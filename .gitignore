@@ -1,0 +1,58 @@
+# Virtual Environments
+venv/
+venv_win/
+.venv/
+env/
+.env_venv/
+
+# Environment Variables (Secrets)
+.env
+backend/.env
+INVERTIS_BUS_SAARTHI/backend/.env
+**/backend/.env
+
+# Node
+node_modules/
+
+# Local Databases and Data
+data/
+*.sqlite
+*.db
+
+# Logs and Exports
+logs/
+*.log
+*.csv
+attendance_export.csv
+
+# Temporary testing scripts
+force_sync.py
+
+# Python Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+
+# Auto-generated agent rules (personalized per developer)
+.brainsync/agent-rules.md
+
+# Auto-generated AI agent exclusions
+.cursorrules
+.clineRules
+.agent/
+.windsurfrules
+.gemini/
+.cline/
+
+AGENT.md
+CLAUDE.md
+.agent-mem/

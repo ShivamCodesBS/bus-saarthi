@@ -1,0 +1,11 @@
+paths:
+  all:
+    runOnReady: >
+      curl -X POST http://localhost:3000/api/streams/auth -H "Content-Type: application/json" -d '{"path": "$MTX_PATH", "action": "publish"}'
+    runOnReadyRestart: false
+    runOnNotReady: >
+      curl -X POST http://localhost:3000/api/streams/auth -H "Content-Type: application/json" -d '{"path": "$MTX_PATH", "action": "unpublish"}'
+
+webrtcICEHostNAT1To1IPs: [127.0.0.1]
+webrtcICEUDPMuxAddress: :8189
+webrtcICETCPMuxAddress: :8189

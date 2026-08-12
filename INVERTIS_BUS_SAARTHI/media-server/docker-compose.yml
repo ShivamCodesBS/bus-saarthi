@@ -1,0 +1,9 @@
+version: '3.8'
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: mediamtx
+    network_mode: "host"
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml
+    restart: unless-stopped
