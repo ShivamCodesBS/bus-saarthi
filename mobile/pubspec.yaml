@@ -1,5 +1,5 @@
 name: bus_sensor_app
-description: "Invertis Bus Smart Sensor - Flutter Android App"
+description: "Bus Saarthi — Smart Bus Attendance & Tracking App"
 version: 1.0.0+1
 
 environment:
@@ -13,14 +13,18 @@ dependencies:
   socket_io_client: ^3.0.0
   dio: ^5.8.0+1
   
-  # Sensors
+  # Sensors (GPS, Accelerometer, Compass)
   geolocator: ^13.0.1
   sensors_plus: ^6.1.0
   flutter_compass: ^0.8.0
   
-  # Camera (kept — used for face capture)
+  # Camera
   camera: ^0.11.1
   image: ^4.5.4
+
+  # Face Recognition — ArcFace (on-device)
+  google_mlkit_face_detection: ^0.12.0
+  tflite_flutter: ^0.11.0
 
   # State Management
   provider: ^6.1.2
@@ -42,9 +46,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   geocoding: ^4.0.0
   audioplayers: ^6.7.1
-
-  # REMOVED: google_mlkit_face_detection — replaced by AWS Rekognition (server-side)
-  # REMOVED: tflite_flutter — on-device inference no longer needed
+  path: ^1.9.0
 
 dev_dependencies:
   flutter_test:
@@ -54,5 +56,5 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    # REMOVED: assets/models/mobilefacenet.tflite — TFLite model no longer needed
+    - assets/models/mobilefacenet.tflite
     - assets/sounds/

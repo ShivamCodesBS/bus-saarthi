@@ -6,10 +6,10 @@ import 'package:provider/provider.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:io' show Platform;
-import 'dart:typed_data';
 
 import '../../face_recognition/face_detector.dart';
 import '../../face_recognition/face_matcher.dart';
+import '../../face_recognition/embedding_store.dart';
 import '../../core/constants.dart';
 import '../../services/api_service.dart';
 import '../../models/attendance_payload.dart';
@@ -27,36 +27,54 @@ enum FaceMatchState { idle, success, duplicate, unknown }
 
 class _CameraPreviewWidgetState extends State<CameraPreviewWidget> {
   CameraController? _controller;
+  CameraDescription? _camera;
 
-  final FaceCaptureService _captureService = FaceCaptureService();
+  late final FaceDetectionService _detectionService;
+  late final EmbeddingStore _embeddingStore;
+  late final FaceMatcher _matcher;
   final ApiService _apiService = ApiService();
   final AudioPlayer _audioPlayer = AudioPlayer();
 
   // Recognition state
   bool _isRecognizing = false;
+  bool _isInitialized = false;
   FaceMatchState _matchState = FaceMatchState.idle;
   String? _matchedName;
   Timer? _recognitionTimer;
   Timer? _successDisplayTimer;
 
-  // ── Local attendance cache ────────────────────────────────────────────────
-  // Stores loginId → {name, time} for faces already marked THIS session.
-  // Used to give INSTANT "Already Marked" feedback without hitting the API.
+  // Local attendance cache — loginId → {name, time}
   final Map<String, _MarkedEntry> _markedFaces = {};
-
-  // Throttle: prevent calling the expensive AWS API for the exact same face
-  // repeatedly. After a face is identified, we skip API calls for this face
-  // for the throttle window, but STILL show "Already Marked" from the local cache.
-  String? _lastScannedLoginId;
-  DateTime? _lastScannedTime;
 
   String? _cameraInitError;
   bool _cameraReady = false;
+  int _enrolledCount = 0;
 
   @override
   void initState() {
     super.initState();
-    _initCamera();
+    _detectionService = FaceDetectionService();
+    _embeddingStore = EmbeddingStore();
+    _matcher = FaceMatcher(_embeddingStore);
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    try {
+      // Initialize face detection + ArcFace model
+      await _embeddingStore.initialize();
+      await _detectionService.initialize();
+      _enrolledCount = await _embeddingStore.count();
+      await _matcher.refreshCache();
+
+      _isInitialized = true;
+      if (mounted) setState(() {});
+
+      // Initialize camera
+      await _initCamera();
+    } catch (e) {
+      if (mounted) setState(() => _cameraInitError = 'Initialization error: $e');
+    }
   }
 
   Future<void> _initCamera() async {
@@ -68,13 +86,13 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget> {
         return;
       }
 
-      final front = cameras.firstWhere(
+      _camera = cameras.firstWhere(
         (c) => c.lensDirection == CameraLensDirection.front,
         orElse: () => cameras.first,
       );
 
       _controller = CameraController(
-        front,
+        _camera!,
         ResolutionPreset.medium,
         enableAudio: false,
         imageFormatGroup: Platform.isAndroid
@@ -86,7 +104,7 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget> {
       if (!mounted) return;
       setState(() => _cameraReady = true);
 
-      // Start periodic recognition every 3 seconds
+      // Start periodic recognition
       _recognitionTimer = Timer.periodic(
         const Duration(milliseconds: AppConstants.faceRecognitionIntervalMs),
         (_) => _runRecognition(),
@@ -97,85 +115,104 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget> {
   }
 
   Future<void> _runRecognition() async {
-    if (_isRecognizing || !_cameraReady || _controller == null) return;
-    
-    // Pause recognition while displaying success or duplicate messages to prevent API spam
-    if (_matchState == FaceMatchState.success || _matchState == FaceMatchState.duplicate) {
-      return;
-    }
-    
+    if (_isRecognizing || !_cameraReady || !_isInitialized || _controller == null || _camera == null) return;
+    if (_matchState == FaceMatchState.success || _matchState == FaceMatchState.duplicate) return;
+
     _isRecognizing = true;
 
     try {
-      // Capture JPEG frame
-      final Uint8List? imageBytes = await _captureService.captureFrameAsJpeg(_controller!);
-      if (imageBytes == null) return;
+      // Capture a frame
+      final XFile file = await _controller!.takePicture();
+      final bytes = await file.readAsBytes();
 
-      if (!mounted) return;
-      final auth = Provider.of<AuthProvider>(context, listen: false);
-      final routeId = auth.user?.routeId ?? AppConstants.defaultRouteId;
-      final now = DateTime.now();
+      // Detect face and extract embedding via ML Kit + ArcFace
+      final inputImage = InputImage.fromFilePath(file.path);
+      // Use the detection service's captureAndEmbed for high quality
+      // But for streaming, we use a simpler approach with takePicture
+      
+      // Detect faces in the captured image
+      final img_lib = await _loadImageFromBytes(bytes);
+      if (img_lib == null) return;
 
-      // ── CALL BACKEND → AWS Rekognition ────────────────────────────────
-      final result = await _apiService.recognizeFace(imageBytes, routeId: routeId);
+      // For streaming recognition, use takePicture → detect → embed → match
+      final enrollResult = await _detectionService.captureAndEmbed(_controller!);
+      if (enrollResult == null || !enrollResult.isSuccess || enrollResult.embedding == null) {
+        // No face or error — show unknown if not showing another state
+        if (_matchState != FaceMatchState.success && _matchState != FaceMatchState.duplicate) {
+          if (mounted) setState(() {
+            _matchState = FaceMatchState.unknown;
+            _matchedName = null;
+          });
+        }
+        return;
+      }
+
+      // Match against enrolled faces locally
+      final result = await _matcher.match(enrollResult.embedding!);
       if (!mounted) return;
 
       if (result.matched && result.loginId != null) {
-        // Update throttle tracking
-        _lastScannedLoginId = result.loginId;
-        _lastScannedTime = DateTime.now(); // Use fresh time after API call
+        final now = DateTime.now();
 
-        if (result.isCooldown || result.isLimitReached) {
-          // ── ALREADY MARKED (from backend) ───────────────────────────────
-          // Also add to local cache so subsequent scans don't hit API
-          _markedFaces[result.loginId!] = _MarkedEntry(
-            name: result.name ?? 'Unknown',
-            time: DateTime.now(),
-          );
-
-          setState(() {
-            _matchState = FaceMatchState.duplicate;
-            _matchedName = result.name;
-          });
-
-          HapticFeedback.vibrate();
-
-          _successDisplayTimer?.cancel();
-          _successDisplayTimer = Timer(const Duration(seconds: 3), () {
-            if (mounted) setState(() => _matchState = FaceMatchState.idle);
-          });
-
-          _showDuplicateSnackbar(result);
-
-        } else {
-          // ── FIRST VALID MATCH — Attendance auto-saved by backend ────────
-          // Add to local cache immediately
-          _markedFaces[result.loginId!] = _MarkedEntry(
-            name: result.name ?? 'Unknown',
-            time: DateTime.now(),
-          );
-
-          setState(() {
-            _matchState = FaceMatchState.success;
-            _matchedName = result.name;
-          });
-
-          // Show green for 3 seconds
-          _successDisplayTimer?.cancel();
-          _successDisplayTimer = Timer(const Duration(seconds: 3), () {
-            if (mounted) setState(() => _matchState = FaceMatchState.idle);
-          });
-
-          // Loud beep: audio + heavy vibration
-          unawaited(_audioPlayer.setVolume(1.0));
-          unawaited(_audioPlayer.play(AssetSource('sounds/success.wav')));
-          HapticFeedback.heavyImpact();
-          Future.delayed(const Duration(milliseconds: 200), () => HapticFeedback.heavyImpact());
-
-          _showMatchSnackbar(result);
+        // Check local dedup cache
+        final existing = _markedFaces[result.loginId!];
+        if (existing != null) {
+          final elapsed = now.difference(existing.time);
+          if (elapsed.inMinutes < AppConstants.attendanceWindowMinutes) {
+            // Already marked this shift
+            setState(() {
+              _matchState = FaceMatchState.duplicate;
+              _matchedName = result.name;
+            });
+            HapticFeedback.vibrate();
+            _successDisplayTimer?.cancel();
+            _successDisplayTimer = Timer(const Duration(seconds: 3), () {
+              if (mounted) setState(() => _matchState = FaceMatchState.idle);
+            });
+            _showDuplicateSnackbar(result);
+            return;
+          }
         }
+
+        // ── FIRST VALID MATCH — Mark attendance ────────────────────────
+        _markedFaces[result.loginId!] = _MarkedEntry(
+          name: result.name ?? 'Unknown',
+          time: now,
+        );
+
+        setState(() {
+          _matchState = FaceMatchState.success;
+          _matchedName = result.name;
+        });
+
+        _successDisplayTimer?.cancel();
+        _successDisplayTimer = Timer(const Duration(seconds: 3), () {
+          if (mounted) setState(() => _matchState = FaceMatchState.idle);
+        });
+
+        // Sound + haptics
+        unawaited(_audioPlayer.setVolume(1.0));
+        unawaited(_audioPlayer.play(AssetSource('sounds/success.wav')));
+        HapticFeedback.heavyImpact();
+        Future.delayed(const Duration(milliseconds: 200), () => HapticFeedback.heavyImpact());
+
+        _showMatchSnackbar(result);
+
+        // Sync attendance to backend (fire-and-forget)
+        final auth = Provider.of<AuthProvider>(context, listen: false);
+        final routeId = auth.user?.routeId ?? AppConstants.defaultRouteId;
+        _apiService.postAttendance(AttendancePayload(
+          data: AttendanceData(
+            studentId: result.loginId!,
+            loginId: result.loginId!,
+            name: result.name ?? 'Unknown',
+            feeStatus: result.feeStatus ?? 'unpaid',
+            confidence: result.confidence ?? 0,
+            checkInTime: now.toIso8601String(),
+            routeId: routeId,
+          ),
+        ));
       } else {
-        // No face matched — only update UI if not currently showing a result
         if (_matchState != FaceMatchState.success && _matchState != FaceMatchState.duplicate) {
           setState(() {
             _matchState = FaceMatchState.unknown;
@@ -190,7 +227,10 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget> {
     }
   }
 
-  void _showMatchSnackbar(RecognitionResult result) {
+  // Placeholder for image loading — not actually needed since we use captureAndEmbed
+  Future<dynamic> _loadImageFromBytes(dynamic bytes) async => true;
+
+  void _showMatchSnackbar(MatchResult result) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
@@ -226,7 +266,7 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget> {
     );
   }
 
-  void _showDuplicateSnackbar(RecognitionResult result) {
+  void _showDuplicateSnackbar(MatchResult result) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
@@ -244,18 +284,16 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget> {
                     result.name ?? 'Unknown',
                     style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: Colors.black87),
                   ),
-                  Text(
-                    result.isLimitReached
-                        ? 'Limit of 2 scans per day reached.'
-                        : 'Already marked this shift. Next scan after 3 hours.',
-                    style: const TextStyle(fontSize: 12, color: Colors.black54),
+                  const Text(
+                    'Already marked this shift. Next scan after 3 hours.',
+                    style: TextStyle(fontSize: 12, color: Colors.black54),
                   ),
                 ],
               ),
             ),
           ],
         ),
-        backgroundColor: const Color(0xFFFBBF24), // Yellow warning
+        backgroundColor: const Color(0xFFFBBF24),
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.all(16),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -268,9 +306,9 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget> {
   void dispose() {
     _recognitionTimer?.cancel();
     _successDisplayTimer?.cancel();
-    _controller?.stopImageStream();
     _controller?.dispose();
-    _captureService.dispose();
+    _detectionService.dispose();
+    _embeddingStore.dispose();
     super.dispose();
   }
 
@@ -304,17 +342,16 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget> {
       );
     }
 
-    if (_controller == null || !_controller!.value.isInitialized) {
+    if (_controller == null || !_controller!.value.isInitialized || !_isInitialized) {
       return const ColoredBox(
         color: Colors.white,
-        child: Center(child: BusSarthiLoader(size: 80, label: 'Initializing Camera')),
+        child: Center(child: BusSarthiLoader(size: 80, label: 'Loading ArcFace Model')),
       );
     }
 
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Camera feed
         CameraPreview(_controller!),
 
         // Face scan overlay
@@ -322,7 +359,23 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget> {
           child: FaceScanOverlay(state: _scanState, label: _matchedName),
         ),
 
-        // Confidence badge (shown when matched)
+        // Enrolled faces count badge
+        Positioned(
+          top: 12, right: 12,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: Colors.black54,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              '$_enrolledCount faces enrolled',
+              style: const TextStyle(color: Colors.white70, fontSize: 11),
+            ),
+          ),
+        ),
+
+        // Success badge
         if (_matchState == FaceMatchState.success && _matchedName != null)
           Positioned(
             bottom: 16, left: 20, right: 20,
@@ -335,10 +388,10 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget> {
               child: const Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.cloud_done_rounded, color: Colors.white, size: 16),
+                  Icon(Icons.face_retouching_natural, color: Colors.white, size: 16),
                   SizedBox(width: 8),
                   Text(
-                    'AWS Rekognition • Attendance Marked',
+                    'ArcFace • Attendance Marked',
                     style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
                   ),
                 ],
@@ -346,7 +399,7 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget> {
             ),
           ),
 
-        // Already-marked badge (shown when duplicate)
+        // Duplicate badge
         if (_matchState == FaceMatchState.duplicate && _matchedName != null)
           Positioned(
             bottom: 16, left: 20, right: 20,
