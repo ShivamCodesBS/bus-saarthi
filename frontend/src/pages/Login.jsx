@@ -134,8 +134,8 @@ const Login = () => {
         boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
       }}>
         <img 
-          src="https://invertis-feedback-system-2.onrender.com/main%20logo.png" 
-          alt="Invertis University" 
+          src="/images/logo.png" 
+          alt="Bus Saarthi" 
           style={{ height: '65px', maxHeight: '65px', objectFit: 'contain' }}
         />
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
