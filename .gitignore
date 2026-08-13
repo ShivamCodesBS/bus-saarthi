@@ -1,58 +1,67 @@
-# Virtual Environments
+# ============= Environment Variables (Secrets) =============
+.env
+.env.local
+.env.production
+**/backend/.env
+**/.env
+
+# ============= Node =============
+node_modules/
+dist/
+.next/
+
+# ============= Python (RPi legacy) =============
 venv/
-venv_win/
 .venv/
 env/
-.env_venv/
-
-# Environment Variables (Secrets)
-.env
-backend/.env
-INVERTIS_BUS_SAARTHI/backend/.env
-**/backend/.env
-
-# Node
-node_modules/
-
-# Local Databases and Data
-data/
-*.sqlite
-*.db
-
-# Logs and Exports
-logs/
-*.log
-*.csv
-attendance_export.csv
-
-# Temporary testing scripts
-force_sync.py
-
-# Python Cache
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# OS Files
+# ============= Local Databases and Data =============
+data/
+*.sqlite
+*.db
+
+# ============= Logs and Exports =============
+logs/
+*.log
+*.csv
+
+# ============= Binary Files (never commit these) =============
+*.exe
+*.zip
+*.tar.gz
+*.dmg
+
+# ============= OS Files =============
 .DS_Store
 Thumbs.db
 
-# IDEs
+# ============= IDEs =============
 .vscode/
 .idea/
 
-# Auto-generated agent rules (personalized per developer)
-.brainsync/agent-rules.md
+# ============= Build Output =============
+build/
+coverage/
+.cache/
 
-# Auto-generated AI agent exclusions
+# ============= Flutter / Dart =============
+mobile/.dart_tool/
+mobile/build/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+
+# ============= AI Agent Generated =============
+.brainsync/
 .cursorrules
 .clineRules
 .agent/
 .windsurfrules
 .gemini/
 .cline/
-
 AGENT.md
 CLAUDE.md
 .agent-mem/

@@ -1,0 +1,48 @@
+# ============================================================
+# Bus Saarthi — Dev Overrides
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# ============================================================
+
+services:
+  # Backend with hot-reload
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: deps   # Stop at deps stage, we mount source code
+    command: npm run start:dev
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/test:/app/test
+    environment:
+      NODE_ENV: development
+
+  # Frontend with Vite dev server
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: builder
+    command: npm run dev -- --host 0.0.0.0
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+    environment:
+      VITE_API_URL: http://localhost:5000
+
+  # Admin with Vite dev server
+  admin-frontend:
+    build:
+      context: ./admin-frontend
+      dockerfile: Dockerfile
+      target: builder
+    command: npm run dev -- --host 0.0.0.0
+    ports:
+      - "5174:5173"
+    volumes:
+      - ./admin-frontend/src:/app/src
+      - ./admin-frontend/public:/app/public
+    environment:
+      VITE_API_URL: http://localhost:5000

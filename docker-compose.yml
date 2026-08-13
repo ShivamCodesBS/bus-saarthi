@@ -1,0 +1,105 @@
+# ============================================================
+# Bus Saarthi — Production Docker Compose
+# Usage: docker compose up -d
+# ============================================================
+
+services:
+  # ── PostgreSQL Database ──
+  postgres:
+    image: postgres:15-alpine
+    container_name: bus_saarthi_pg
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgrespassword}
+      POSTGRES_DB: ${DB_NAME:-bus_saarthi}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis (Cache + Socket.IO adapter) ──
+  redis:
+    image: redis:7-alpine
+    container_name: bus_saarthi_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── NestJS Backend API ──
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: bus_saarthi_backend
+    ports:
+      - "${PORT:-5000}:5000"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgrespassword}@postgres:5432/${DB_NAME:-bus_saarthi}
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Student/Admin Frontend ──
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:5000}
+    container_name: bus_saarthi_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # ── Tech Admin Dashboard ──
+  admin-frontend:
+    build:
+      context: ./admin-frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:5000}
+    container_name: bus_saarthi_admin
+    ports:
+      - "81:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # ── MediaMTX (RTSP/WebRTC Media Relay) ──
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: bus_saarthi_media
+    ports:
+      - "8554:8554"   # RTSP
+      - "8889:8889"   # WebRTC
+      - "1935:1935"   # RTMP
+    volumes:
+      - ./media-server/mediamtx.yml:/mediamtx.yml
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
