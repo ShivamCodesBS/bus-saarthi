@@ -1,4 +1,11 @@
-import { Controller, Post, Request, UseInterceptors, UploadedFile, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Request,
+  UseInterceptors,
+  UploadedFile,
+  UseGuards,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UploadService } from './upload.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -18,7 +25,10 @@ export class UploadController {
   // Profile picture upload — updates user's profilePic in DB
   @Post('profile_pic')
   @UseInterceptors(FileInterceptor('file'))
-  uploadProfilePic(@UploadedFile() file: Express.Multer.File, @Request() req: any) {
+  uploadProfilePic(
+    @UploadedFile() file: Express.Multer.File,
+    @Request() req: any,
+  ) {
     return this.uploadService.uploadProfilePic(file, req.user.loginId);
   }
 }

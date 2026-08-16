@@ -1,16 +1,13 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { v2 as cloudinary } from 'cloudinary';
 import { ConfigService } from '@nestjs/config';
-import { User } from '../users/entities/user.entity';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class UploadService {
   constructor(
     private configService: ConfigService,
-    @InjectRepository(User)
-    private usersRepository: Repository<User>,
+    private prisma: PrismaService,
   ) {
     cloudinary.config({
       cloud_name: this.configService.get<string>('CLOUDINARY_CLOUD_NAME'),
@@ -19,7 +16,10 @@ export class UploadService {
     });
   }
 
-  async uploadFile(file: Express.Multer.File, folder: string = 'bus_saarthi_media') {
+  async uploadFile(
+    file: Express.Multer.File,
+    folder: string = 'bus_saarthi_media',
+  ) {
     if (!file) throw new BadRequestException('No file provided');
 
     return new Promise((resolve, reject) => {
@@ -35,17 +35,22 @@ export class UploadService {
     });
   }
 
-  async uploadProfilePic(file: Express.Multer.File, loginId: string): Promise<any> {
+  async uploadProfilePic(
+    file: Express.Multer.File,
+    loginId: string,
+  ): Promise<any> {
     if (!file) throw new BadRequestException('No file provided');
 
     const result: any = await this.uploadFile(file, 'bus_saarthi_avatars');
     const profilePicUrl = result.url;
 
     // Update user's profile pic in DB
-    const user = await this.usersRepository.findOne({ where: { loginId } });
+    const user = await this.prisma.user.findUnique({ where: { loginId } });
     if (user) {
-      user.profilePic = profilePicUrl;
-      await this.usersRepository.save(user);
+      await this.prisma.user.update({
+        where: { loginId },
+        data: { profilePic: profilePicUrl },
+      });
     }
 
     return {

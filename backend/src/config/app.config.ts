@@ -7,6 +7,7 @@ export default registerAs('app', () => {
   }
   return {
     port: parseInt(process.env.PORT || '5000', 10),
-    webhookSecret: webhookSecret || 'dev_only_webhook_secret_DO_NOT_USE_IN_PROD',
+    webhookSecret:
+      webhookSecret || 'dev_only_webhook_secret_DO_NOT_USE_IN_PROD',
   };
 });

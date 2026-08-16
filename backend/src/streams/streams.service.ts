@@ -3,7 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 @Injectable()
 export class StreamsService {
   private readonly logger = new Logger(StreamsService.name);
-  
+
   // In a real app, this would be a Redis store or Database table.
   // Using an in-memory map for the integration demonstration.
   private activeStreams = new Map<string, boolean>();

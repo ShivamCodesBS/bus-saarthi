@@ -1,0 +1,218 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UserRole {
+  passenger
+  admin
+  driver
+  transport_incharge
+  tech_admin
+  parent
+}
+
+enum FeeStatus {
+  paid
+  unpaid
+  partial
+}
+
+enum GrievanceStatus {
+  pending
+  resolved
+}
+
+enum LogLevel {
+  log
+  warn
+  error
+  debug
+  verbose
+  fatal
+}
+
+model User {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  loginId         String    @unique @map("login_id") @db.VarChar(50)
+  name            String    @db.VarChar(100)
+  password        String?
+  role            UserRole
+  routeId         String?   @map("route_id")
+  feeStatus       FeeStatus @default(unpaid) @map("fee_status")
+  phone           String?   @db.VarChar(20)
+  email           String?   @db.VarChar(100)
+  profilePic      String?   @map("profile_pic")
+  designation     String?   @db.VarChar(100)
+  lastLogin       DateTime? @map("last_login") @db.Timestamptz(6)
+  locationLat     Float?    @map("location_lat")
+  locationLng     Float?    @map("location_lng")
+  licenseNumber   String?   @map("license_number") @db.VarChar(50)
+  licenseExpiry   DateTime? @map("license_expiry") @db.Timestamptz(6)
+  experienceYears Int?      @map("experience_years")
+  bloodGroup      String?   @map("blood_group") @db.VarChar(10)
+  parentName      String?   @map("parent_name") @db.VarChar(100)
+  parentPhone     String?   @map("parent_phone") @db.VarChar(20)
+  dob             DateTime? @db.Timestamptz(6)
+  address         String?
+  gradeClass      String?   @map("grade_class") @db.VarChar(50)
+  wakeAlarm       Boolean   @default(false) @map("wake_alarm")
+  faceEnrolledAt  DateTime? @map("face_enrolled_at") @db.Timestamptz(6)
+  awsFaceId       String?   @map("aws_face_id") @db.VarChar(100)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  route             Route?             @relation(fields: [routeId], references: [routeId])
+  attendanceRecords Attendance[]
+  grievances        Grievance[]
+  grievanceUpvotes  GrievanceUpvote[]
+  leaves            Leave[]
+  pushSubscriptions PushSubscription[]
+
+  @@map("users")
+}
+
+model Route {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  routeId            String    @unique @map("route_id") @db.VarChar(50)
+  routeName          String    @map("route_name") @db.VarChar(100)
+  busNumber          String    @map("bus_number") @db.VarChar(30)
+  driverId           String?   @map("driver_id") @db.VarChar(50)
+  stops              String
+  city               String    @default("Bareilly") @db.VarChar(50)
+  vehicleModel       String?   @map("vehicle_model") @db.VarChar(100)
+  registrationNumber String?   @map("registration_number") @db.VarChar(50)
+  seatingCapacity    Int?      @map("seating_capacity")
+  insuranceExpiry    DateTime? @map("insurance_expiry") @db.Timestamptz(6)
+  speedLimit         Int       @default(60) @map("speed_limit")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  users User[]
+
+  @@map("routes")
+}
+
+model Attendance {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  passengerId String     @map("passenger_id") @db.VarChar(50)
+  routeId     String     @map("route_id") @db.VarChar(20)
+  name        String?    @db.VarChar(100)
+  feeStatus   FeeStatus? @map("fee_status")
+  confidence  Float?     @db.Real
+  timestamp   DateTime   @default(now()) @db.Timestamptz(6)
+
+  passenger User @relation(fields: [passengerId], references: [loginId], onDelete: Cascade)
+
+  @@map("attendance")
+}
+
+model Grievance {
+  id        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  loginId   String          @map("login_id") @db.VarChar(50)
+  route     String          @db.VarChar(20)
+  text      String
+  realName  String?         @map("real_name") @db.VarChar(100)
+  type      String?         @db.VarChar(50)
+  mediaUrl  String?         @map("media_url")
+  category  String?         @db.VarChar(100)
+  status    GrievanceStatus @default(pending)
+  upvotes   Int             @default(0)
+  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user          User              @relation(fields: [loginId], references: [loginId], onDelete: Cascade)
+  upvoteRecords GrievanceUpvote[]
+
+  @@map("grievances")
+}
+
+model GrievanceUpvote {
+  grievanceId String @map("grievance_id") @db.Uuid
+  loginId     String @map("login_id") @db.VarChar(50)
+
+  grievance Grievance @relation(fields: [grievanceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [loginId], references: [loginId], onDelete: Cascade)
+
+  @@id([grievanceId, loginId])
+  @@map("grievance_upvotes")
+}
+
+model Leave {
+  id      String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  loginId String   @map("login_id") @db.VarChar(50)
+  date    DateTime @db.Date
+
+  user User @relation(fields: [loginId], references: [loginId], onDelete: Cascade)
+
+  @@unique([loginId, date])
+  @@map("leaves")
+}
+
+model SystemLog {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  level     LogLevel @default(log)
+  message   String
+  context   String?  @db.VarChar(255)
+  meta      Json?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("system_logs")
+}
+
+model Broadcast {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  message   String
+  title     String?  @db.VarChar(200)
+  timestamp DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("broadcasts")
+}
+
+model PushSubscription {
+  id           String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  loginId      String @map("login_id") @db.VarChar(50)
+  subscription Json
+  deviceType   String @default("web") @map("device_type") @db.VarChar(20)
+
+  user User @relation(fields: [loginId], references: [loginId], onDelete: Cascade)
+
+  @@map("push_subscriptions")
+}
+
+model SosAlert {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  loginId   String   @map("login_id") @db.VarChar(50)
+  passenger String?  @db.VarChar(100)
+  route     String   @db.VarChar(20)
+  time      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("sos_alerts")
+}
+
+model Telemetry {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  routeId       String   @default("4") @map("route_id") @db.VarChar(20)
+  latitude      Float?
+  longitude     Float?
+  gpsSpeedKnots Float?   @map("gps_speed_knots") @db.Real
+  mpuSpeedKmh   Float?   @map("mpu_speed_kmh") @db.Real
+  headingDeg    Float?   @map("heading_deg") @db.Real
+  timestamp     DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("telemetry")
+}
+
+model ParentChildLink {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  parentLoginId String   @map("parent_login_id") @db.VarChar(50)
+  childLoginId  String   @map("child_login_id") @db.VarChar(50)
+  nickname      String?  @db.VarChar(100)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([parentLoginId, childLoginId])
+  @@map("parent_child_links")
+}

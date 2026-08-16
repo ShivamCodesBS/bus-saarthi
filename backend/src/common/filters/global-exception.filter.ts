@@ -1,4 +1,10 @@
-import { ExceptionFilter, Catch, ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  ExceptionFilter,
+  Catch,
+  ArgumentsHost,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
 import { Request, Response } from 'express';
 import { DbLoggerService } from '../../health/db-logger.service';
 
@@ -18,23 +24,35 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       status = exception.getStatus();
       const exceptionResponse = exception.getResponse();
-      
+
       if (typeof exceptionResponse === 'string') {
         message = exceptionResponse;
-      } else if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
+      } else if (
+        typeof exceptionResponse === 'object' &&
+        exceptionResponse !== null
+      ) {
         message = (exceptionResponse as any).message || message;
-        detail = (exceptionResponse as any).error || (exceptionResponse as any).detail || null;
+        detail =
+          (exceptionResponse as any).error ||
+          (exceptionResponse as any).detail ||
+          null;
       }
     } else if (exception instanceof Error) {
       message = exception.message;
     }
 
     if (this.logger) {
-      this.logger.error(`[${request.method}] ${request.url} - Error ${status}: ${message}`, exception instanceof Error ? exception.stack : undefined, 'GlobalExceptionFilter');
+      this.logger.error(
+        `[${request.method}] ${request.url} - Error ${status}: ${message}`,
+        exception instanceof Error ? exception.stack : undefined,
+        'GlobalExceptionFilter',
+      );
     } else {
-      console.error(`[${request.method}] ${request.url} - Error ${status}: ${message}`);
+      console.error(
+        `[${request.method}] ${request.url} - Error ${status}: ${message}`,
+      );
       if (status === HttpStatus.INTERNAL_SERVER_ERROR) {
-         console.error(exception);
+        console.error(exception);
       }
     }
 

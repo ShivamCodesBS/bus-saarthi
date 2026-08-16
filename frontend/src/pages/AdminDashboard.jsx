@@ -99,7 +99,7 @@ const AdminDashboard = () => {
   // User Management Modal State
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
-  const [userFormData, setUserFormData] = useState({ name: '', login_id: '', password: '', role: 'passenger', route_id: '1', fee_status: 'paid', phone: '', licenseNumber: '', licenseExpiry: '', experienceYears: '', bloodGroup: '', parentName: '', parentPhone: '', dob: '', address: '', gradeClass: '' });
+  const [userFormData, setUserFormData] = useState({ name: '', login_id: '', password: '', role: 'passenger', route_id: '1', fee_status: 'paid', phone: '', licenseNumber: '', licenseExpiry: '', experienceYears: '', bloodGroup: '', parentName: '', parentPhone: '', parentPassword: '', createParentAccount: false, dob: '', address: '', gradeClass: '' });
   const [userFilter, setUserFilter] = useState('passenger');
   const [routeSearchQuery, setRouteSearchQuery] = useState('');
   const [viewingUser, setViewingUser] = useState(null);
@@ -271,7 +271,7 @@ const AdminDashboard = () => {
       }
     };
     fetchData();
-  }, [activeTab]);
+  }, [activeTab, user?.token, selectedRoute]);
 
   const handleLogout = () => {
     logout();
@@ -333,6 +333,21 @@ const AdminDashboard = () => {
       } else {
         await axios.post(`${BACKEND_URL}/api/users`, userFormData, authHeaders);
         toast.success("User created successfully!");
+        // Auto-create parent account if requested
+        if (userFormData.role === 'passenger' && userFormData.createParentAccount && userFormData.parentName) {
+          try {
+            const parentRes = await axios.post(`${BACKEND_URL}/api/parents/create-and-link`, {
+              child_login_id: userFormData.login_id,
+              parent_name: userFormData.parentName,
+              parent_phone: userFormData.parentPhone,
+              parent_password: userFormData.parentPassword || 'Invertis@123',
+              nickname: userFormData.name,
+            }, authHeaders);
+            toast.success(`✅ Parent account created: ${parentRes.data.parent_login_id}`);
+          } catch (parentErr) {
+            toast.error(`User created but parent account failed: ${parentErr.response?.data?.message || parentErr.message}`);
+          }
+        }
       }
       setShowUserModal(false);
       const res = await axios.get(`${BACKEND_URL}/api/users`, authHeaders);
@@ -447,13 +462,13 @@ const AdminDashboard = () => {
 
   const openAddUser = () => {
     setEditingUser(null);
-    setUserFormData({ name: '', login_id: '', password: '', role: 'passenger', route_id: routesList[0]?.route_id || '1', fee_status: 'paid', phone: '', licenseNumber: '', licenseExpiry: '', experienceYears: '', bloodGroup: '', parentName: '', parentPhone: '', dob: '', address: '', gradeClass: '' });
+    setUserFormData({ name: '', login_id: '', password: '', role: 'passenger', route_id: routesList[0]?.route_id || '1', fee_status: 'paid', phone: '', licenseNumber: '', licenseExpiry: '', experienceYears: '', bloodGroup: '', parentName: '', parentPhone: '', parentPassword: '', createParentAccount: false, dob: '', address: '', gradeClass: '' });
     setShowUserModal(true);
   };
 
   const openEditUser = (u) => {
     setEditingUser(u);
-    setUserFormData({ name: u.name, login_id: u.loginId || u.login_id, password: '', role: u.role, route_id: u.routeId || u.route_id || '', fee_status: u.feeStatus || u.fee_status || 'paid', phone: u.phone || '', licenseNumber: u.licenseNumber || '', licenseExpiry: u.licenseExpiry ? new Date(u.licenseExpiry).toISOString().split('T')[0] : '', experienceYears: u.experienceYears || '', bloodGroup: u.bloodGroup || '', parentName: u.parentName || '', parentPhone: u.parentPhone || '', dob: u.dob ? new Date(u.dob).toISOString().split('T')[0] : '', address: u.address || '', gradeClass: u.gradeClass || '' });
+    setUserFormData({ name: u.name, login_id: u.loginId || u.login_id, password: '', role: u.role, route_id: u.routeId || u.route_id || '', fee_status: u.feeStatus || u.fee_status || 'paid', phone: u.phone || '', licenseNumber: u.licenseNumber || '', licenseExpiry: u.licenseExpiry ? new Date(u.licenseExpiry).toISOString().split('T')[0] : '', experienceYears: u.experienceYears || '', bloodGroup: u.bloodGroup || '', parentName: u.parentName || '', parentPhone: u.parentPhone || '', parentPassword: '', createParentAccount: false, dob: u.dob ? new Date(u.dob).toISOString().split('T')[0] : '', address: u.address || '', gradeClass: u.gradeClass || '' });
     setShowUserModal(true);
   };
 
@@ -1104,6 +1119,7 @@ const AdminDashboard = () => {
                 { role: 'driver', label: 'Drivers', color: '#28a745' },
                 { role: 'admin', label: 'Admins', color: 'var(--secondary-orange)' },
                 { role: 'transport_incharge', label: 'Transport Incharge', color: '#7c3aed' },
+                { role: 'parent', label: '👨‍👧 Parents', color: '#9b59b6' },
               ].map(({ role: r, label, color }) => (
                 <button
                   key={r}
@@ -1221,17 +1237,17 @@ const AdminDashboard = () => {
                 <p style={{ margin: 0, fontSize: '1rem', color: 'var(--text-dark)' }}>{comp.text}</p>
 
                 {/* Media Attachment */}
-                {comp.type === 'photo' && comp.media_url && (
+                {comp.type === 'photo' && (comp.media_url || comp.mediaUrl) && (
                   <div 
-                    onClick={() => setFullScreenMedia({ type: 'photo', url: comp.media_url })}
+                    onClick={() => setFullScreenMedia({ type: 'photo', url: comp.media_url || comp.mediaUrl })}
                     style={{ borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: '#f8f9fa', display: 'flex', justifyContent: 'center', cursor: 'zoom-in' }}
                   >
-                    <img src={comp.media_url} alt="Complaint Attachment" style={{ width: '100%', height: 'auto', display: 'block', maxHeight: '400px', objectFit: 'contain', transition: 'transform 0.2s' }} />
+                    <img src={comp.media_url || comp.mediaUrl} alt="Complaint Attachment" style={{ width: '100%', height: 'auto', display: 'block', maxHeight: '400px', objectFit: 'contain', transition: 'transform 0.2s' }} />
                   </div>
                 )}
-                {comp.type === 'video' && comp.media_url && (
+                {comp.type === 'video' && (comp.media_url || comp.mediaUrl) && (
                   <div 
-                    onClick={() => setFullScreenMedia({ type: 'video', url: comp.media_url })}
+                    onClick={() => setFullScreenMedia({ type: 'video', url: comp.media_url || comp.mediaUrl })}
                     style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: 'black', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
                   >
                     <div style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)' }}>
@@ -1239,12 +1255,12 @@ const AdminDashboard = () => {
                         ▶
                       </div>
                     </div>
-                    <video src={comp.media_url} style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'contain', opacity: 0.8 }} />
+                    <video src={comp.media_url || comp.mediaUrl} style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'contain', opacity: 0.8 }} />
                   </div>
                 )}
-                {comp.type === 'audio' && comp.media_url && (
+                {comp.type === 'audio' && (comp.media_url || comp.mediaUrl) && (
                   <div style={{ marginTop: '0.5rem', padding: '1rem', backgroundColor: 'var(--bg-color)', borderRadius: '30px', border: '1px solid var(--border-color)' }}>
-                    <audio src={comp.media_url} controls style={{ width: '100%' }} />
+                    <audio src={comp.media_url || comp.mediaUrl} controls style={{ width: '100%' }} />
                   </div>
                 )}
 
@@ -1403,19 +1419,19 @@ const AdminDashboard = () => {
                     </div>
                     <p style={{ margin: 0, color: 'var(--text-dark)' }}>{comp.text}</p>
                     {/* Media Attachment */}
-                    {comp.type === 'photo' && comp.media_url && (
+                    {comp.type === 'photo' && (comp.media_url || comp.mediaUrl) && (
                       <div style={{ borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: '#f8f9fa', display: 'flex', justifyContent: 'center' }}>
-                        <img src={comp.media_url} alt="Complaint Attachment" style={{ width: '100%', height: 'auto', display: 'block', maxHeight: '400px', objectFit: 'contain' }} />
+                        <img src={comp.media_url || comp.mediaUrl} alt="Complaint Attachment" style={{ width: '100%', height: 'auto', display: 'block', maxHeight: '400px', objectFit: 'contain' }} />
                       </div>
                     )}
-                    {comp.type === 'video' && comp.media_url && (
+                    {comp.type === 'video' && (comp.media_url || comp.mediaUrl) && (
                       <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: 'black', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <video src={comp.media_url} controls style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'contain' }} />
+                        <video src={comp.media_url || comp.mediaUrl} controls style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'contain' }} />
                       </div>
                     )}
-                    {comp.type === 'audio' && comp.media_url && (
+                    {comp.type === 'audio' && (comp.media_url || comp.mediaUrl) && (
                       <div style={{ marginTop: '0.5rem', padding: '1rem', backgroundColor: 'var(--bg-color)', borderRadius: '30px', border: '1px solid var(--border-color)' }}>
-                        <audio src={comp.media_url} controls style={{ width: '100%' }} />
+                        <audio src={comp.media_url || comp.mediaUrl} controls style={{ width: '100%' }} />
                       </div>
                     )}
                     <div style={{ marginTop: '0.5rem', display: 'flex', justifyContent: 'flex-end' }}>
@@ -1746,6 +1762,44 @@ const AdminDashboard = () => {
                     <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Address</label>
                     <textarea rows="2" value={userFormData.address} onChange={e => setUserFormData({ ...userFormData, address: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
                   </div>
+                  {/* ---- Parent Account Auto-Creation ---- */}
+                  {!editingUser && (
+                    <div style={{ background: '#f5f0ff', borderRadius: '12px', padding: '1rem', border: '2px solid #9b59b620' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                        <input
+                          type="checkbox"
+                          id="createParentToggle"
+                          checked={userFormData.createParentAccount}
+                          onChange={e => setUserFormData({ ...userFormData, createParentAccount: e.target.checked })}
+                          style={{ width: 18, height: 18, accentColor: '#9b59b6', cursor: 'pointer' }}
+                        />
+                        <label htmlFor="createParentToggle" style={{ fontWeight: 700, color: '#7c3aed', cursor: 'pointer', fontSize: '0.95rem' }}>
+                          👨‍👧 Create Parent Account for this Student
+                        </label>
+                      </div>
+                      {userFormData.createParentAccount && (
+                        <>
+                          <p style={{ margin: '0 0 0.75rem', fontSize: '0.8rem', color: '#7c3aed' }}>
+                            Parent login ID will be auto-generated (e.g. P{userFormData.login_id.replace(/^[A-Za-z]/, '') || 'XXX'})
+                          </p>
+                          <div className="flex flex-col sm:flex-row gap-3">
+                            <div style={{ flex: 1 }}>
+                              <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500', fontSize: '0.85rem' }}>Parent Name *</label>
+                              <input type="text" required={userFormData.createParentAccount} placeholder="e.g. Mr. Ramesh Kumar" value={userFormData.parentName} onChange={e => setUserFormData({ ...userFormData, parentName: e.target.value })} style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #9b59b6' }} />
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500', fontSize: '0.85rem' }}>Parent Phone</label>
+                              <input type="tel" placeholder="+91 9876543210" value={userFormData.parentPhone} onChange={e => setUserFormData({ ...userFormData, parentPhone: e.target.value })} style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #9b59b6' }} />
+                            </div>
+                          </div>
+                          <div style={{ marginTop: '0.6rem' }}>
+                            <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500', fontSize: '0.85rem' }}>Parent Password</label>
+                            <input type="text" placeholder="Default: Invertis@123" value={userFormData.parentPassword} onChange={e => setUserFormData({ ...userFormData, parentPassword: e.target.value })} style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #9b59b6' }} />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </>
               )}
               {userFormData.role === 'driver' && (

@@ -36,7 +36,10 @@ async function bootstrap() {
         return callback(null, true);
       }
       // Allow local network during dev
-      if (origin.startsWith('http://192.168.') || origin.startsWith('http://10.')) {
+      if (
+        origin.startsWith('http://192.168.') ||
+        origin.startsWith('http://10.')
+      ) {
         return callback(null, true);
       }
       // Reject everything else

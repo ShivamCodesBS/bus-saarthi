@@ -1,36 +1,44 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Leave } from './entities/leave.entity';
-import { User, UserRole } from '../users/entities/user.entity';
+import { UserRole } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class LeavesService {
-  constructor(
-    @InjectRepository(Leave) private leaveRepository: Repository<Leave>,
-    @InjectRepository(User) private usersRepository: Repository<User>,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
   async markLeave(loginId: string, dateStr: string) {
-    const user = await this.usersRepository.findOne({ where: { loginId } });
-    if (!user || user.role !== UserRole.PASSENGER) {
+    const user = await this.prisma.user.findUnique({ where: { loginId } });
+    if (!user || user.role !== UserRole.passenger) {
       throw new BadRequestException('Only passengers can mark leaves');
     }
 
     try {
-      const leave = this.leaveRepository.create({ loginId, date: dateStr });
-      await this.leaveRepository.save(leave);
+      await this.prisma.leave.create({
+        data: {
+          loginId,
+          date: new Date(dateStr),
+        },
+      });
       return { status: 'success', message: 'Leave marked' };
-    } catch (error) {
-      if (error.code === '23505') { // Postgres unique constraint violation
-        return { status: 'success', message: 'Leave already marked for this date' };
+    } catch (error: any) {
+      // Prisma unique constraint violation code is P2002
+      if (error.code === 'P2002') {
+        return {
+          status: 'success',
+          message: 'Leave already marked for this date',
+        };
       }
       throw error;
     }
   }
 
   async cancelLeave(loginId: string, dateStr: string) {
-    await this.leaveRepository.delete({ loginId, date: dateStr });
+    await this.prisma.leave.deleteMany({
+      where: {
+        loginId,
+        date: new Date(dateStr),
+      },
+    });
     return { status: 'success', message: 'Leave cancelled' };
   }
 }

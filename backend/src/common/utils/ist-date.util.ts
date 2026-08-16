@@ -2,7 +2,7 @@ export function getISTMidnightUTC(): Date {
   const now = new Date();
   const utcOffset = now.getTimezoneOffset() * 60000;
   const utcTime = now.getTime() + utcOffset;
-  const istTime = new Date(utcTime + (330 * 60000));
+  const istTime = new Date(utcTime + 330 * 60000);
   istTime.setHours(0, 0, 0, 0);
-  return new Date(istTime.getTime() - (330 * 60000));
+  return new Date(istTime.getTime() - 330 * 60000);
 }

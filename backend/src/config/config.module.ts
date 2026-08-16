@@ -14,12 +14,15 @@ import Joi from 'joi';
       load: [appConfig, databaseConfig, jwtConfig, awsConfig, redisConfig],
       validationSchema: Joi.object({
         // Server
-        NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
+        NODE_ENV: Joi.string()
+          .valid('development', 'production', 'test')
+          .default('development'),
         PORT: Joi.number().default(5000),
 
         // Database (required — no sensible default)
         DATABASE_URL: Joi.string().required().messages({
-          'any.required': 'DATABASE_URL is required. Set it in your .env file (e.g. postgresql://user:pass@localhost:5432/bus_saarthi)',
+          'any.required':
+            'DATABASE_URL is required. Set it in your .env file (e.g. postgresql://user:pass@localhost:5432/bus_saarthi)',
         }),
 
         // Auth
@@ -49,11 +52,10 @@ import Joi from 'joi';
       }),
       validationOptions: {
         allowUnknown: true, // Don't fail on unrecognized env vars
-        abortEarly: false,  // Report all validation errors at once
+        abortEarly: false, // Report all validation errors at once
       },
     }),
   ],
   exports: [NestConfigModule],
 })
 export class AppConfigModule {}
-
