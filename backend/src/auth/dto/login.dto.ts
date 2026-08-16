@@ -11,5 +11,9 @@ export class LoginDto {
 
   @IsString()
   @IsOptional()
+  role?: string;
+
+  @IsString()
+  @IsOptional()
   fcm_token?: string;
 }

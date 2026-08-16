@@ -50,8 +50,7 @@ const Login = () => {
       try {
         const response = await axios.post(`${BACKEND_URL}/api/login`, {
           login_id: userId,
-          password: password,
-          role: loginType
+          password: password
         });
 
         if (response.data.status === 'success') {
