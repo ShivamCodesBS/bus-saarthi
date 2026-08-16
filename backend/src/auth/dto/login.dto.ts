@@ -1,5 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsEnum } from 'class-validator';
-import { UserRole } from '../../users/entities/user.entity';
+import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 
 export class LoginDto {
   @IsString()
@@ -10,7 +9,7 @@ export class LoginDto {
   @IsNotEmpty()
   password: string;
 
+  @IsString()
   @IsOptional()
-  @IsEnum(UserRole)
-  role?: UserRole;
+  fcm_token?: string;
 }

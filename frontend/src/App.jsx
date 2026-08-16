@@ -22,10 +22,12 @@ if (localStorage.getItem('pref_dark') === 'true') {
 const Home = lazy(() => import('./pages/Home'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const TransportInchargeDashboard = lazy(() => import('./pages/TransportInchargeDashboard'));
+const ParentDashboard = lazy(() => import('./pages/ParentDashboard'));
 const Community = lazy(() => import('./pages/Community'));
 const Profile = lazy(() => import('./pages/Profile'));
 const AdminSpeedAnalytics = lazy(() => import('./pages/AdminSpeedAnalytics'));
 const Settings = lazy(() => import('./pages/Settings'));
+
 
 // Limiter to prevent toast spam
 const TOAST_LIMIT = 4;
@@ -108,10 +110,12 @@ const PublicRoute = ({ children }) => {
   if (user) {
     if (user.role === 'admin') return <Navigate to="/admin-dashboard" replace />;
     if (user.role === 'transport_incharge') return <Navigate to="/transport-incharge-dashboard" replace />;
+    if (user.role === 'parent') return <Navigate to="/parent-dashboard" replace />;
     return <Navigate to="/home" replace />;
   }
   return children;
 };
+
 
 const BackgroundManager = () => {
   const location = useLocation();
@@ -123,6 +127,9 @@ const BackgroundManager = () => {
   if (path.includes('transport-incharge')) {
     dotClass = 'bg-dot-pattern-green';
     iconColor = 'text-[#28a745] dark:text-[#28a745]';
+  } else if (path.includes('parent-dashboard')) {
+    dotClass = 'bg-dot-pattern';
+    iconColor = 'text-[#8b5cf6] dark:text-[#8b5cf6]';
   } else if (path.includes('home') || path.includes('community') || path.includes('profile') || path.includes('settings')) {
     dotClass = 'bg-dot-pattern-blue';
     iconColor = 'text-blue-500 dark:text-blue-500';
@@ -140,10 +147,10 @@ function App() {
   // Initialize Lenis smooth scrolling
   useEffect(() => {
     const lenis = new Lenis({
-      lerp: 0.15,
+      lerp: 0.4,
       smoothWheel: true,
-      wheelMultiplier: 1.2,
-      duration: 1.0,
+      wheelMultiplier: 0.9,
+      duration: 0.4,
     });
 
     function raf(time) {
@@ -224,6 +231,15 @@ function App() {
                     </ProtectedRoute>
                   } 
                 />
+                <Route 
+                  path="/parent-dashboard" 
+                  element={
+                    <ProtectedRoute allowedRoles={['parent']}>
+                      <ParentDashboard />
+                    </ProtectedRoute>
+                  } 
+                />
+
                 <Route 
                   path="/community" 
                   element={

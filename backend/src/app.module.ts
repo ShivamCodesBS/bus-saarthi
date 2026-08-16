@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AppConfigModule } from './config/config.module';
-import { DatabaseModule } from './database/database.module';
+import { PrismaModule } from './prisma/prisma.module';
 import { QueueModule } from './queue/queue.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
@@ -18,19 +18,23 @@ import { GatewayModule } from './gateway/gateway.module';
 import { UploadModule } from './upload/upload.module';
 import { HealthModule } from './health/health.module';
 import { StreamsModule } from './streams/streams.module';
+import { ParentsModule } from './parents/parents.module';
+
 import { ThrottlerModule } from '@nestjs/throttler';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 
 @Module({
   imports: [
     AppConfigModule,
-    DatabaseModule,
+    PrismaModule,
     QueueModule,
     EventEmitterModule.forRoot(),
-    ThrottlerModule.forRoot([{
-      ttl: 60000,
-      limit: 100,
-    }]),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,
+        limit: 100,
+      },
+    ]),
     AuthModule,
     UsersModule,
     RoutesModule,
@@ -45,6 +49,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     UploadModule,
     HealthModule,
     StreamsModule,
+    ParentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

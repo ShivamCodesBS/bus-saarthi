@@ -8,12 +8,16 @@ export class RedisIoAdapter extends IoAdapter {
   private readonly logger = new Logger('RedisIoAdapter');
   private redisAvailable = false;
 
-  constructor(app: INestApplicationContext, private configService: ConfigService) {
+  constructor(
+    app: INestApplicationContext,
+    private configService: ConfigService,
+  ) {
     super(app);
   }
 
   async connectToRedis(): Promise<void> {
-    const redisUrl = this.configService.get<string>('redis.url') || 'redis://localhost:6379';
+    const redisUrl =
+      this.configService.get<string>('redis.url') || 'redis://localhost:6379';
 
     try {
       const { createClient } = await import('redis');
@@ -23,8 +27,12 @@ export class RedisIoAdapter extends IoAdapter {
       const subClient = pubClient.duplicate();
 
       // Catch error events to prevent unhandled rejections crashing the app
-      pubClient.on('error', (err) => this.logger.debug(`Redis pubClient error: ${err.message}`));
-      subClient.on('error', (err) => this.logger.debug(`Redis subClient error: ${err.message}`));
+      pubClient.on('error', (err) =>
+        this.logger.debug(`Redis pubClient error: ${err.message}`),
+      );
+      subClient.on('error', (err) =>
+        this.logger.debug(`Redis subClient error: ${err.message}`),
+      );
 
       // Set a short timeout so it doesn't hang on startup
       await Promise.race([

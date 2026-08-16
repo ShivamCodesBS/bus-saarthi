@@ -1,7 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { User, UserRole } from '../users/entities/user.entity';
+import { PrismaService } from '../prisma/prisma.service';
 
 /**
  * Face Recognition Service — Backend Side
@@ -14,20 +12,20 @@ import { User, UserRole } from '../users/entities/user.entity';
 export class FaceRecognitionService {
   private readonly logger = new Logger(FaceRecognitionService.name);
 
-  constructor(
-    @InjectRepository(User) private usersRepository: Repository<User>,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
   /**
    * Mark a passenger as face-enrolled.
    * Called after the mobile app successfully captures and stores ArcFace embeddings locally.
    */
   async markFaceEnrolled(loginId: string) {
-    const user = await this.usersRepository.findOne({ where: { loginId } });
+    const user = await this.prisma.user.findUnique({ where: { loginId } });
     if (!user) throw new NotFoundException('User not found');
 
-    user.faceEnrolledAt = new Date();
-    await this.usersRepository.save(user);
+    await this.prisma.user.update({
+      where: { loginId },
+      data: { faceEnrolledAt: new Date() },
+    });
 
     return { status: 'success', message: 'Face enrollment recorded', loginId };
   }
@@ -36,7 +34,7 @@ export class FaceRecognitionService {
    * Check if a passenger has an enrolled face.
    */
   async getFaceStatus(loginId: string) {
-    const user = await this.usersRepository.findOne({ where: { loginId } });
+    const user = await this.prisma.user.findUnique({ where: { loginId } });
     if (!user) throw new NotFoundException('User not found');
 
     return {
@@ -52,11 +50,13 @@ export class FaceRecognitionService {
    * The mobile app should also clear its local ArcFace embeddings.
    */
   async deleteFace(loginId: string) {
-    const user = await this.usersRepository.findOne({ where: { loginId } });
+    const user = await this.prisma.user.findUnique({ where: { loginId } });
     if (!user) throw new NotFoundException('User not found');
 
-    user.faceEnrolledAt = null;
-    await this.usersRepository.save(user);
+    await this.prisma.user.update({
+      where: { loginId },
+      data: { faceEnrolledAt: null },
+    });
 
     return { status: 'success', message: 'Face enrollment cleared' };
   }

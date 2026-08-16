@@ -666,7 +666,7 @@ const TransportInchargeDashboard = () => {
                 <h3 style={{ margin: 0, fontSize: '1.25rem', color: '#155724', fontWeight: 'bold' }}>Broadcast Notice</h3>
                 <p style={{ margin: 0, fontSize: '0.9rem', color: '#155724' }}>Send message to all passengers.</p>
               </div>
-              <form onSubmit={handleSendBroadcast} style={{ flex: '2 1 300px', display: 'flex', gap: '1rem' }}>
+              <form onSubmit={handleBroadcast} style={{ flex: '2 1 300px', display: 'flex', gap: '1rem' }}>
                 <input type="text" required placeholder="Type message..." value={broadcastMessage} onChange={(e) => setBroadcastMessage(e.target.value)} style={{ flex: 1, padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid #28a745' }} />
                 <button type="submit" disabled={isBroadcasting} style={{ backgroundColor: '#28a745', color: 'white', border: 'none', padding: '0.75rem 1.5rem', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>Broadcast</button>
               </form>
@@ -850,17 +850,17 @@ const TransportInchargeDashboard = () => {
                   <p style={{ margin: '1rem 0 0 0', fontSize: '1rem' }}>{comp.text}</p>
 
                   {/* Media Attachment */}
-                  {comp.type === 'photo' && comp.media_url && (
+                  {comp.type === 'photo' && (comp.media_url || comp.mediaUrl) && (
                     <div 
-                      onClick={() => setFullScreenMedia({ type: 'photo', url: comp.media_url })}
+                      onClick={() => setFullScreenMedia({ type: 'photo', url: comp.media_url || comp.mediaUrl })}
                       style={{ borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: '#f8f9fa', display: 'flex', justifyContent: 'center', cursor: 'zoom-in' }}
                     >
-                      <img src={comp.media_url} alt="Complaint Attachment" style={{ width: '100%', height: 'auto', display: 'block', maxHeight: '400px', objectFit: 'contain', transition: 'transform 0.2s' }} />
+                      <img src={comp.media_url || comp.mediaUrl} alt="Complaint Attachment" style={{ width: '100%', height: 'auto', display: 'block', maxHeight: '400px', objectFit: 'contain', transition: 'transform 0.2s' }} />
                     </div>
                   )}
-                  {comp.type === 'video' && comp.media_url && (
+                  {comp.type === 'video' && (comp.media_url || comp.mediaUrl) && (
                     <div 
-                      onClick={() => setFullScreenMedia({ type: 'video', url: comp.media_url })}
+                      onClick={() => setFullScreenMedia({ type: 'video', url: comp.media_url || comp.mediaUrl })}
                       style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: 'black', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
                     >
                       <div style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)' }}>
@@ -868,12 +868,12 @@ const TransportInchargeDashboard = () => {
                           ▶
                         </div>
                       </div>
-                      <video src={comp.media_url} style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'contain', opacity: 0.8 }} />
+                      <video src={comp.media_url || comp.mediaUrl} style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'contain', opacity: 0.8 }} />
                     </div>
                   )}
-                  {comp.type === 'audio' && comp.media_url && (
+                  {comp.type === 'audio' && (comp.media_url || comp.mediaUrl) && (
                     <div style={{ marginTop: '0.5rem', padding: '1rem', backgroundColor: 'var(--bg-color)', borderRadius: '30px', border: '1px solid var(--border-color)' }}>
-                      <audio src={comp.media_url} controls style={{ width: '100%' }} />
+                      <audio src={comp.media_url || comp.mediaUrl} controls style={{ width: '100%' }} />
                     </div>
                   )}
 

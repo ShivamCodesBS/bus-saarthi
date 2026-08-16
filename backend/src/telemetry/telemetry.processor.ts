@@ -1,22 +1,17 @@
 import { Process, Processor } from '@nestjs/bull';
 import type { Job } from 'bull';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Telemetry } from './entities/telemetry.entity';
+import { PrismaService } from '../prisma/prisma.service';
 import { TelemetryBatchDto } from './dto/telemetry-batch.dto';
 
 @Processor('telemetry')
 export class TelemetryProcessor {
-  constructor(
-    @InjectRepository(Telemetry)
-    private telemetryRepository: Repository<Telemetry>,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
   @Process('processBatch')
   async handleBatch(job: Job<TelemetryBatchDto>) {
     const { route_id, data } = job.data;
-    
-    const entities = data.map(item => this.telemetryRepository.create({
+
+    const entities = data.map((item: any) => ({
       routeId: route_id,
       latitude: item.lat,
       longitude: item.lng,
@@ -26,6 +21,8 @@ export class TelemetryProcessor {
       timestamp: new Date(item.timestamp),
     }));
 
-    await this.telemetryRepository.save(entities);
+    if (entities.length > 0) {
+      await this.prisma.telemetry.createMany({ data: entities });
+    }
   }
 }

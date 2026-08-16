@@ -1,17 +1,14 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { SystemLog } from './entities/system-log.entity';
 import * as os from 'os';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class HealthService implements OnModuleInit {
   private metricsInterval: NodeJS.Timeout;
 
   constructor(
-    @InjectRepository(SystemLog)
-    private systemLogRepository: Repository<SystemLog>,
+    private prisma: PrismaService,
     private eventEmitter: EventEmitter2,
   ) {}
 
@@ -55,22 +52,22 @@ export class HealthService implements OnModuleInit {
         platform: os.platform(),
         release: os.release(),
         uptime: os.uptime(), // System uptime
-      }
+      },
     };
   }
 
-  async getLogs(page = 1, limit = 50, level?: string) {
-    const query = this.systemLogRepository.createQueryBuilder('log');
-    
-    if (level) {
-      query.where('log.level = :level', { level });
-    }
-    
-    query.orderBy('log.createdAt', 'DESC')
-         .skip((page - 1) * limit)
-         .take(limit);
+  async getLogs(page = 1, limit = 50, level?: any) {
+    const whereClause = level ? { level } : {};
 
-    const [logs, total] = await query.getManyAndCount();
+    const [logs, total] = await Promise.all([
+      this.prisma.systemLog.findMany({
+        where: whereClause,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.systemLog.count({ where: whereClause }),
+    ]);
 
     return {
       data: logs,

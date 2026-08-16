@@ -4,7 +4,7 @@ import { SyncAttendanceDto } from './dto/sync-attendance.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
-import { UserRole } from '../users/entities/user.entity';
+import { UserRole } from '@prisma/client';
 
 @Controller('api')
 @UseGuards(JwtAuthGuard)
@@ -25,7 +25,7 @@ export class AttendanceController {
   // GET all today's attendance (for Admin/Transport Incharge dashboard)
   @Get('attendance')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.TRANSPORT_INCHARGE)
+  @Roles(UserRole.admin, UserRole.transport_incharge)
   getAllAttendance() {
     return this.attendanceService.getAllAttendanceToday();
   }

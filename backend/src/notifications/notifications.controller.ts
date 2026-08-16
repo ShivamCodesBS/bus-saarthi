@@ -1,9 +1,16 @@
-import { Controller, Post, Get, Body, UseGuards, Request } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Body,
+  UseGuards,
+  Request,
+} from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
-import { UserRole } from '../users/entities/user.entity';
+import { UserRole } from '@prisma/client';
 
 @Controller('api')
 @UseGuards(JwtAuthGuard)
@@ -14,7 +21,11 @@ export class NotificationsController {
   subscribe(@Request() req: any, @Body() body: any) {
     // Accept both device_type (snake_case from frontend) and deviceType (camelCase)
     const deviceType = body.device_type || body.deviceType || 'web';
-    return this.notificationsService.subscribe(req.user.loginId, body.subscription, deviceType);
+    return this.notificationsService.subscribe(
+      req.user.loginId,
+      body.subscription,
+      deviceType,
+    );
   }
 
   // GET recent broadcasts/notifications
@@ -25,7 +36,7 @@ export class NotificationsController {
 
   @Post('broadcast')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.TRANSPORT_INCHARGE)
+  @Roles(UserRole.admin, UserRole.transport_incharge)
   broadcast(@Body() body: { message: string; title?: string }) {
     return this.notificationsService.broadcastMessage(body.message, body.title);
   }

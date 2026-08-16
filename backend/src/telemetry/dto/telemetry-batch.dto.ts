@@ -1,4 +1,10 @@
-import { IsString, IsNotEmpty, IsArray, ValidateNested, IsNumber } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsArray,
+  ValidateNested,
+  IsNumber,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 class TelemetryDataDto {
