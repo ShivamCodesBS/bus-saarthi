@@ -109,16 +109,19 @@ const Community = () => {
 
     // Search
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
+      const q = searchQuery.toLowerCase().trim();
+      const qWithoutHash = q.replace(/^#/, '');
+      
       list = list.filter(c => {
         const textMatch = (c.text || '').toLowerCase().includes(q);
-        const categoryMatch = (c.category || '').toLowerCase().includes(q);
         const routeIdMatch = String(c.route || '').toLowerCase().includes(q);
         const routeNameMatch = formatRoute(c.route).toLowerCase().includes(q);
         const statusMatch = (c.status || '').toLowerCase().includes(q);
-        const ticketIdMatch = (c.id || c._id || '').substring(0, 6).toLowerCase().includes(q);
         
-        return textMatch || categoryMatch || routeIdMatch || routeNameMatch || statusMatch || ticketIdMatch;
+        const ticketId = (c.id || c._id || '').substring(0, 6).toLowerCase();
+        const ticketIdMatch = ticketId ? (ticketId.includes(qWithoutHash) || q.includes(ticketId)) : false;
+        
+        return textMatch || routeIdMatch || routeNameMatch || statusMatch || ticketIdMatch;
       });
     }
 
