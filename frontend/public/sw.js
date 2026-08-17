@@ -1,23 +1,31 @@
 self.addEventListener('install', function(event) {
-  self.skipWaiting(); // Force the waiting service worker to become the active service worker.
+  self.skipWaiting();
 });
 
 self.addEventListener('activate', function(event) {
-  event.waitUntil(self.clients.claim()); // Tell the active service worker to take control of the page immediately.
+  event.waitUntil(self.clients.claim());
 });
 
 self.addEventListener('push', function(event) {
   if (event.data) {
-    const data = event.data.json();
+    let data;
+    try {
+      data = event.data.json();
+    } catch {
+      data = { title: 'Bus Saarthi', body: event.data.text() };
+    }
+
     const options = {
       body: data.body,
-      icon: '/bus-icon-192.png', // The main image shown next to the notification
-      data: {
-        url: data.url || '/'
-      }
+      icon: data.icon || '/icons/bus-192x192.png',
+      badge: data.badge || '/icons/bus-72x72.png',
+      tag: data.tag || 'bus-saarthi',
+      requireInteraction: data.requireInteraction || false,
+      vibrate: [200, 100, 200, 100, 200],
+      data: { url: data.url || '/home' },
     };
     event.waitUntil(
-      self.registration.showNotification(data.title, options)
+      self.registration.showNotification(data.title || 'Bus Saarthi', options)
     );
   }
 });
@@ -26,23 +34,16 @@ self.addEventListener('notificationclick', function(event) {
   event.notification.close();
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
-      if (event.notification.data.url) {
-        let client = null;
-        for (let i = 0; i < clientList.length; i++) {
-          let c = clientList[i];
-          if (c.url.includes(event.notification.data.url) && 'focus' in c) {
-            client = c;
-            break;
-          }
+      const targetUrl = event.notification.data?.url || '/home';
+      for (let i = 0; i < clientList.length; i++) {
+        let c = clientList[i];
+        if (c.url.includes(self.location.origin) && 'focus' in c) {
+          return c.focus();
         }
-        if (client) {
-          return client.focus();
-        }
-        if (clients.openWindow) {
-          // ensure the full url is opened or relative
-          const urlToOpen = new URL(event.notification.data.url, self.location.origin).href;
-          return clients.openWindow(urlToOpen);
-        }
+      }
+      if (clients.openWindow) {
+        const urlToOpen = new URL(targetUrl, self.location.origin).href;
+        return clients.openWindow(urlToOpen);
       }
     })
   );

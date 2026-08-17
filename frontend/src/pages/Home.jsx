@@ -5,6 +5,7 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import HamburgerMenu from '../components/HamburgerMenu';
+import WakeAlarmModal from '../components/WakeAlarmModal';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
 import { io } from 'socket.io-client';
@@ -106,6 +107,8 @@ const Home = () => {
   const [telemetry, setTelemetry] = useState(null);
   const [alarmSet, setAlarmSet] = useState(() => localStorage.getItem('wake_alarm_enabled') === 'true');
   const [alarmLoading, setAlarmLoading] = useState(false);
+  const [showAlarmModal, setShowAlarmModal] = useState(false);
+  const alarmAudioRef = useRef(null);
   const [sosActive, setSosActive] = useState(false);
   const [sosTimer, setSosTimer] = useState(null);
 
@@ -196,7 +199,8 @@ const Home = () => {
       console.log('Connected to real-time telemetry server');
       // Join the route room so server emits targeted live_telemetry events
       const routeIdToUse = user?.routeId || user?.route_id || '4';
-      socket.emit('join_route', { route_id: routeIdToUse });
+      const loginId = user?.loginId || user?.login_id;
+      socket.emit('join_route', { route_id: routeIdToUse, login_id: loginId });
     });
 
     let telemetryTimeout;
@@ -232,6 +236,28 @@ const Home = () => {
       setActiveBroadcast(data);
     });
 
+    // Listen for wake alarm trigger from server
+    socket.on('wake_alarm_trigger', (data) => {
+      toast(`🚌 Bus is ${data.distanceKm}km away! Get ready!`, {
+        duration: 10000,
+        icon: '⏰',
+        style: { background: '#1d4ed8', color: 'white', fontWeight: 700, borderRadius: '12px' },
+      });
+      // Play alarm sound
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
+        gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+        oscillator.start();
+        oscillator.stop(audioCtx.currentTime + 1.5);
+      } catch(e) { console.warn('Audio play failed', e); }
+    });
+
     return () => {
       clearInterval(crowdInterval);
       if (telemetryTimeout) clearTimeout(telemetryTimeout);
@@ -245,28 +271,26 @@ const Home = () => {
   };
 
   const handleWakeAlarm = async () => {
-    setAlarmLoading(true);
-    try {
-      const newState = !alarmSet;
-      
-      // We don't have a backend endpoint yet for wake alarm preferences, 
-      // but conceptually this is where we would call it. 
-      // await axios.put(`${BACKEND_URL}/api/users/wake_alarm`, { enabled: newState });
-      
-      setAlarmSet(newState);
-      localStorage.setItem('wake_alarm_enabled', newState);
-      toast.success(newState ? "Wake alarm set for your stop." : "Wake alarm cancelled.", {
-        icon: newState ? '⏰' : '🔕',
-        style: {
-          borderRadius: '10px',
-          background: '#333',
-          color: '#fff',
-        },
-      });
-    } catch (err) {
-      toast.error("Failed to set alarm.");
-    } finally {
-      setAlarmLoading(false);
+    if (alarmSet) {
+      // Cancel the alarm
+      setAlarmLoading(true);
+      try {
+        const token = user?.token || JSON.parse(localStorage.getItem('bus_saarthi_user') || '{}').token;
+        await axios.delete(`${BACKEND_URL}/api/users/me/wake-alarm`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setAlarmSet(false);
+        localStorage.removeItem('wake_alarm_enabled');
+        localStorage.removeItem('wake_alarm_data');
+        toast.success('🔕 Wake alarm cancelled.', { style: { borderRadius: '10px' } });
+      } catch (err) {
+        toast.error('Failed to cancel alarm.');
+      } finally {
+        setAlarmLoading(false);
+      }
+    } else {
+      // Open modal to set alarm
+      setShowAlarmModal(true);
     }
   };
 
@@ -367,6 +391,25 @@ const Home = () => {
           </div>
         </div>
         <div className="flex items-center gap-2 md:gap-4">
+          {/* PC NAVIGATION BAR */}
+          <nav className="hidden lg:flex items-center gap-1 mr-2 pr-4 border-r border-slate-200 dark:border-slate-700">
+            <Button onClick={() => navigate('/community')} className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white font-bold rounded-xl shadow-md border-none transition-all hover:scale-[1.02] h-10 px-4">
+              <Users className="mr-2" size={16} /> Bus Community
+            </Button>
+            
+            <Button variant="ghost" onClick={() => navigate('/home')} className="h-10 rounded-xl bg-slate-50 dark:bg-slate-800 text-blue-700 dark:text-blue-400 font-bold hover:bg-slate-100 dark:hover:bg-slate-700 px-4">
+              <HomeIcon className="mr-2" size={16} /> Home
+            </Button>
+
+            <Button variant="ghost" onClick={() => navigate('/profile')} className="h-10 rounded-xl text-slate-700 dark:text-slate-300 font-medium hover:bg-slate-100 dark:hover:bg-slate-800 px-4">
+              <User className="mr-2" size={16} /> Profile
+            </Button>
+
+            <Button variant="ghost" onClick={() => navigate('/settings')} className="h-10 rounded-xl text-slate-700 dark:text-slate-300 font-medium hover:bg-slate-100 dark:hover:bg-slate-800 px-4">
+              <Settings className="mr-2" size={16} /> Settings
+            </Button>
+          </nav>
+
           <div className="relative">
             {(() => {
               const allNotifications = [];
@@ -493,10 +536,10 @@ const Home = () => {
               </div>
             </button>
             {showProfileMenu && (
-              <div className="absolute top-full right-0 mt-3 w-72 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/60 dark:border-slate-700/60 rounded-2xl shadow-2xl z-50 p-2 animate-in slide-in-from-top-4 fade-in duration-300 flex flex-col gap-1">
+              <div className="absolute top-full right-0 mt-3 w-64 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/60 dark:border-slate-700/60 rounded-2xl shadow-2xl z-50 p-2 animate-in slide-in-from-top-4 fade-in duration-300 flex flex-col gap-1">
                 
                 {/* User Info Header */}
-                <div className="flex items-center gap-3 p-3 border-b border-slate-100 dark:border-slate-800 mb-2">
+                <div className="flex items-center gap-3 p-3 mb-1">
                   <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-100 to-violet-100 dark:from-blue-900/40 dark:to-violet-900/40 flex items-center justify-center text-blue-600 dark:text-blue-400 font-bold text-xl flex-shrink-0 overflow-hidden ring-2 ring-white dark:ring-slate-800 shadow-sm">
                     {user?.profile_pic ? (
                       <img src={user.profile_pic} alt="Profile" className="w-full h-full object-cover" />
@@ -510,27 +553,7 @@ const Home = () => {
                   </div>
                 </div>
 
-                <Button onClick={() => navigate('/community')} className="w-full justify-start h-11 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white font-bold shadow-md mb-1 border-none transition-all hover:scale-[1.02]">
-                  <Users className="mr-3" size={18} />
-                  Bus Community
-                </Button>
-                
-                <Button variant="ghost" onClick={() => setShowProfileMenu(false)} className="w-full justify-start h-11 rounded-xl bg-slate-50 dark:bg-slate-800 text-blue-700 dark:text-blue-400 font-bold hover:bg-slate-100 dark:hover:bg-slate-700">
-                  <HomeIcon className="mr-3" size={18} />
-                  Home
-                </Button>
-
-                <Button variant="ghost" onClick={() => navigate('/profile')} className="w-full justify-start h-11 rounded-xl text-slate-700 dark:text-slate-300 font-medium hover:bg-slate-100 dark:hover:bg-slate-800">
-                  <User className="mr-3" size={18} />
-                  Profile
-                </Button>
-
-                <Button variant="ghost" onClick={() => navigate('/settings')} className="w-full justify-start h-11 rounded-xl text-slate-700 dark:text-slate-300 font-medium hover:bg-slate-100 dark:hover:bg-slate-800">
-                  <Settings className="mr-3" size={18} />
-                  Settings
-                </Button>
-
-                <div className="border-t border-slate-100 dark:border-slate-800 mt-1 pt-1">
+                <div className="border-t border-slate-100 dark:border-slate-800 pt-1">
                   <Button variant="ghost" onClick={() => { logout(); navigate('/'); }} className="w-full justify-start h-11 rounded-xl text-red-600 dark:text-red-400 font-bold hover:bg-red-50 dark:hover:bg-red-950/30">
                     <LogOut className="mr-3" size={18} />
                     Log Out
@@ -878,6 +901,14 @@ const Home = () => {
       )}
 
       <HamburgerMenu isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} />
+
+      {showAlarmModal && (
+        <WakeAlarmModal
+          user={user}
+          onClose={() => setShowAlarmModal(false)}
+          onAlarmSet={(state) => setAlarmSet(state)}
+        />
+      )}
     </div>
   );
 };

@@ -61,7 +61,7 @@ model User {
   dob             DateTime? @db.Timestamptz(6)
   address         String?
   gradeClass      String?   @map("grade_class") @db.VarChar(50)
-  wakeAlarm       Boolean   @default(false) @map("wake_alarm")
+  wakeAlarm       Json?     @map("wake_alarm") @db.Json
   faceEnrolledAt  DateTime? @map("face_enrolled_at") @db.Timestamptz(6)
   awsFaceId       String?   @map("aws_face_id") @db.VarChar(100)
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)

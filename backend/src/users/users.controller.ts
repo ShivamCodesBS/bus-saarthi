@@ -78,4 +78,25 @@ export class UsersController {
       body.new_password,
     );
   }
+
+  // Wake Alarm — passenger sets their alarm location & threshold
+  @Put('me/wake-alarm')
+  setWakeAlarm(
+    @Request() req: any,
+    @Body() body: { lat: number; lng: number; thresholdKm: number; subscription?: any },
+  ) {
+    const loginId = req.user?.loginId || req.user?.login_id;
+    return this.usersService.setWakeAlarm(loginId, {
+      lat: body.lat,
+      lng: body.lng,
+      thresholdKm: body.thresholdKm,
+      subscription: body.subscription ?? null,
+    });
+  }
+
+  @Delete('me/wake-alarm')
+  cancelWakeAlarm(@Request() req: any) {
+    const loginId = req.user?.loginId || req.user?.login_id;
+    return this.usersService.cancelWakeAlarm(loginId);
+  }
 }
