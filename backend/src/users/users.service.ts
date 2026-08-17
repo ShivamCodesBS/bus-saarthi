@@ -212,4 +212,88 @@ export class UsersService {
     });
     return { status: 'success', message: 'Password changed successfully' };
   }
+
+  async setWakeAlarm(
+    loginId: string,
+    dto: { lat: number; lng: number; thresholdKm: number; subscription: any; firedAt?: string | null },
+  ) {
+    const user = await this.prisma.user.findUnique({ where: { loginId } });
+    if (!user) throw new NotFoundException(`User ${loginId} not found`);
+
+    const alarmData = {
+      enabled: true,
+      lat: dto.lat,
+      lng: dto.lng,
+      thresholdKm: dto.thresholdKm,
+      firedAt: dto.firedAt !== undefined ? dto.firedAt : null,
+    };
+
+    await this.prisma.user.update({
+      where: { loginId },
+      data: { wakeAlarm: alarmData },
+    });
+
+    // Save push subscription if provided
+    if (dto.subscription) {
+      const existingSub = await this.prisma.pushSubscription.findFirst({
+        where: { loginId, deviceType: 'web' },
+      });
+      if (existingSub) {
+        await this.prisma.pushSubscription.update({
+          where: { id: existingSub.id },
+          data: { subscription: dto.subscription },
+        });
+      } else {
+        await this.prisma.pushSubscription.create({
+          data: { loginId, subscription: dto.subscription, deviceType: 'web' },
+        });
+      }
+    }
+
+    return { status: 'success', message: 'Wake alarm set', alarm: alarmData };
+  }
+
+  async cancelWakeAlarm(loginId: string) {
+    const user = await this.prisma.user.findUnique({ where: { loginId } });
+    if (!user) throw new NotFoundException(`User ${loginId} not found`);
+
+    await this.prisma.user.update({
+      where: { loginId },
+      data: { wakeAlarm: { enabled: false } },
+    });
+
+    return { status: 'success', message: 'Wake alarm cancelled' };
+  }
+
+  async getActiveWakeAlarms() {
+    // Fetch all users who have any wakeAlarm JSON set (enabled or disabled)
+    const allUsers = await this.prisma.user.findMany({
+      select: { loginId: true, wakeAlarm: true },
+    });
+
+    return allUsers.filter((u) => {
+      const alarm = u.wakeAlarm as any;
+      return alarm?.enabled === true;
+    });
+  }
+
+  /**
+   * Marks the alarm as fired for today WITHOUT touching subscription data.
+   * This prevents the push subscription from being accidentally deleted.
+   */
+  async markAlarmFired(loginId: string, today: string) {
+    const user = await this.prisma.user.findUnique({ where: { loginId } });
+    if (!user) return;
+
+    const existingAlarm = user.wakeAlarm as any;
+    await this.prisma.user.update({
+      where: { loginId },
+      data: {
+        wakeAlarm: {
+          ...existingAlarm,
+          firedAt: today,
+        },
+      },
+    });
+  }
 }
