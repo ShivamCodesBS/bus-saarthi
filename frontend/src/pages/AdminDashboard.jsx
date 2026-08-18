@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Users, MapPin, Shield, LogOut, Settings, Bell, AlertOctagon, CheckCircle2, MessageSquare, Trash2, UserPlus, Navigation, Plus, X, User, Menu, Eye, Download, Upload, Activity } from 'lucide-react';
+import { Users, MapPin, Shield, LogOut, Settings, Bell, AlertOctagon, CheckCircle2, MessageSquare, Trash2, UserPlus, Navigation, Plus, X, User, Menu, Eye, Download, Upload, Activity, GitMerge, Undo2, Sparkles, AlertTriangle, ArrowRight, History, Layers } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
@@ -138,6 +138,19 @@ const AdminDashboard = () => {
   // Analytics State
   const [selectedRouteAnalytics, setSelectedRouteAnalytics] = useState('All');
 
+  // Merge & Cancel State
+  const [activeMerges, setActiveMerges] = useState([]);
+  const [mergeHistory, setMergeHistory] = useState([]);
+  const [mergeSuggestions, setMergeSuggestions] = useState([]);
+  const [mergeFormData, setMergeFormData] = useState({
+    cancelled_route_id: '',
+    target_route_id: '',
+    reason: 'low_attendance',
+    notes: '',
+  });
+  const [isMerging, setIsMerging] = useState(false);
+  const [selectedMergeCity, setSelectedMergeCity] = useState('All');
+
   // Notifications State
   const [showNotifications, setShowNotifications] = useState(false);
   const [hasUnread, setHasUnread] = useState(false);
@@ -158,7 +171,7 @@ const AdminDashboard = () => {
 
     socket.on('connect', () => {
       console.log('Admin connected to socket server');
-      socket.emit('join_admin');
+      socket.emit('join_admin', { token: user?.token });
     });
 
     socket.on('connect_error', (err) => {
@@ -222,6 +235,16 @@ const AdminDashboard = () => {
       }
     });
 
+    socket.on('merge_executed', (data) => {
+      toast.success(`Bus Merge Active: ${data.cancelledRoute?.routeName || 'Route'} merged into ${data.targetRoute?.routeName || 'Route'}`, { id: 'admin_merge_exec' });
+      setActiveMerges(prev => [data.mergeEvent, ...prev.filter(m => m.id !== data.mergeEvent?.id)]);
+    });
+
+    socket.on('merge_undone', (data) => {
+      toast.success(`Bus Merge Restored: ${data.merge?.cancelledRouteName || 'Route'} is active again`, { id: 'admin_merge_undone' });
+      setActiveMerges(prev => prev.filter(m => m.id !== data.merge?.id));
+    });
+
     setSocketInstance(socket);
 
     return () => {
@@ -241,27 +264,30 @@ const AdminDashboard = () => {
       setIsLoading(true);
       const authHeaders = { headers: { Authorization: `Bearer ${user?.token}` } };
       try {
-        const [rRes, gRes, attRes, usersRes] = await Promise.all([
-          axios.get(`${BACKEND_URL}/api/routes`, authHeaders).catch(e => { console.warn('Routes fetch failed', e.message); return { data: [] }; }),
-          // Fixed: /api/admin/grievances → /api/grievances
-          axios.get(`${BACKEND_URL}/api/grievances`, authHeaders).catch(e => { console.warn('Grievances fetch failed', e.message); return { data: [] }; }),
-          axios.get(`${BACKEND_URL}/api/attendance`, authHeaders).catch(e => { console.warn('Attendance fetch failed', e.message); return { data: [] }; }),
-          axios.get(`${BACKEND_URL}/api/users`, authHeaders).catch(e => { console.warn('Users fetch failed', e.message); return { data: [] }; }),
+        const [rRes, gRes, usersRes, attRes, mRes, sRes, hRes] = await Promise.all([
+          axios.get(`${BACKEND_URL}/api/routes`, authHeaders).catch(e => { console.warn('Routes fetch failed'); return { data: { status: 'error' } }; }),
+          axios.get(`${BACKEND_URL}/api/admin/grievances`, authHeaders).catch(e => { console.warn('Grievances fetch failed'); return { data: { status: 'error' } }; }),
+          axios.get(`${BACKEND_URL}/api/users`, authHeaders).catch(e => { console.warn('Users fetch failed'); return { data: { status: 'error' } }; }),
+          axios.get(`${BACKEND_URL}/api/attendance`, authHeaders).catch(e => { console.warn('Attendance fetch failed'); return { data: { status: 'error' } }; }),
+          axios.get(`${BACKEND_URL}/api/merge/active`, authHeaders).catch(e => ({ data: { data: [] } })),
+          axios.get(`${BACKEND_URL}/api/merge/suggestions`, authHeaders).catch(e => ({ data: { data: [] } })),
+          axios.get(`${BACKEND_URL}/api/merge/history`, authHeaders).catch(e => ({ data: { data: [] } })),
         ]);
 
-        // NestJS returns arrays directly, not { status, data } wrapped
         const routes = Array.isArray(rRes.data) ? rRes.data : (rRes.data?.data || []);
         const grievancesData = Array.isArray(gRes.data) ? gRes.data : (gRes.data?.data || []);
-        const attendanceData = Array.isArray(attRes.data) ? attRes.data : (attRes.data?.data || []);
         const usersData = Array.isArray(usersRes.data) ? usersRes.data : (usersRes.data?.data || []);
+        const attendanceData = Array.isArray(attRes.data) ? attRes.data : (attRes.data?.data || []);
 
         setRoutesList(routes);
-        if (routes.length > 0 && selectedRoute === '1') {
-          setSelectedRoute(routes[0].routeId || routes[0].route_id);
-        }
+        if (routes.length > 0 && selectedRoute === '1') setSelectedRoute(routes[0].routeId || routes[0].route_id);
+
         setGrievances(grievancesData);
+        setUsersList(usersData.filter(u => ['driver', 'passenger'].includes(u.role)));
         setAttendanceLogs(attendanceData);
-        setUsersList(usersData);
+        setActiveMerges(mRes.data?.data || []);
+        setMergeSuggestions(sRes.data?.data || []);
+        setMergeHistory(hRes.data?.data || []);
 
       } catch (err) {
         console.error("Error fetching admin data", err);
@@ -276,6 +302,79 @@ const AdminDashboard = () => {
   const handleLogout = () => {
     logout();
     navigate('/login', { replace: true });
+  };
+
+  const handleExecuteMerge = async (e) => {
+    e?.preventDefault();
+    if (!mergeFormData.cancelled_route_id || !mergeFormData.target_route_id) {
+      return toast.error('Please select both the cancelled bus and the target bus.');
+    }
+    if (mergeFormData.cancelled_route_id === mergeFormData.target_route_id) {
+      return toast.error('Cannot merge a bus into itself.');
+    }
+
+    const cancelledR = routesList.find(r => String(r.routeId || r.route_id) === String(mergeFormData.cancelled_route_id));
+    const targetR = routesList.find(r => String(r.routeId || r.route_id) === String(mergeFormData.target_route_id));
+
+    if (!window.confirm(`Are you sure you want to cancel ${cancelledR?.routeName || 'Route'} (Bus ${cancelledR?.busNumber || cancelledR?.bus_number}) and merge students into ${targetR?.routeName || 'Route'} (Bus ${targetR?.busNumber || targetR?.bus_number})?`)) {
+      return;
+    }
+
+    setIsMerging(true);
+    try {
+      const authHeaders = { headers: { Authorization: `Bearer ${user?.token}` } };
+      const res = await axios.post(`${BACKEND_URL}/api/merge`, mergeFormData, authHeaders);
+      if (res.data.status === 'success') {
+        toast.success(res.data.message || 'Bus merged successfully!');
+        if (res.data.warning) toast(res.data.warning, { icon: '⚠️' });
+        setMergeFormData({ cancelled_route_id: '', target_route_id: '', reason: 'low_attendance', notes: '' });
+        
+        const [mRes, sRes, hRes] = await Promise.all([
+          axios.get(`${BACKEND_URL}/api/merge/active`, authHeaders),
+          axios.get(`${BACKEND_URL}/api/merge/suggestions`, authHeaders),
+          axios.get(`${BACKEND_URL}/api/merge/history`, authHeaders),
+        ]);
+        setActiveMerges(mRes.data?.data || []);
+        setMergeSuggestions(sRes.data?.data || []);
+        setMergeHistory(hRes.data?.data || []);
+      }
+    } catch (err) {
+      toast.error(parseApiError(err, 'Failed to merge buses'));
+    } finally {
+      setIsMerging(false);
+    }
+  };
+
+  const handleUndoMerge = async (mergeId) => {
+    if (!window.confirm('Are you sure you want to undo this merge and restore the original bus route?')) return;
+    try {
+      const authHeaders = { headers: { Authorization: `Bearer ${user?.token}` } };
+      const res = await axios.post(`${BACKEND_URL}/api/merge/${mergeId}/undo`, {}, authHeaders);
+      if (res.data.status === 'success') {
+        toast.success(res.data.message || 'Merge undone successfully!');
+        const [mRes, sRes, hRes] = await Promise.all([
+          axios.get(`${BACKEND_URL}/api/merge/active`, authHeaders),
+          axios.get(`${BACKEND_URL}/api/merge/suggestions`, authHeaders),
+          axios.get(`${BACKEND_URL}/api/merge/history`, authHeaders),
+        ]);
+        setActiveMerges(mRes.data?.data || []);
+        setMergeSuggestions(sRes.data?.data || []);
+        setMergeHistory(hRes.data?.data || []);
+      }
+    } catch (err) {
+      toast.error(parseApiError(err, 'Failed to undo merge'));
+    }
+  };
+
+  const handleQuickMergeFromSuggestion = (cancelledId, targetId) => {
+    setMergeFormData({
+      cancelled_route_id: String(cancelledId),
+      target_route_id: String(targetId),
+      reason: 'low_attendance',
+      notes: 'Auto-suggested merge due to low attendance',
+    });
+    setActiveTab('merge');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleResolveGrievance = async (id) => {
@@ -734,6 +833,7 @@ const AdminDashboard = () => {
         <div style={{ display: 'flex', gap: '0.6rem', overflowX: 'auto', paddingBottom: '0.5rem', scrollbarWidth: 'none' }}>
           {[
             { id: 'overview',    icon: <MapPin size={16} />,       label: 'Fleet & Tracking',       color: '#0066cc', bg: '#e6f0fa' },
+            { id: 'merge',       icon: <GitMerge size={16} />,     label: 'Merge & Cancel',         color: '#e67e22', bg: '#fef3e2' },
             { id: 'routes',      icon: <Navigation size={16} />,   label: 'Routes',      color: '#28a745', bg: '#e6fae6' },
             { id: 'users',       icon: <Users size={16} />,        label: 'Directory',       color: '#7c3aed', bg: '#f3e8ff' },
             { id: 'grievances',  icon: <MessageSquare size={16} />, label: 'Complaints', color: '#cf1322', bg: '#fff1f0' },
@@ -790,10 +890,10 @@ const AdminDashboard = () => {
               <div>
                 <h3 style={{ color: '#cf1322', fontWeight: 'bold', margin: 0 }}>ACTIVE SOS ALERT</h3>
                 <p style={{ margin: 0, fontSize: '0.95rem', color: '#a8071a', fontWeight: '600' }}>
-                  Bus {routesList.find(r => String(r.route_id) === String(sosAlerts[0].route))?.bus_number || 'Unknown'} (Route {sosAlerts[0].route}) â€¢ Driver: {usersList.find(u => u.login_id === routesList.find(r => String(r.route_id) === String(sosAlerts[0].route))?.driver_id)?.name || 'Unknown'}
+                  Bus {routesList.find(r => String(r.route_id) === String(sosAlerts[0].route))?.bus_number || 'Unknown'} (Route {sosAlerts[0].route}) • Driver: {usersList.find(u => u.login_id === routesList.find(r => String(r.route_id) === String(sosAlerts[0].route))?.driver_id)?.name || 'Unknown'}
                 </p>
                 <p style={{ margin: 0, fontSize: '0.85rem', color: '#a8071a' }}>
-                  Initiated by {sosAlerts[0].passenger} (ID: {sosAlerts[0].login_id}) â€¢ {sosAlerts[0].time}
+                  Initiated by {sosAlerts[0].passenger} (ID: {sosAlerts[0].login_id}) • {sosAlerts[0].time}
                 </p>
               </div>
             </div>
@@ -824,9 +924,19 @@ const AdminDashboard = () => {
                   onChange={(e) => setSelectedRoute(e.target.value)}
                   className="w-full sm:w-auto min-w-[200px] p-2.5 rounded-xl border-2 border-blue-500/30 dark:border-blue-500/50 hover:border-blue-500 dark:hover:border-blue-400 font-bold outline-none cursor-pointer text-ellipsis overflow-hidden bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 transition-all shadow-sm focus:ring-4 focus:ring-blue-500/20"
                 >
-                  {routesList.map((r, idx) => (
-                    <option key={r.routeId || r.route_id || idx} value={r.routeId || r.route_id}>{r.routeName || r.route_name} ({r.busNumber || r.bus_number})</option>
-                  ))}
+                  {routesList.map((r, idx) => {
+                    const rId = String(r.routeId || r.route_id || idx);
+                    const isCancelled = activeMerges.find(m => String(m.cancelledRouteId) === rId);
+                    const isTarget = activeMerges.find(m => String(m.targetRouteId) === rId);
+                    let label = `${r.routeName || r.route_name} (${r.busNumber || r.bus_number})`;
+                    if (isCancelled) label += ` [CANCELLED ➔ Bus ${isCancelled.targetBusNumber || 'Merged'}]`;
+                    else if (isTarget) label += ` [MERGED +${isTarget.studentsMoved || 0} students]`;
+                    return (
+                      <option key={rId} value={rId} disabled={!!isCancelled}>
+                        {label}
+                      </option>
+                    );
+                  })}
                   {routesList.length === 0 && <option value="1">No Routes Found</option>}
                 </select>
               </div>
@@ -1344,32 +1454,36 @@ const AdminDashboard = () => {
                         <tr><td colSpan="4" style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-light)' }}>No attendance logs found.</td></tr>
                       ) : filteredAttendanceLogs.map((log, i) => (
                         <tr key={log._id || i} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                          <td style={{ padding: '1rem', fontWeight: '600' }}>
+                          <td style={{ padding: '1rem' }}>
                             {(() => {
                               const displayName = log.name || log.passenger_name;
                               const displayId = log.passenger_id || log.login_id;
+                              const origRoute = log.originalRouteId || log.original_route_id;
                               
-                              if (log.person_type === 'Unknown' || displayName === 'Unknown Face') {
-                                return (
-                                  <span style={{ color: 'var(--secondary-orange)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                                    ⚠️ Unknown Face
+                              return (
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span>
+                                    {log.person_type === 'Unknown' || displayName === 'Unknown Face' ? (
+                                      <span style={{ color: 'var(--secondary-orange)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                                        ⚠️ Unknown Face
+                                      </span>
+                                    ) : log.person_type === 'Unpaid' || log.fee_status === 'unpaid' ? (
+                                      <span style={{ color: '#cf1322' }}>
+                                        {displayName || displayId} (Unpaid)
+                                      </span>
+                                    ) : displayName && displayId ? (
+                                      `${displayName} (${displayId})`
+                                    ) : (
+                                      displayName || displayId || 'Unknown Face'
+                                    )}
                                   </span>
-                                );
-                              }
-                              
-                              if (log.person_type === 'Unpaid' || log.fee_status === 'unpaid') {
-                                return (
-                                  <span style={{ color: '#cf1322' }}>
-                                    {displayName || displayId} (Unpaid)
-                                  </span>
-                                );
-                              }
-                              
-                              if (displayName && displayId) {
-                                return `${displayName} (${displayId})`;
-                              }
-                              
-                              return displayName || displayId || 'Unknown Face';
+                                  {origRoute && (
+                                    <span className="bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300 font-extrabold text-[10px] px-2 py-0.5 rounded-full">
+                                      Merged (Route {origRoute})
+                                    </span>
+                                  )}
+                                </div>
+                              );
                             })()}
                           </td>
                           <td style={{ padding: '1rem' }}>
@@ -1393,6 +1507,332 @@ const AdminDashboard = () => {
             </div>
           )
         })()}
+
+        {/* ----------------- TAB: MERGE & CANCEL ----------------- */}
+        {activeTab === 'merge' && (
+          <div className="animate-fade-in flex flex-col gap-6">
+            {/* Header Banner */}
+            <div className="glass p-6 rounded-3xl border border-orange-200 dark:border-orange-900/40 bg-gradient-to-r from-orange-50/80 via-amber-50/50 to-white/70 dark:from-orange-950/20 dark:via-slate-900/60 dark:to-slate-900/70 shadow-sm">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="p-3.5 bg-orange-500 text-white rounded-2xl shadow-md shadow-orange-500/20">
+                    <GitMerge size={28} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-xl sm:text-2xl font-bold text-slate-800 dark:text-slate-100 m-0">Bus Merge & Cancellation Center</h2>
+                      <span className="bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300 text-xs font-extrabold px-2.5 py-0.5 rounded-full">
+                        {activeMerges.length} Active Today
+                      </span>
+                    </div>
+                    <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 m-0 mt-1">
+                      Instantly cancel low-attendance buses and transfer students, attendance eligibility, and GPS streaming to another active bus.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 bg-white/80 dark:bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Filter City:</span>
+                  <select 
+                    value={selectedMergeCity} 
+                    onChange={(e) => setSelectedMergeCity(e.target.value)}
+                    className="bg-transparent border-none font-bold text-xs text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
+                  >
+                    <option value="All">All Cities</option>
+                    {[...new Set(routesList.map(r => r.city || 'Bareilly'))].map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Smart Merge Suggestions */}
+            {mergeSuggestions.length > 0 && (
+              <div className="glass p-5 rounded-2xl border-2 border-amber-300 dark:border-amber-700/60 bg-amber-50/70 dark:bg-amber-950/20">
+                <div className="flex items-center gap-2 mb-3">
+                  <Sparkles size={20} className="text-amber-600 dark:text-amber-400 animate-pulse" />
+                  <h3 className="text-sm font-bold text-amber-900 dark:text-amber-200 m-0">
+                    Smart Suggestions — Low Attendance Detected ({mergeSuggestions.length})
+                  </h3>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {mergeSuggestions.map((sugg, idx) => (
+                    <div key={idx} className="bg-white dark:bg-slate-800 p-3.5 rounded-xl border border-amber-200 dark:border-amber-800/50 flex justify-between items-center gap-3">
+                      <div>
+                        <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800 dark:text-slate-200">
+                          <span className="text-red-500">{sugg.cancelledRoute?.routeName} (Bus {sugg.cancelledRoute?.busNumber})</span>
+                          <ArrowRight size={14} className="text-slate-400" />
+                          <span className="text-emerald-600 dark:text-emerald-400">{sugg.targetRoute?.routeName} (Bus {sugg.targetRoute?.busNumber})</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 m-0 mt-1">
+                          Only {sugg.studentCount || 0} students marked • Target has {sugg.availableSeats || 0} available seats
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleQuickMergeFromSuggestion(sugg.cancelledRoute?.routeId || sugg.cancelledRoute?.route_id, sugg.targetRoute?.routeId || sugg.targetRoute?.route_id)}
+                        className="bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg border-none cursor-pointer transition-colors whitespace-nowrap flex items-center gap-1"
+                      >
+                        <GitMerge size={14} /> Quick Merge
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Merge Form & Active Merges Today */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Form */}
+              <div className="lg:col-span-7 glass p-6 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 shadow-sm flex flex-col gap-4">
+                <div className="flex items-center gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+                  <Layers size={20} className="text-orange-500" />
+                  <h3 className="text-base sm:text-lg font-bold text-slate-800 dark:text-slate-100 m-0">Initiate Bus Merge</h3>
+                </div>
+
+                <form onSubmit={handleExecuteMerge} className="flex flex-col gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                        <span className="w-5 h-5 rounded-full bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400 flex items-center justify-center text-[10px]">1</span>
+                        Bus to Cancel (Low Attendance):
+                      </label>
+                      <select
+                        required
+                        value={mergeFormData.cancelled_route_id}
+                        onChange={(e) => setMergeFormData(prev => ({ ...prev, cancelled_route_id: e.target.value }))}
+                        className="p-2.5 rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50/40 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-bold outline-none cursor-pointer focus:ring-2 focus:ring-red-400"
+                      >
+                        <option value="">Select bus to cancel...</option>
+                        {routesList
+                          .filter(r => selectedMergeCity === 'All' || (r.city || 'Bareilly') === selectedMergeCity)
+                          .filter(r => !activeMerges.some(m => String(m.cancelledRouteId) === String(r.routeId || r.route_id)))
+                          .map(r => (
+                            <option key={r.routeId || r.route_id} value={r.routeId || r.route_id}>
+                              {r.routeName || r.route_name} (Bus {r.busNumber || r.bus_number}) • {r.city || 'Bareilly'}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                        <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400 flex items-center justify-center text-[10px]">2</span>
+                        Merge Students Into (Target Bus):
+                      </label>
+                      <select
+                        required
+                        value={mergeFormData.target_route_id}
+                        onChange={(e) => setMergeFormData(prev => ({ ...prev, target_route_id: e.target.value }))}
+                        className="p-2.5 rounded-xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/40 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-bold outline-none cursor-pointer focus:ring-2 focus:ring-emerald-400"
+                      >
+                        <option value="">Select target bus...</option>
+                        {routesList
+                          .filter(r => {
+                            if (mergeFormData.cancelled_route_id) {
+                              const cancelledR = routesList.find(cr => String(cr.routeId || cr.route_id) === String(mergeFormData.cancelled_route_id));
+                              if (cancelledR && cancelledR.city) {
+                                return r.city === cancelledR.city && String(r.routeId || r.route_id) !== String(mergeFormData.cancelled_route_id);
+                              }
+                            }
+                            return String(r.routeId || r.route_id) !== String(mergeFormData.cancelled_route_id);
+                          })
+                          .filter(r => !activeMerges.some(m => String(m.cancelledRouteId) === String(r.routeId || r.route_id)))
+                          .map(r => (
+                            <option key={r.routeId || r.route_id} value={r.routeId || r.route_id}>
+                              {r.routeName || r.route_name} (Bus {r.busNumber || r.bus_number}) • Cap: {r.seatingCapacity || 50}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Reason for Merge:</label>
+                      <select
+                        value={mergeFormData.reason}
+                        onChange={(e) => setMergeFormData(prev => ({ ...prev, reason: e.target.value }))}
+                        className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-semibold outline-none cursor-pointer"
+                      >
+                        <option value="low_attendance">Low Passenger Attendance</option>
+                        <option value="vehicle_breakdown">Vehicle Breakdown / Puncture</option>
+                        <option value="driver_unavailable">Driver Unavailable / Emergency</option>
+                        <option value="weather">Inclement Weather</option>
+                        <option value="other">Other Operational Reason</option>
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Operational Notes (Optional):</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Bareilly Mod collection point"
+                        value={mergeFormData.notes}
+                        onChange={(e) => setMergeFormData(prev => ({ ...prev, notes: e.target.value }))}
+                        className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {mergeFormData.cancelled_route_id && mergeFormData.target_route_id && (() => {
+                    const cancelledR = routesList.find(r => String(r.routeId || r.route_id) === String(mergeFormData.cancelled_route_id));
+                    const targetR = routesList.find(r => String(r.routeId || r.route_id) === String(mergeFormData.target_route_id));
+                    const studentCountMoved = usersList.filter(u => u.role === 'passenger' && String(u.routeId || u.route_id) === String(mergeFormData.cancelled_route_id)).length;
+                    const targetCurrentCount = attendanceLogs.filter(a => String(a.routeId || a.route_id) === String(mergeFormData.target_route_id)).length;
+                    const targetCapacity = targetR?.seatingCapacity || 50;
+                    const projectedTotal = targetCurrentCount + studentCountMoved;
+                    const isOver = projectedTotal > targetCapacity;
+
+                    return (
+                      <div className={`p-4 rounded-2xl border ${isOver ? 'bg-orange-50 border-orange-300 dark:bg-orange-950/20 dark:border-orange-800' : 'bg-emerald-50 border-emerald-300 dark:bg-emerald-950/20 dark:border-emerald-800'} transition-all`}>
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Capacity Simulation:</span>
+                          <span className={`text-xs font-extrabold px-2 py-0.5 rounded-full ${isOver ? 'bg-orange-200 text-orange-800 dark:bg-orange-900/60 dark:text-orange-200' : 'bg-emerald-200 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200'}`}>
+                            {isOver ? '⚠️ High Load' : '✅ Fits Comfortably'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                          <div className="p-2 bg-white/80 dark:bg-slate-800/80 rounded-xl">
+                            <span className="text-slate-400 block text-[10px]">Moving From Bus</span>
+                            <span className="font-extrabold text-red-600">+{studentCountMoved} Students</span>
+                          </div>
+                          <div className="p-2 bg-white/80 dark:bg-slate-800/80 rounded-xl">
+                            <span className="text-slate-400 block text-[10px]">Target Present</span>
+                            <span className="font-extrabold text-slate-700 dark:text-slate-300">{targetCurrentCount} Checked In</span>
+                          </div>
+                          <div className="p-2 bg-white/80 dark:bg-slate-800/80 rounded-xl">
+                            <span className="text-slate-400 block text-[10px]">Projected Load</span>
+                            <span className={`font-extrabold ${isOver ? 'text-orange-600' : 'text-emerald-600'}`}>
+                              {projectedTotal} / {targetCapacity} Seats
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  <button
+                    type="submit"
+                    disabled={isMerging || !mergeFormData.cancelled_route_id || !mergeFormData.target_route_id}
+                    className="mt-2 w-full py-3 px-4 bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 disabled:opacity-50 text-white rounded-xl font-bold transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 cursor-pointer border-none"
+                  >
+                    <GitMerge size={18} />
+                    {isMerging ? 'Executing Merge & Syncing...' : 'Execute Bus Merge & Notify Passengers'}
+                  </button>
+                </form>
+              </div>
+
+              {/* Active Merges Today List */}
+              <div className="lg:col-span-5 flex flex-col gap-4">
+                <div className="glass p-6 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 shadow-sm flex flex-col gap-4 flex-1">
+                  <div className="flex justify-between items-center pb-3 border-b border-slate-100 dark:border-slate-800">
+                    <h3 className="text-base sm:text-lg font-bold text-slate-800 dark:text-slate-100 m-0">Active Merges Today</h3>
+                    <span className="text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 font-bold px-2 py-0.5 rounded-full">
+                      {activeMerges.length} Active
+                    </span>
+                  </div>
+
+                  {activeMerges.length === 0 ? (
+                    <div className="text-center py-12 text-slate-400 dark:text-slate-500">
+                      <GitMerge size={36} className="mx-auto mb-2 opacity-40" />
+                      <p className="m-0 text-sm font-semibold">No active merges today</p>
+                      <p className="m-0 text-xs mt-1">All bus routes are operating on normal individual schedules.</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3 max-h-[420px] overflow-y-auto pr-1">
+                      {activeMerges.map(merge => (
+                        <div
+                          key={merge.id}
+                          className="p-4 rounded-2xl border border-orange-200 dark:border-orange-900/50 bg-gradient-to-br from-orange-50/60 to-white/90 dark:from-slate-800/80 dark:to-slate-800/40 flex flex-col gap-2.5 shadow-sm"
+                        >
+                          <div className="flex justify-between items-start">
+                            <div className="flex items-center gap-1.5">
+                              <span className="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded">CANCELLED</span>
+                              <span className="font-bold text-xs text-slate-800 dark:text-slate-200">{merge.cancelledRouteName}</span>
+                            </div>
+                            <span className="text-[10px] font-semibold text-slate-400">
+                              {formatTime(merge.mergedAt || merge.createdAt)}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300 bg-white/70 dark:bg-slate-900/60 p-2 rounded-xl border border-slate-100 dark:border-slate-800">
+                            <span className="text-red-500 font-bold">Bus {merge.cancelledBusNumber || merge.cancelledRouteId}</span>
+                            <ArrowRight size={14} className="text-orange-500 shrink-0" />
+                            <span className="text-emerald-600 dark:text-emerald-400 font-bold">Bus {merge.targetBusNumber || merge.targetRouteId} ({merge.targetRouteName})</span>
+                          </div>
+
+                          <div className="flex justify-between items-center text-[11px] text-slate-500 dark:text-slate-400 pt-1">
+                            <span>Moved: <strong className="text-slate-700 dark:text-slate-200">{merge.studentsMoved || 0} students</strong></span>
+                            <span className="capitalize bg-slate-100 dark:bg-slate-700/60 px-2 py-0.5 rounded-full font-medium">
+                              {(merge.reason || 'low_attendance').replace(/_/g, ' ')}
+                            </span>
+                          </div>
+
+                          <button
+                            onClick={() => handleUndoMerge(merge.id)}
+                            className="mt-1 w-full py-1.5 px-3 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400 text-xs font-bold rounded-xl border border-red-200 dark:border-red-800/40 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <Undo2 size={13} /> Undo Merge & Restore Route
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Merge History Table */}
+            <div className="glass p-6 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 shadow-sm flex flex-col gap-4">
+              <div className="flex items-center gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+                <History size={20} className="text-slate-600 dark:text-slate-300" />
+                <h3 className="text-base sm:text-lg font-bold text-slate-800 dark:text-slate-100 m-0">Merge & Cancellation History</h3>
+              </div>
+
+              {mergeHistory.length === 0 ? (
+                <p className="text-xs text-slate-400 m-0 py-4 text-center">No historical merge events recorded yet.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-200 dark:border-slate-700 text-slate-400 font-bold uppercase tracking-wider">
+                        <th className="py-2.5 px-3">Date / Time</th>
+                        <th className="py-2.5 px-3">Cancelled Bus</th>
+                        <th className="py-2.5 px-3">Target Bus</th>
+                        <th className="py-2.5 px-3 text-center">Students</th>
+                        <th className="py-2.5 px-3">Reason</th>
+                        <th className="py-2.5 px-3">Initiated By</th>
+                        <th className="py-2.5 px-3 text-right">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
+                      {mergeHistory.slice(0, 15).map(hist => (
+                        <tr key={hist.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
+                          <td className="py-2.5 px-3 text-slate-500 whitespace-nowrap">{formatTime(hist.mergedAt || hist.createdAt)}</td>
+                          <td className="py-2.5 px-3 font-bold text-red-500">{hist.cancelledRouteName} ({hist.cancelledBusNumber})</td>
+                          <td className="py-2.5 px-3 font-bold text-emerald-600 dark:text-emerald-400">{hist.targetRouteName} ({hist.targetBusNumber})</td>
+                          <td className="py-2.5 px-3 text-center font-bold text-slate-700 dark:text-slate-300">{hist.studentsMoved || 0}</td>
+                          <td className="py-2.5 px-3 capitalize text-slate-500">{(hist.reason || 'low_attendance').replace(/_/g, ' ')}</td>
+                          <td className="py-2.5 px-3 text-slate-500">{hist.initiatedBy || 'Admin'}</td>
+                          <td className="py-2.5 px-3 text-right">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                              hist.status === 'active' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300' :
+                              hist.status === 'undone' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300' :
+                              'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                            }`}>
+                              {hist.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
       </main>
 

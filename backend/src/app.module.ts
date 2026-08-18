@@ -22,6 +22,8 @@ import { ParentsModule } from './parents/parents.module';
 
 import { ThrottlerModule } from '@nestjs/throttler';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ScheduleModule } from '@nestjs/schedule';
+import { MergeModule } from './merge/merge.module';
 
 @Module({
   imports: [
@@ -50,6 +52,8 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     HealthModule,
     StreamsModule,
     ParentsModule,
+    ScheduleModule.forRoot(),
+    MergeModule,
   ],
   controllers: [AppController],
   providers: [AppService],

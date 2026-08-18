@@ -198,7 +198,7 @@ const Login = () => {
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.3rem'
               }}
             >
-              {type === 'passenger' ? <><GraduationCap size={16} /> Student</> : 
+              {type === 'passenger' ? <><GraduationCap size={16} /> Passenger</> : 
                type === 'parent' ? <><Users size={16} /> Parent</> : 
                type === 'transport_incharge' ? <><Bus size={16} /> T.I.</> : 
                <><Shield size={16} /> Admin</>}
@@ -244,7 +244,7 @@ const Login = () => {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 style={{
-                  width: '100%', padding: '0.8rem 2.8rem 0.8rem 2.8rem',
+                  width: '100%', padding: '0.8rem 3.5rem 0.8rem 2.8rem',
                   borderRadius: '12px', border: '1px solid rgba(255,255,255,0.2)',
                   fontSize: '1rem', outline: 'none', transition: 'border-color 0.3s',
                   background: 'rgba(255,255,255,0.05)', color: 'white',

@@ -25,6 +25,7 @@ export class SosService {
         url:
           this.configService.get<string>('redis.url') ||
           'redis://localhost:6379',
+        socket: { reconnectStrategy: false }
       });
       this.redisClient.on('error', (err: any) => {
         this.logger.debug(`Redis SOS client error: ${err.message}`);

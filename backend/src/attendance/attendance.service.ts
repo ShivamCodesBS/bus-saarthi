@@ -46,10 +46,44 @@ export class AttendanceService {
           continue;
         }
 
+        // Route eligibility check:
+        // 1. Direct match: student is assigned to this bus route
+        // 2. Merged route: student's assigned route was merged into this bus route today
+        let isEligible = !passenger.routeId || String(passenger.routeId) === String(route_id);
+        let originalRouteId: string | null = null;
+        let mergeEventId: string | null = null;
+
+        if (!isEligible && passenger.routeId) {
+          const activeMerge = await this.prisma.mergeEvent.findFirst({
+            where: {
+              cancelledRouteId: String(passenger.routeId),
+              targetRouteId: String(route_id),
+              status: 'active',
+              createdAt: { gte: todayStart },
+            },
+          });
+
+          if (activeMerge) {
+            isEligible = true;
+            originalRouteId = String(passenger.routeId);
+            mergeEventId = activeMerge.id;
+          }
+        }
+
+        if (!isEligible) {
+          console.warn(
+            `Student ${passenger.loginId} (assigned: ${passenger.routeId}) is not eligible on route ${route_id}`,
+          );
+          results.errors++;
+          continue;
+        }
+
         await this.prisma.attendance.create({
           data: {
             passengerId: passenger.loginId,
             routeId: route_id,
+            originalRouteId,
+            mergeEventId,
             name: passenger.name,
             feeStatus: passenger.feeStatus,
             confidence: record.confidence || undefined,
@@ -66,6 +100,8 @@ export class AttendanceService {
           passenger_id: passenger.loginId,
           name: passenger.name,
           route_id: route_id,
+          original_route_id: originalRouteId,
+          is_merged: !!originalRouteId,
           fee_status: passenger.feeStatus,
         });
       } catch (err) {

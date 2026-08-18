@@ -8,71 +8,41 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-enum UserRole {
-  passenger
-  admin
-  driver
-  transport_incharge
-  tech_admin
-  parent
-}
-
-enum FeeStatus {
-  paid
-  unpaid
-  partial
-}
-
-enum GrievanceStatus {
-  pending
-  resolved
-}
-
-enum LogLevel {
-  log
-  warn
-  error
-  debug
-  verbose
-  fatal
-}
-
 model User {
-  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  loginId         String    @unique @map("login_id") @db.VarChar(50)
-  name            String    @db.VarChar(100)
-  password        String?
-  role            UserRole
-  routeId         String?   @map("route_id")
-  feeStatus       FeeStatus @default(unpaid) @map("fee_status")
-  phone           String?   @db.VarChar(20)
-  email           String?   @db.VarChar(100)
-  profilePic      String?   @map("profile_pic")
-  designation     String?   @db.VarChar(100)
-  lastLogin       DateTime? @map("last_login") @db.Timestamptz(6)
-  locationLat     Float?    @map("location_lat")
-  locationLng     Float?    @map("location_lng")
-  licenseNumber   String?   @map("license_number") @db.VarChar(50)
-  licenseExpiry   DateTime? @map("license_expiry") @db.Timestamptz(6)
-  experienceYears Int?      @map("experience_years")
-  bloodGroup      String?   @map("blood_group") @db.VarChar(10)
-  parentName      String?   @map("parent_name") @db.VarChar(100)
-  parentPhone     String?   @map("parent_phone") @db.VarChar(20)
-  dob             DateTime? @db.Timestamptz(6)
-  address         String?
-  gradeClass      String?   @map("grade_class") @db.VarChar(50)
-  wakeAlarm       Json?     @map("wake_alarm") @db.Json
-  faceEnrolledAt  DateTime? @map("face_enrolled_at") @db.Timestamptz(6)
-  awsFaceId       String?   @map("aws_face_id") @db.VarChar(100)
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  route             Route?             @relation(fields: [routeId], references: [routeId])
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  loginId           String             @unique @map("login_id") @db.VarChar(50)
+  name              String             @db.VarChar(100)
+  password          String?
+  role              UserRole
+  routeId           String?            @map("route_id")
+  feeStatus         FeeStatus          @default(unpaid) @map("fee_status")
+  phone             String?            @db.VarChar(20)
+  email             String?            @db.VarChar(100)
+  profilePic        String?            @map("profile_pic")
+  designation       String?            @db.VarChar(100)
+  lastLogin         DateTime?          @map("last_login") @db.Timestamptz(6)
+  locationLat       Float?             @map("location_lat")
+  locationLng       Float?             @map("location_lng")
+  licenseNumber     String?            @map("license_number") @db.VarChar(50)
+  licenseExpiry     DateTime?          @map("license_expiry") @db.Timestamptz(6)
+  experienceYears   Int?               @map("experience_years")
+  bloodGroup        String?            @map("blood_group") @db.VarChar(10)
+  parentName        String?            @map("parent_name") @db.VarChar(100)
+  parentPhone       String?            @map("parent_phone") @db.VarChar(20)
+  dob               DateTime?          @db.Timestamptz(6)
+  address           String?
+  gradeClass        String?            @map("grade_class") @db.VarChar(50)
+  faceEnrolledAt    DateTime?          @map("face_enrolled_at") @db.Timestamptz(6)
+  awsFaceId         String?            @map("aws_face_id") @db.VarChar(100)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  wakeAlarm         Json?              @map("wake_alarm") @db.Json
   attendanceRecords Attendance[]
-  grievances        Grievance[]
   grievanceUpvotes  GrievanceUpvote[]
+  grievances        Grievance[]
   leaves            Leave[]
   pushSubscriptions PushSubscription[]
+  route             Route?             @relation(fields: [routeId], references: [routeId])
 
   @@map("users")
 }
@@ -91,51 +61,49 @@ model Route {
   insuranceExpiry    DateTime? @map("insurance_expiry") @db.Timestamptz(6)
   speedLimit         Int       @default(60) @map("speed_limit")
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  users User[]
+  users              User[]
 
   @@map("routes")
 }
 
 model Attendance {
-  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  passengerId String     @map("passenger_id") @db.VarChar(50)
-  routeId     String     @map("route_id") @db.VarChar(20)
-  name        String?    @db.VarChar(100)
-  feeStatus   FeeStatus? @map("fee_status")
-  confidence  Float?     @db.Real
-  timestamp   DateTime   @default(now()) @db.Timestamptz(6)
-
-  passenger User @relation(fields: [passengerId], references: [loginId], onDelete: Cascade)
+  id              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  passengerId     String     @map("passenger_id") @db.VarChar(50)
+  routeId         String     @map("route_id") @db.VarChar(20)
+  name            String?    @db.VarChar(100)
+  feeStatus       FeeStatus? @map("fee_status")
+  confidence      Float?     @db.Real
+  timestamp       DateTime   @default(now()) @db.Timestamptz(6)
+  originalRouteId String?    @map("original_route_id") @db.VarChar(20)
+  mergeEventId    String?    @map("merge_event_id") @db.Uuid
+  passenger       User       @relation(fields: [passengerId], references: [loginId], onDelete: Cascade)
 
   @@map("attendance")
 }
 
 model Grievance {
-  id        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  loginId   String          @map("login_id") @db.VarChar(50)
-  route     String          @db.VarChar(20)
-  text      String
-  realName  String?         @map("real_name") @db.VarChar(100)
-  type      String?         @db.VarChar(50)
-  mediaUrl  String?         @map("media_url")
-  category  String?         @db.VarChar(100)
-  status    GrievanceStatus @default(pending)
-  upvotes   Int             @default(0)
-  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  user          User              @relation(fields: [loginId], references: [loginId], onDelete: Cascade)
+  id            String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  loginId       String            @map("login_id") @db.VarChar(50)
+  route         String            @db.VarChar(20)
+  text          String
+  realName      String?           @map("real_name") @db.VarChar(100)
+  type          String?           @db.VarChar(50)
+  mediaUrl      String?           @map("media_url")
+  status        GrievanceStatus   @default(pending)
+  upvotes       Int               @default(0)
+  createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  category      String?           @db.VarChar(100)
   upvoteRecords GrievanceUpvote[]
+  user          User              @relation(fields: [loginId], references: [loginId], onDelete: Cascade)
 
   @@map("grievances")
 }
 
 model GrievanceUpvote {
-  grievanceId String @map("grievance_id") @db.Uuid
-  loginId     String @map("login_id") @db.VarChar(50)
-
-  grievance Grievance @relation(fields: [grievanceId], references: [id], onDelete: Cascade)
-  user      User      @relation(fields: [loginId], references: [loginId], onDelete: Cascade)
+  grievanceId String    @map("grievance_id") @db.Uuid
+  loginId     String    @map("login_id") @db.VarChar(50)
+  grievance   Grievance @relation(fields: [grievanceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [loginId], references: [loginId], onDelete: Cascade)
 
   @@id([grievanceId, loginId])
   @@map("grievance_upvotes")
@@ -145,8 +113,7 @@ model Leave {
   id      String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   loginId String   @map("login_id") @db.VarChar(50)
   date    DateTime @db.Date
-
-  user User @relation(fields: [loginId], references: [loginId], onDelete: Cascade)
+  user    User     @relation(fields: [loginId], references: [loginId], onDelete: Cascade)
 
   @@unique([loginId, date])
   @@map("leaves")
@@ -177,8 +144,7 @@ model PushSubscription {
   loginId      String @map("login_id") @db.VarChar(50)
   subscription Json
   deviceType   String @default("web") @map("device_type") @db.VarChar(20)
-
-  user User @relation(fields: [loginId], references: [loginId], onDelete: Cascade)
+  user         User   @relation(fields: [loginId], references: [loginId], onDelete: Cascade)
 
   @@map("push_subscriptions")
 }
@@ -215,4 +181,68 @@ model ParentChildLink {
 
   @@unique([parentLoginId, childLoginId])
   @@map("parent_child_links")
+}
+
+model MergeEvent {
+  id                 String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  cancelledRouteId   String      @map("cancelled_route_id") @db.VarChar(50)
+  targetRouteId      String      @map("target_route_id") @db.VarChar(50)
+  reason             MergeReason @default(low_attendance)
+  status             MergeStatus @default(active)
+  initiatedBy        String      @map("initiated_by") @db.VarChar(50)
+  studentsMoved      Int         @default(0) @map("students_moved")
+  cancelledBusNumber String?     @map("cancelled_bus_number") @db.VarChar(30)
+  targetBusNumber    String?     @map("target_bus_number") @db.VarChar(30)
+  cancelledRouteName String?     @map("cancelled_route_name") @db.VarChar(100)
+  targetRouteName    String?     @map("target_route_name") @db.VarChar(100)
+  notes              String?
+  mergedAt           DateTime    @default(now()) @map("merged_at") @db.Timestamptz(6)
+  unmergedAt         DateTime?   @map("unmerged_at") @db.Timestamptz(6)
+  expiresAt          DateTime    @map("expires_at") @db.Timestamptz(6)
+  createdAt          DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("merge_events")
+}
+
+enum UserRole {
+  passenger
+  admin
+  driver
+  transport_incharge
+  tech_admin
+  parent
+}
+
+enum FeeStatus {
+  paid
+  unpaid
+  partial
+}
+
+enum GrievanceStatus {
+  pending
+  resolved
+}
+
+enum LogLevel {
+  log
+  warn
+  error
+  debug
+  verbose
+  fatal
+}
+
+enum MergeStatus {
+  active
+  undone
+  expired
+}
+
+enum MergeReason {
+  low_attendance
+  vehicle_breakdown
+  driver_unavailable
+  weather
+  other
 }

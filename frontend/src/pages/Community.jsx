@@ -67,7 +67,7 @@ const Community = () => {
         setComplaints(data);
 
         // Build routeId → friendly name map
-        const routes = Array.isArray(routesRes.data) ? routesRes.data : [];
+        const routes = Array.isArray(routesRes.data) ? routesRes.data : (routesRes.data?.data || []);
         const map = {};
         routes.forEach(r => { map[r.routeId] = r.routeName || `Route ${r.routeId}`; });
         setRouteMap(map);
