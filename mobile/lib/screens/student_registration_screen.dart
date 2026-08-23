@@ -1,18 +1,19 @@
-import 'dart:typed_data';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'dart:io' show Platform;
 
 import '../face_recognition/face_detector.dart';
 import '../face_recognition/embedding_store.dart';
+import '../face_recognition/face_quality_engine.dart';
+import '../face_recognition/face_aligner.dart';
+import '../face_recognition/arcface_service.dart';
+import '../face_recognition/face_tracker.dart';
+import '../face_recognition/recognition_config.dart';
 import '../services/api_service.dart';
 import '../core/theme.dart';
 import 'widgets/loading_overlay.dart';
 
-/// Student face enrollment screen — ArcFace on-device.
-///
-/// Flow: Camera → ML Kit face detection → ArcFace embedding → Store locally.
-/// Backend is notified that enrollment happened (metadata only, no image upload).
 class StudentRegistrationScreen extends StatefulWidget {
   const StudentRegistrationScreen({Key? key}) : super(key: key);
 
@@ -22,46 +23,70 @@ class StudentRegistrationScreen extends StatefulWidget {
 
 class _StudentRegistrationScreenState extends State<StudentRegistrationScreen> {
   CameraController? _controller;
-  late final FaceDetectionService _detectionService;
-  late final EmbeddingStore _embeddingStore;
+  CameraDescription? _camera;
+  
+  late final FaceDetectionService _detector;
+  late final FaceQualityEngine _qualityEngine;
+  late final FaceAligner _aligner;
+  late final ArcFaceService _recognizer;
+  late final FaceTracker _tracker;
+  late final EmbeddingStore _store;
   final ApiService _apiService = ApiService();
+
   final TextEditingController _studentIdController = TextEditingController();
 
-  bool _isCameraInitialized = false;
-  bool _isModelReady = false;
+  bool _isInitialized = false;
   bool _isCapturing = false;
-  String _status = 'Loading ArcFace model...';
+  String _status = 'Loading models...';
+  
+  // Auto-capture state
+  int _capturedFrames = 0;
+  final List<FaceTemplate> _collectedTemplates = [];
+  bool _isProcessingFrame = false;
+  
+  bool _hasFrontal = false;
+  bool _hasLeft = false;
+  bool _hasRight = false;
 
   @override
   void initState() {
     super.initState();
-    _detectionService = FaceDetectionService();
-    _embeddingStore = EmbeddingStore();
+    _detector = FaceDetectionService();
+    _qualityEngine = FaceQualityEngine();
+    _aligner = FaceAligner();
+    _recognizer = ArcFaceService();
+    _tracker = FaceTracker();
+    _store = EmbeddingStore();
+    
     _initialize();
   }
 
   Future<void> _initialize() async {
     try {
-      await _embeddingStore.initialize();
-      await _detectionService.initialize();
-      _isModelReady = true;
-      if (mounted) setState(() => _status = 'Position your face in the oval and press Capture');
+      await _store.database;
+      _detector.initialize();
+      await _recognizer.initialize();
+      
+      if (mounted) setState(() => _status = 'Enter Student ID to begin auto-capture');
       await _initCamera();
+      
+      _isInitialized = true;
+      if (mounted) setState(() {});
     } catch (e) {
-      if (mounted) setState(() => _status = 'Error loading ArcFace model: $e');
+      if (mounted) setState(() => _status = 'Error loading models: $e');
     }
   }
 
   Future<void> _initCamera() async {
     final cameras = await availableCameras();
-    final front = cameras.firstWhere(
+    _camera = cameras.firstWhere(
       (c) => c.lensDirection == CameraLensDirection.front,
       orElse: () => cameras.first,
     );
 
     _controller = CameraController(
-      front,
-      ResolutionPreset.high,
+      _camera!,
+      ResolutionPreset.medium,
       enableAudio: false,
       imageFormatGroup: Platform.isAndroid
           ? ImageFormatGroup.nv21
@@ -69,74 +94,157 @@ class _StudentRegistrationScreenState extends State<StudentRegistrationScreen> {
     );
 
     await _controller!.initialize();
-    if (!mounted) return;
-    setState(() => _isCameraInitialized = true);
   }
 
-  Future<void> _captureAndEnroll() async {
+  void _startAutoCapture() async {
     final studentId = _studentIdController.text.trim();
     if (studentId.isEmpty) {
       _showSnack('Please enter a Student ID', AppTheme.orange);
       return;
     }
 
-    if (!_isModelReady) {
-      _showSnack('ArcFace model not ready yet', AppTheme.dangerColor);
-      return;
-    }
-
     setState(() {
       _isCapturing = true;
-      _status = 'Capturing face...';
+      _capturedFrames = 0;
+      _collectedTemplates.clear();
+      _hasFrontal = false;
+      _hasLeft = false;
+      _hasRight = false;
+      _status = 'Look straight, then slowly turn head left and right.';
     });
 
-    BusSarthiLoader.show(context, label: 'Detecting face...');
-
+    _controller!.startImageStream((CameraImage image) {
+      _processEnrollmentFrame(image, studentId);
+    });
+  }
+  
+  Future<void> _processEnrollmentFrame(CameraImage image, String studentId) async {
+    if (_isProcessingFrame || !_isCapturing) return;
+    _isProcessingFrame = true;
+    
     try {
-      // Capture + detect + extract embedding (all on-device)
-      final result = await _detectionService.captureAndEmbed(_controller!);
-
-      if (result == null) {
-        throw Exception('Could not capture image. Please try again.');
+      final faces = await _detector.detectFaces(image, _camera!);
+      if (faces.isEmpty) {
+        if (mounted) setState(() => _status = 'No face detected');
+        _isProcessingFrame = false;
+        return;
       }
-
-      if (!result.isSuccess) {
-        throw Exception(result.error ?? 'Face detection failed.');
+      
+      if (faces.length > 1) {
+        if (mounted) setState(() => _status = 'Multiple faces detected. Please stand alone.');
+        _isProcessingFrame = false;
+        return;
       }
-
-      if (mounted) {
-        BusSarthiLoader.hide(context);
-        BusSarthiLoader.show(context, label: 'Saving face embedding...');
+      
+      final trackedFaces = _tracker.update(faces);
+      if (trackedFaces.isEmpty) {
+        _isProcessingFrame = false;
+        return;
       }
-
-      setState(() => _status = 'Storing ArcFace embedding locally...');
-
-      // Store embedding in local SQLite
-      await _embeddingStore.upsert(
-        loginId: studentId,
-        name: studentId, // Name will be synced from backend later
-        feeStatus: 'unpaid',
-        embedding: result.embedding!,
+      
+      final track = trackedFaces.first;
+      final quality = _qualityEngine.score(track, image, _camera!.lensDirection);
+      
+      if (quality.totalScore < RecognitionConfig.minEnrollmentQuality) {
+        if (mounted) setState(() => _status = 'Quality too low. Adjust lighting or come closer.');
+        _isProcessingFrame = false;
+        return;
+      }
+      
+      // Face is good enough, extract embedding
+      final aligned = _aligner.align(image, track, _camera!.lensDirection);
+      final embedding = await _recognizer.getEmbeddingFromAlignedImage(aligned);
+      
+      if (embedding != null) {
+        // Determine pose category
+        final yaw = track.face.headEulerAngleY ?? 0;
+        String pose = 'frontal';
+        if (yaw > 12) {
+          pose = 'left';  // Mirrored front camera
+          _hasLeft = true;
+        } else if (yaw < -12) {
+          pose = 'right';
+          _hasRight = true;
+        } else {
+          _hasFrontal = true;
+        }
+        
+        // Skip adding if we already have too many of this pose (e.g., max 10 per pose)
+        final poseCount = _collectedTemplates.where((t) => t.poseCategory == pose).length;
+        if (poseCount < 10) {
+          _collectedTemplates.add(FaceTemplate(
+            loginId: studentId,
+            embedding: embedding,
+            poseCategory: pose,
+            qualityScore: quality.totalScore,
+            isCentroid: false,
+          ));
+        }
+        
+        if (mounted) {
+          setState(() {
+            _capturedFrames = _collectedTemplates.length;
+            
+            String missing = [];
+            if (!_hasFrontal) missing.add('Front');
+            if (!_hasLeft) missing.add('Left');
+            if (!_hasRight) missing.add('Right');
+            
+            if (missing.isNotEmpty) {
+              _status = 'Captured $_capturedFrames. Need: ${missing.join(", ")}';
+            } else {
+              _status = 'Captured $_capturedFrames frames.';
+            }
+          });
+        }
+        
+        final hasAllPoses = _hasFrontal && _hasLeft && _hasRight;
+        if (_capturedFrames >= RecognitionConfig.minEnrollmentFrames && hasAllPoses) {
+          _finishEnrollment(studentId);
+        } else if (_capturedFrames >= RecognitionConfig.maxEnrollmentFrames) {
+          // Force finish if we hit max frames, even without all poses
+          _finishEnrollment(studentId);
+        }
+      }
+    } catch (e) {
+      print('Enrollment frame error: $e');
+    } finally {
+      _isProcessingFrame = false;
+    }
+  }
+  
+  Future<void> _finishEnrollment(String studentId) async {
+    setState(() => _isCapturing = false);
+    await _controller!.stopImageStream();
+    
+    BusSarthiLoader.show(context, label: 'Saving multi-template profile...');
+    
+    try {
+      // 1. Save student profile
+      await _store.upsertStudent(
+        studentId, 
+        studentId, // Name will be synced from backend later
+        'unpaid', 
+        null, 
+        _collectedTemplates.map((t) => t.qualityScore).reduce((a, b) => a + b) / _collectedTemplates.length
       );
-
-      // Notify backend that enrollment happened (metadata only — no image)
+      
+      // 2. Save robust clustered templates (centroids)
+      await _store.clusterAndSaveTemplates(studentId, _collectedTemplates);
+      
+      // 3. Notify backend
       _apiService.markFaceEnrolled(studentId); // fire-and-forget
-
+      
       if (mounted) BusSarthiLoader.hide(context);
-
+      
       if (mounted) {
-        await _showSuccessDialog(studentId);
+        await _showSuccessDialog(studentId, _collectedTemplates.length);
         if (mounted) Navigator.pop(context);
       }
     } catch (e) {
-      print('[StudentRegistration] error: $e');
-      if (mounted) {
-        BusSarthiLoader.hide(context);
-        _showSnack('Error: $e', AppTheme.dangerColor);
-        setState(() => _status = 'Position your face in the oval and press Capture');
-      }
-    } finally {
-      if (mounted) setState(() => _isCapturing = false);
+      if (mounted) BusSarthiLoader.hide(context);
+      _showSnack('Save failed: $e', AppTheme.dangerColor);
+      setState(() => _status = 'Enter Student ID to begin auto-capture');
     }
   }
 
@@ -152,7 +260,7 @@ class _StudentRegistrationScreenState extends State<StudentRegistrationScreen> {
     );
   }
 
-  Future<void> _showSuccessDialog(String studentId) {
+  Future<void> _showSuccessDialog(String studentId, int templates) {
     return showDialog(
       context: context,
       barrierDismissible: false,
@@ -175,30 +283,14 @@ class _StudentRegistrationScreenState extends State<StudentRegistrationScreen> {
               ),
               const SizedBox(height: 20),
               const Text(
-                'Face Enrolled!',
+                'Enrollment Complete!',
                 style: TextStyle(color: AppTheme.black, fontSize: 22, fontWeight: FontWeight.w900),
               ),
               const SizedBox(height: 8),
               Text(
-                'Student $studentId has been enrolled locally using ArcFace.\nFace recognition is ready for attendance.',
+                'Student $studentId enrolled successfully with $templates high-quality templates.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: AppTheme.blackSoft, fontSize: 13, height: 1.5),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF22C55E).withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.security_rounded, size: 14, color: Color(0xFF22C55E)),
-                    SizedBox(width: 6),
-                    Text('Stored on-device • No cloud upload', style: TextStyle(fontSize: 11, color: Color(0xFF22C55E))),
-                  ],
-                ),
               ),
               const SizedBox(height: 24),
               SizedBox(
@@ -222,9 +314,12 @@ class _StudentRegistrationScreenState extends State<StudentRegistrationScreen> {
 
   @override
   void dispose() {
+    if (_controller != null && _controller!.value.isStreamingImages) {
+      _controller!.stopImageStream();
+    }
     _controller?.dispose();
-    _detectionService.dispose();
-    _embeddingStore.dispose();
+    _detector.dispose();
+    _recognizer.dispose();
     _studentIdController.dispose();
     super.dispose();
   }
@@ -240,10 +335,10 @@ class _StudentRegistrationScreenState extends State<StudentRegistrationScreen> {
           icon: const Icon(Icons.arrow_back_ios_new_rounded, color: AppTheme.black, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Register Face', style: TextStyle(color: AppTheme.black, fontWeight: FontWeight.w800, fontSize: 18)),
+        title: const Text('Auto-Enroll Face', style: TextStyle(color: AppTheme.black, fontWeight: FontWeight.w800, fontSize: 18)),
         centerTitle: true,
       ),
-      body: (!_isCameraInitialized || !_isModelReady)
+      body: !_isInitialized
           ? Center(child: BusSarthiLoader(size: 80, label: _status))
           : Column(
               children: [
@@ -267,25 +362,26 @@ class _StudentRegistrationScreenState extends State<StudentRegistrationScreen> {
                         ),
                       ),
                       const Center(child: _OvalFaceGuide()),
-                      // ArcFace badge
-                      Positioned(
-                        top: 12, right: 12,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.black54,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
+                      
+                      // Progress Bar
+                      if (_isCapturing)
+                        Positioned(
+                          bottom: 20, left: 40, right: 40,
+                          child: Column(
                             children: [
-                              Icon(Icons.face_retouching_natural, color: Colors.white70, size: 12),
-                              SizedBox(width: 4),
-                              Text('ArcFace On-Device', style: TextStyle(color: Colors.white70, fontSize: 10)),
+                              Text('$_capturedFrames / ${RecognitionConfig.maxEnrollmentFrames} frames', 
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 8),
+                              LinearProgressIndicator(
+                                value: _capturedFrames / RecognitionConfig.maxEnrollmentFrames,
+                                backgroundColor: Colors.black54,
+                                color: AppTheme.orange,
+                                minHeight: 8,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
                             ],
                           ),
                         ),
-                      ),
                     ],
                   ),
                 ),
@@ -349,16 +445,16 @@ class _StudentRegistrationScreenState extends State<StudentRegistrationScreen> {
                               ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
                               : const Icon(Icons.face_retouching_natural, color: Colors.white),
                           label: Text(
-                            _isCapturing ? 'Processing...' : 'Capture & Enroll',
+                            _isCapturing ? 'Auto-Capturing...' : 'Start Auto-Capture',
                             style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
                           ),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: _isCapturing ? Colors.grey.shade300 : AppTheme.orange,
+                            backgroundColor: _isCapturing ? Colors.grey.shade400 : AppTheme.orange,
                             elevation: _isCapturing ? 0 : 4,
                             shadowColor: AppTheme.orange.withOpacity(0.4),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                           ),
-                          onPressed: _isCapturing ? null : _captureAndEnroll,
+                          onPressed: _isCapturing ? null : _startAutoCapture,
                         ),
                       ),
                     ],
@@ -370,7 +466,6 @@ class _StudentRegistrationScreenState extends State<StudentRegistrationScreen> {
   }
 }
 
-// ── Oval Face Guide ───────────────────────────────────────────────────────────
 class _OvalFaceGuide extends StatefulWidget {
   const _OvalFaceGuide();
 

@@ -33,7 +33,7 @@ class OfflineQueueService {
     ''');
   }
 
-  Future<void> enqueueAttendance(AttendancePayload payload) async {
+  Future<void> enqueueAttendance(SyncAttendancePayload payload) async {
     final db = await database;
     await db.insert('attendance_queue', {
       'payload': jsonEncode(payload.toJson()),

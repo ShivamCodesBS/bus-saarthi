@@ -19,21 +19,50 @@ class SyncService {
     if (queue.isEmpty) return;
 
     print('Attempting to sync ${queue.length} offline records...');
-
+    
+    // Group by route_id (assuming we stored SyncAttendancePayload in queue)
+    Map<String, List<Map<String, dynamic>>> groupedByRoute = {};
+    
     for (var item in queue) {
       try {
         final payloadJson = jsonDecode(item['payload']);
-        // Reconstruct AttendancePayload (this assumes it's an attendance payload for now)
-        final data = AttendanceData.fromJson(payloadJson['data']);
-        final payload = AttendancePayload(data: data);
-
-        final success = await _apiService.postAttendance(payload);
-        if (success) {
-          await _queueService.deleteItem(item['id']);
-          print('Synced record ${item['id']}');
+        final payload = SyncAttendancePayload.fromJson(payloadJson);
+        
+        if (!groupedByRoute.containsKey(payload.routeId)) {
+          groupedByRoute[payload.routeId] = [];
         }
+        
+        // Save the db row id and the record itself
+        groupedByRoute[payload.routeId]!.add({
+          'db_id': item['id'],
+          'record': payload.records.first,
+        });
       } catch (e) {
-        print('Failed to sync record ${item['id']}: $e');
+        print('Error parsing queue item ${item['id']}: $e');
+        // Delete malformed items
+        await _queueService.deleteItem(item['id']);
+      }
+    }
+
+    // Send bulk request per route
+    for (var entry in groupedByRoute.entries) {
+      final routeId = entry.key;
+      final items = entry.value;
+      
+      final bulkPayload = SyncAttendancePayload(
+        routeId: routeId,
+        records: items.map((e) => e['record'] as AttendanceRecord).toList(),
+      );
+
+      final success = await _apiService.postAttendance(bulkPayload);
+      if (success) {
+        // Delete all successful items from queue
+        for (var item in items) {
+          await _queueService.deleteItem(item['db_id']);
+        }
+        print('Successfully bulk synced ${items.length} records for route $routeId');
+      } else {
+        print('Failed to bulk sync route $routeId');
       }
     }
   }

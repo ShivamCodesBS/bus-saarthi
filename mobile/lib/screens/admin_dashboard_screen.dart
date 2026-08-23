@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../core/theme.dart';
 import 'student_registration_screen.dart';
+import 'benchmark_screen.dart';
 
 import '../services/api_service.dart';
 
@@ -156,6 +157,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const StudentRegistrationScreen()),
+              ),
+            ),
+
+            const SizedBox(height: 14),
+            
+            // ── Benchmark Mode Card ────────────────────────────────────
+            _ActionCard(
+              icon: Icons.speed_rounded,
+              title: 'FAR/FRR Benchmark',
+              subtitle: 'Test face recognition thresholds and measure real-world latency.',
+              color: const Color(0xFF8B5CF6), // Purple
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const BenchmarkScreen()),
               ),
             ),
 

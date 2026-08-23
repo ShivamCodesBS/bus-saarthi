@@ -8,19 +8,22 @@ class AttendanceProvider extends ChangeNotifier {
   final ApiService _apiService = ApiService();
   final OfflineQueueService _queueService = OfflineQueueService();
   
-  final List<AttendanceData> _recentCheckIns = [];
-  List<AttendanceData> get recentCheckIns => _recentCheckIns;
+  final List<AttendanceRecord> _recentCheckIns = [];
+  List<AttendanceRecord> get recentCheckIns => _recentCheckIns;
 
-  void addAttendance(AttendanceData data) async {
+  void addAttendance(AttendanceRecord record, String routeId) async {
     // Keep only last 20 check-ins in memory for the UI log
-    _recentCheckIns.insert(0, data);
+    _recentCheckIns.insert(0, record);
     if (_recentCheckIns.length > 20) {
       _recentCheckIns.removeLast();
     }
     notifyListeners();
 
     // Post to backend or queue if offline
-    final payload = AttendancePayload(data: data);
+    final payload = SyncAttendancePayload(
+      routeId: routeId,
+      records: [record],
+    );
     
     final connectivityResult = await (Connectivity().checkConnectivity());
     if (!connectivityResult.contains(ConnectivityResult.none)) {

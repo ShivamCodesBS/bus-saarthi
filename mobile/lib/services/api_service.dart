@@ -20,14 +20,14 @@ class ApiService {
   // ── Attendance Sync ────────────────────────────────────────────────────────
 
   /// Post a locally-matched attendance record to the backend for persistence.
-  Future<bool> postAttendance(AttendancePayload payload) async {
+  Future<bool> postAttendance(SyncAttendancePayload payload) async {
     try {
       final response = await _dio.post(
         '/api/sync/attendance',
-        data: payload.data.toJson(),
+        data: payload.toJson(),
         options: Options(headers: {'Content-Type': 'application/json'}),
       );
-      return response.statusCode == 200;
+      return response.statusCode == 200 || response.statusCode == 201;
     } on DioException catch (e) {
       print('[ApiService] postAttendance error: ${e.type} — ${e.message}');
       return false;

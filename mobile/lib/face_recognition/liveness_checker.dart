@@ -1,51 +1,111 @@
-import 'face_detector.dart';
+import 'dart:math';
+import 'package:flutter/material.dart';
+import 'face_tracker.dart';
+import 'arcface_service.dart';
+import 'recognition_config.dart';
 
-/// Basic on-device liveness detection using ML Kit face classification.
-///
-/// Uses eye open probability from ML Kit to detect blinks, which helps
-/// prevent spoofing with static photos.
+class LivenessResult {
+  final bool isLive;
+  final double score;
+  final String reason;
+
+  LivenessResult({
+    required this.isLive,
+    required this.score,
+    required this.reason,
+  });
+}
+
 class LivenessChecker {
-  int _blinkCount = 0;
-  bool _eyesClosed = false;
-  static const double _eyeClosedThreshold = 0.3;
-  static const double _eyeOpenThreshold = 0.7;
-
-  /// Process a detected face and track blink events.
-  /// Returns true if a blink was just detected on this frame.
-  bool processFace(DetectedFace face) {
-    final leftEye = face.leftEyeOpenProbability ?? 1.0;
-    final rightEye = face.rightEyeOpenProbability ?? 1.0;
-
-    final avgEyeOpen = (leftEye + rightEye) / 2;
-
-    if (!_eyesClosed && avgEyeOpen < _eyeClosedThreshold) {
-      _eyesClosed = true;
-    } else if (_eyesClosed && avgEyeOpen > _eyeOpenThreshold) {
-      _eyesClosed = false;
-      _blinkCount++;
-      return true; // Blink detected
+  /// Checks liveness passively using accumulated tracking data.
+  /// Normal flow requires no user interaction.
+  LivenessResult check(TrackedFace track) {
+    if (!RecognitionConfig.livenessEnabled) {
+      return LivenessResult(isLive: true, score: 1.0, reason: "Liveness disabled");
     }
 
-    return false;
+    if (track.positionHistory.length < 3 || track.embeddingHistory.length < 2) {
+      return LivenessResult(isLive: true, score: 0.5, reason: "Insufficient data, assuming live");
+    }
+
+    // 1. Temporal Movement (face moves naturally over frames)
+    final double movementScore = _checkMovement(track.positionHistory);
+    
+    // 2. Embedding Variance (live face produces slightly different embeddings; photo produces identical)
+    final double embeddingVarianceScore = _checkEmbeddingVariance(track.embeddingHistory);
+    
+    // 3. 3D Pose Variation (live faces have subtle 3D rotational jitter, flat photos do not)
+    final double poseVariationScore = _checkPoseVariation(track.yawHistory, track.pitchHistory);
+
+    // Composite score
+    final double totalScore = (movementScore * 0.25) + (embeddingVarianceScore * 0.5) + (poseVariationScore * 0.25);
+
+    if (totalScore < 0.3) {
+      return LivenessResult(isLive: false, score: totalScore, reason: "Suspiciously static (possible spoof)");
+    }
+
+    return LivenessResult(isLive: true, score: totalScore, reason: "Live");
   }
 
-  /// Check if the face is looking roughly straight at the camera.
-  /// Returns true if head angles are within acceptable range.
-  static bool isFaceStraight(DetectedFace face, {double maxAngle = 25}) {
-    final yaw = face.headEulerAngleY?.abs() ?? 0;
-    final roll = face.headEulerAngleZ?.abs() ?? 0;
-    return yaw < maxAngle && roll < maxAngle;
+  double _checkMovement(List<Offset> positions) {
+    if (positions.length < 2) return 0.0;
+    
+    double maxDist = 0.0;
+    for (int i = 1; i < positions.length; i++) {
+      final dist = (positions[i] - positions[i-1]).distance;
+      if (dist > maxDist) maxDist = dist;
+    }
+    
+    // Some natural jitter is expected. 0 jitter = static photo.
+    if (maxDist < RecognitionConfig.minMovementPixels) {
+      return 0.0; // Suspiciously perfectly still
+    }
+    
+    return (maxDist / 20.0).clamp(0.0, 1.0);
   }
 
-  /// Number of blinks detected since last reset.
-  int get blinkCount => _blinkCount;
+  double _checkEmbeddingVariance(List<List<double>> embeddings) {
+    if (embeddings.length < 2) return 0.0;
+    
+    double maxDist = 0.0;
+    
+    // Check maximum pairwise cosine distance
+    for (int i = 0; i < embeddings.length; i++) {
+      for (int j = i + 1; j < embeddings.length; j++) {
+        final sim = ArcFaceService.cosineSimilarity(embeddings[i], embeddings[j]);
+        final dist = 1.0 - sim; // distance
+        if (dist > maxDist) maxDist = dist;
+      }
+    }
+    
+    // If the embeddings are exactly identical across different frames, it's likely a static printed photo.
+    // Live faces have slight variations (0.02 - 0.08 distance typically)
+    if (maxDist < RecognitionConfig.minEmbeddingVariance) {
+      return 0.0; 
+    }
+    
+    return (maxDist / 0.1).clamp(0.0, 1.0);
+  }
 
-  /// Whether liveness has been confirmed (at least 1 blink detected).
-  bool get isLive => _blinkCount >= 1;
-
-  /// Reset blink counter for a new session.
-  void reset() {
-    _blinkCount = 0;
-    _eyesClosed = false;
+  double _checkPoseVariation(List<double> yaw, List<double> pitch) {
+    if (yaw.length < 2) return 0.0;
+    
+    double maxYawDiff = 0.0;
+    double maxPitchDiff = 0.0;
+    
+    for (int i = 1; i < yaw.length; i++) {
+      final yDiff = (yaw[i] - yaw[i-1]).abs();
+      final pDiff = (pitch[i] - pitch[i-1]).abs();
+      if (yDiff > maxYawDiff) maxYawDiff = yDiff;
+      if (pDiff > maxPitchDiff) maxPitchDiff = pDiff;
+    }
+    
+    // Live faces usually have > 1 degree of micro-movement in 3D space
+    final totalDiff = maxYawDiff + maxPitchDiff;
+    if (totalDiff < 1.0) {
+      return 0.0; // Suspiciously flat/rigid
+    }
+    
+    return (totalDiff / 5.0).clamp(0.0, 1.0);
   }
 }

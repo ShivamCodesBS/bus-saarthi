@@ -16,7 +16,7 @@ class ImageUtils {
   /// with [_cropPadding] applied and the bounding box mirrored for front cameras.
   ///
   /// Returns null if the image format is unsupported.
-  static img.Image? convertCameraImageToImage(
+  static img.Image? cropFaceFromCameraImage(
     CameraImage image,
     Rect boundingBox, {
     CameraLensDirection lensDirection = CameraLensDirection.front,

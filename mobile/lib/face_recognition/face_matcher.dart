@@ -1,107 +1,135 @@
+import 'dart:async';
 import 'arcface_service.dart';
 import 'embedding_store.dart';
-import '../core/constants.dart';
+import 'recognition_config.dart';
 
-/// On-device face matching using ArcFace cosine similarity.
-///
-/// Compares a live embedding against all enrolled faces in the local store
-/// and returns the best match above the similarity threshold.
-class FaceMatcher {
-  final EmbeddingStore _store;
+enum MatchConfidence { strong, weak, unknown, ambiguous }
 
-  // Cache enrolled faces to avoid hitting SQLite on every frame
-  List<StoredFace> _cachedFaces = [];
-  DateTime? _lastCacheRefresh;
-  static const _cacheLifetime = Duration(seconds: 30);
-
-  FaceMatcher(this._store);
-
-  /// Refresh the in-memory cache of enrolled faces.
-  Future<void> refreshCache() async {
-    _cachedFaces = await _store.getAll();
-    _lastCacheRefresh = DateTime.now();
-  }
-
-  /// Match a live embedding against all enrolled faces.
-  ///
-  /// Returns a [MatchResult] with the best match, or [MatchResult.noMatch()]
-  /// if no face exceeds the similarity threshold.
-  Future<MatchResult> match(List<double> liveEmbedding) async {
-    // Auto-refresh cache if stale
-    if (_lastCacheRefresh == null ||
-        DateTime.now().difference(_lastCacheRefresh!) > _cacheLifetime) {
-      await refreshCache();
-    }
-
-    if (_cachedFaces.isEmpty) {
-      return MatchResult.noMatch();
-    }
-
-    double bestSimilarity = -1;
-    StoredFace? bestFace;
-
-    for (final face in _cachedFaces) {
-      final similarity = ArcFaceService.cosineSimilarity(liveEmbedding, face.embedding);
-      if (similarity > bestSimilarity) {
-        bestSimilarity = similarity;
-        bestFace = face;
-      }
-    }
-
-    if (bestFace != null && bestSimilarity >= AppConstants.arcFaceSimilarityThreshold) {
-      return MatchResult(
-        matched: true,
-        loginId: bestFace.loginId,
-        name: bestFace.name,
-        feeStatus: bestFace.feeStatus,
-        routeId: bestFace.routeId,
-        confidence: bestSimilarity * 100, // Convert to percentage
-      );
-    }
-
-    return MatchResult.noMatch();
-  }
-
-  /// Number of enrolled faces available for matching.
-  int get enrolledCount => _cachedFaces.length;
-}
-
-/// Result of an on-device face match.
 class MatchResult {
-  final bool matched;
-  final String? loginId;
+  final MatchConfidence confidence;
+  final String? studentId;
   final String? name;
   final String? feeStatus;
   final String? routeId;
-  final double? confidence;
+  final double similarity;
+  final double? secondBestSimilarity;
+  final int templatesCompared;
 
-  // Attendance dedup flags (set by caller based on local cache)
-  final bool isCooldown;
-  final bool isLimitReached;
-
-  const MatchResult({
-    required this.matched,
-    this.loginId,
+  MatchResult({
+    required this.confidence,
+    this.studentId,
     this.name,
     this.feeStatus,
     this.routeId,
-    this.confidence,
-    this.isCooldown = false,
-    this.isLimitReached = false,
+    required this.similarity,
+    this.secondBestSimilarity,
+    this.templatesCompared = 0,
   });
+}
 
-  factory MatchResult.noMatch() => const MatchResult(matched: false);
+class FaceMatcher {
+  final EmbeddingStore _store = EmbeddingStore();
+  
+  List<StudentProfile> _cachedProfiles = [];
+  Timer? _refreshTimer;
+  bool _isCacheLoaded = false;
 
-  MatchResult copyWith({bool? isCooldown, bool? isLimitReached}) {
+  FaceMatcher() {
+    // Refresh cache periodically to pick up new enrollments
+    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      _loadCache();
+    });
+    _loadCache();
+  }
+
+  Future<void> _loadCache() async {
+    _cachedProfiles = await _store.getAllStudentProfiles();
+    _isCacheLoaded = true;
+  }
+  
+  Future<void> forceRefresh() async {
+    await _loadCache();
+  }
+
+  /// Matches a live embedding against all student profiles using multi-template max similarity.
+  Future<MatchResult> match(List<double> queryEmbedding) async {
+    if (!_isCacheLoaded) {
+      await _loadCache();
+    }
+
+    if (_cachedProfiles.isEmpty) {
+      return MatchResult(
+        confidence: MatchConfidence.unknown,
+        similarity: 0.0,
+      );
+    }
+
+    double bestSim = -1.0;
+    StudentProfile? bestProfile;
+    
+    double secondBestSim = -1.0;
+    
+    int templatesCompared = 0;
+
+    for (final profile in _cachedProfiles) {
+      if (profile.templates.isEmpty) continue;
+      
+      // Find the best similarity across all templates for this student
+      double profileBestSim = -1.0;
+      for (final template in profile.templates) {
+        final sim = ArcFaceService.cosineSimilarity(queryEmbedding, template.embedding);
+        if (sim > profileBestSim) {
+          profileBestSim = sim;
+        }
+        templatesCompared++;
+      }
+
+      if (profileBestSim > bestSim) {
+        secondBestSim = bestSim;
+        bestSim = profileBestSim;
+        bestProfile = profile;
+      } else if (profileBestSim > secondBestSim) {
+        secondBestSim = profileBestSim;
+      }
+    }
+
+    if (bestProfile == null) {
+      return MatchResult(
+        confidence: MatchConfidence.unknown,
+        similarity: 0.0,
+        templatesCompared: templatesCompared,
+      );
+    }
+
+    MatchConfidence confidence;
+    
+    if (bestSim >= RecognitionConfig.strongMatchThreshold) {
+      // Check for ambiguity (two students look very similar)
+      if (secondBestSim > 0 && (bestSim - secondBestSim) < RecognitionConfig.ambiguityGap) {
+        confidence = MatchConfidence.ambiguous;
+      } else {
+        confidence = MatchConfidence.strong;
+      }
+    } else if (bestSim >= RecognitionConfig.weakMatchThreshold) {
+      // Wait for more frames to accumulate evidence
+      confidence = MatchConfidence.weak;
+    } else {
+      confidence = MatchConfidence.unknown;
+    }
+
     return MatchResult(
-      matched: matched,
-      loginId: loginId,
-      name: name,
-      feeStatus: feeStatus,
-      routeId: routeId,
       confidence: confidence,
-      isCooldown: isCooldown ?? this.isCooldown,
-      isLimitReached: isLimitReached ?? this.isLimitReached,
+      studentId: bestProfile.loginId,
+      name: bestProfile.name,
+      feeStatus: bestProfile.feeStatus,
+      routeId: bestProfile.routeId,
+      similarity: bestSim,
+      secondBestSimilarity: secondBestSim,
+      templatesCompared: templatesCompared,
     );
+  }
+
+  void dispose() {
+    _refreshTimer?.cancel();
   }
 }
