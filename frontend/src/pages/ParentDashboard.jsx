@@ -3,7 +3,7 @@ import {
   Heart, MapPin, Bus, User, LogOut, Bell, Calendar, CheckCircle2,
   XCircle, Clock, TrendingUp, BookOpen, Phone, Navigation,
   Gauge, Compass, AlertOctagon, Menu, X, Activity, ChevronLeft, ChevronRight,
-  IndianRupee, Megaphone, Settings, Eye, ArrowLeft
+  IndianRupee, Megaphone, Settings, Eye, ArrowLeft, GitMerge
 } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -194,6 +194,7 @@ const ParentDashboard = () => {
   const [broadcasts, setBroadcasts] = useState([]);
   const [speedData, setSpeedData] = useState(null);
   const [analyticsDate, setAnalyticsDate] = useState(new Date().toISOString().split('T')[0]);
+  const [childMergeInfo, setChildMergeInfo] = useState(null);
 
   // Live tracking states
   const [busLocation, setBusLocation] = useState([28.3180, 79.4670]);
@@ -219,9 +220,30 @@ const ParentDashboard = () => {
         const attRes = await axios.get(`${BACKEND_URL}/api/parents/child/${c.loginId}/attendance`, authHeaders);
         setAttendanceData(attRes.data);
 
-        // Fetch route info
+        // Fetch route info & check for active merge
         if (c.routeId) {
-          const routeRes = await axios.get(`${BACKEND_URL}/api/routes/${c.routeId}`, authHeaders);
+          // Check if child's route is merged today
+          let activeRouteId = c.routeId;
+          try {
+            const mRes = await axios.get(`${BACKEND_URL}/api/merge/check/${c.routeId}`, authHeaders);
+            if (mRes.data?.status === 'success' && mRes.data.data?.isCancelled && mRes.data.data?.merge) {
+              const m = mRes.data.data.merge;
+              activeRouteId = m.targetRouteId;
+              setChildMergeInfo({
+                originalRouteId: c.routeId,
+                activeRouteId: m.targetRouteId,
+                targetBusNumber: m.targetBusNumber,
+                targetRouteName: m.targetRouteName,
+              });
+            } else {
+              setChildMergeInfo(null);
+            }
+          } catch (e) {
+            console.warn('Merge check failed', e);
+          }
+
+          // Fetch route info for the active bus
+          const routeRes = await axios.get(`${BACKEND_URL}/api/routes/${activeRouteId}`, authHeaders);
           setRouteInfo(routeRes.data);
         }
       }
@@ -288,20 +310,22 @@ const ParentDashboard = () => {
   }, [fetchAll, fetchBroadcasts]);
 
   useEffect(() => {
-    if (!child?.routeId) return;
+    const routeToTrack = childMergeInfo?.activeRouteId || child?.routeId;
+    if (!routeToTrack) return;
     let socket;
-    fetchTelemetry(child.routeId).then(s => { socket = s; });
+    fetchTelemetry(routeToTrack).then(s => { socket = s; });
     return () => {
       clearTimeout(staleTimerRef.current);
       if (socket) socket.disconnect();
     };
-  }, [child?.routeId]);
+  }, [child?.routeId, childMergeInfo]);
 
   useEffect(() => {
-    if (activeTab === 'analytics' && child?.routeId) {
-      fetchSpeedAnalytics(child.routeId, analyticsDate);
+    const routeToAnalyze = childMergeInfo?.activeRouteId || child?.routeId;
+    if (activeTab === 'analytics' && routeToAnalyze) {
+      fetchSpeedAnalytics(routeToAnalyze, analyticsDate);
     }
-  }, [activeTab, analyticsDate, child?.routeId]);
+  }, [activeTab, analyticsDate, child?.routeId, childMergeInfo]);
 
   // Mark leave for child
   const handleMarkLeave = async (date) => {
@@ -437,8 +461,14 @@ const ParentDashboard = () => {
           <div style={{ flex: 1 }}>
             <p style={{ margin: 0, fontWeight: 700, color: 'var(--text-dark)', fontSize: '1rem' }}>{child.name}</p>
             <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-light)' }}>
-              {child.gradeClass && `${child.gradeClass} · `}Route {child.routeId}
-              {routeInfo?.busNumber && ` · Bus ${routeInfo.busNumber}`}
+              {child.gradeClass && `${child.gradeClass} · `}
+              {childMergeInfo ? (
+                <span>
+                  Route {child.routeId} ➔ <strong style={{ color: '#ea580c' }}>Bus {childMergeInfo.targetBusNumber} ({childMergeInfo.targetRouteName})</strong>
+                </span>
+              ) : (
+                <span>Route {child.routeId} {routeInfo?.busNumber && `· Bus ${routeInfo.busNumber}`}</span>
+              )}
             </p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
@@ -489,6 +519,25 @@ const ParentDashboard = () => {
         {/* ===== OVERVIEW TAB ===== */}
         {activeTab === 'overview' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+
+            {/* Merge Notification Banner for Parents */}
+            {childMergeInfo && (
+              <div style={{
+                background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
+                color: 'white', borderRadius: '16px', padding: '1rem 1.25rem',
+                display: 'flex', alignItems: 'center', gap: '0.85rem', boxShadow: '0 4px 14px rgba(249,115,22,0.25)',
+              }}>
+                <GitMerge size={26} color="white" style={{ flexShrink: 0 }} />
+                <div>
+                  <p style={{ margin: 0, fontWeight: 700, fontSize: '0.9rem' }}>
+                    🚌 Bus Route Changed Today
+                  </p>
+                  <p style={{ margin: '0.2rem 0 0', fontSize: '0.78rem', opacity: 0.95, lineHeight: 1.4 }}>
+                    Your child's regular bus was merged into <strong>Bus {childMergeInfo.targetBusNumber} ({childMergeInfo.targetRouteName})</strong> today. Live tracking is automatically showing the active bus.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Today's Status Hero Card */}
             <div style={{

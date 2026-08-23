@@ -1,6 +1,6 @@
 import toast from 'react-hot-toast';
 import { useState, useEffect, useRef } from 'react';
-import { Bus, Menu, MapPin, Phone, User, Maximize2, X, Compass, Activity, Navigation, Wind, AlertOctagon, Bell, AlarmClock, Users, Home as HomeIcon, Settings, LogOut, MessageSquare } from 'lucide-react';
+import { Bus, Menu, MapPin, Phone, User, Maximize2, X, Compass, Activity, Navigation, Wind, AlertOctagon, Bell, AlarmClock, Users, Home as HomeIcon, Settings, LogOut, MessageSquare, GitMerge } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -59,13 +59,33 @@ const MapResizer = () => {
 };
 
 const STOP_COORDS = {
+  // Bareilly Core
   'Civil Lines': [28.3615, 79.4180],
   'Rajendra Nagar': [28.3610, 79.4501],
   'DD Puram': [28.3715, 79.4452],
   'Pilibhit Bypass': [28.3842, 79.4310],
   'Invertis University': [28.3180, 79.4670],
-  'labela chowk': [28.3500, 79.4200], // Example coordinate
-  'police line': [28.3550, 79.4250] // Example coordinate
+  'labela chowk': [28.3500, 79.4200],
+  'police line': [28.3550, 79.4250],
+  'Chauki Chauraha': [28.3580, 79.4120],
+  'Satellite Bus Stand': [28.3440, 79.4420],
+  'Bareilly Mod': [28.2500, 79.5200],
+  // Shahjahanpur Hubs
+  'Shahjahanpur': [27.8805, 79.9140],
+  'Shahjahanpur Bus Stand': [27.8820, 79.9100],
+  'Roza Junction': [27.8350, 79.9200],
+  'Tilhar': [28.0200, 79.7300],
+  'Miranpur Katra': [28.1100, 79.6200],
+  // Badaun Hubs
+  'Badaun': [28.0300, 79.1200],
+  'Badaun Road': [28.2000, 79.2800],
+  'Ujhani': [28.0100, 79.0100],
+  'Dataganj': [27.9400, 79.3500],
+  // Pilibhit & Others
+  'Pilibhit': [28.6300, 79.8000],
+  'Bisalpur': [28.3000, 79.8000],
+  'Nawabganj': [28.5400, 79.6300],
+  'Faridpur': [28.2100, 79.5400],
 };
 
 const Home = () => {
@@ -132,18 +152,48 @@ const Home = () => {
   const [notices, setNotices] = useState([]);
   const [activeBroadcast, setActiveBroadcast] = useState(null);
 
+  // Merge & Cancellation State (When student's bus is merged)
+  const [mergeInfo, setMergeInfo] = useState(null);
+
   // Initial Bus Location (Example: Near Invertis University, Bareilly)
   const [busLocation, setBusLocation] = useState([28.3180, 79.4670]);
+
+  // Dynamic Effective Route ID: Switches instantly to newRouteId when merged
+  const effectiveRouteId = mergeInfo?.newRouteId || user?.routeId || user?.route_id || '4';
 
   // Connect to Socket.IO for real-time telemetry updates and fetch initial status
   useEffect(() => {
     const authHeaders = { headers: { Authorization: `Bearer ${user?.token}` } };
 
-    // Fetch Crowd Status
+    // Check if student's home route is currently cancelled/merged today
+    const checkMergeStatus = async () => {
+      try {
+        const homeRouteId = user?.routeId || user?.route_id || '4';
+        const res = await axios.get(`${BACKEND_URL}/api/merge/check/${homeRouteId}`, authHeaders);
+        if (res.data.status === 'success' && res.data.data?.isCancelled && res.data.data?.merge) {
+          const m = res.data.data.merge;
+          setMergeInfo({
+            newRouteId: m.targetRouteId,
+            newBusNumber: m.targetBusNumber,
+            newRouteName: m.targetRouteName,
+            reason: m.reason,
+            cancelledBusNumber: m.cancelledBusNumber,
+            cancelledRouteName: m.cancelledRouteName,
+            message: `Your bus (${m.cancelledBusNumber || m.cancelledRouteId}) is cancelled today. Please board Bus ${m.targetBusNumber} (${m.targetRouteName}).`
+          });
+        } else {
+          setMergeInfo(null);
+        }
+      } catch (err) {
+        console.warn("Failed to check merge status");
+      }
+    };
+    checkMergeStatus();
+
+    // Fetch Crowd Status for the dynamically active bus
     const fetchCrowdStatus = async () => {
       try {
-        const routeIdToUse = user?.routeId || user?.route_id || '4';
-        const res = await axios.get(`${BACKEND_URL}/api/route_status/${routeIdToUse}`, authHeaders);
+        const res = await axios.get(`${BACKEND_URL}/api/route_status/${effectiveRouteId}`, authHeaders);
         if (res.data.status === 'success') {
           setCrowdStatus(res.data.data);
         }
@@ -156,14 +206,16 @@ const Home = () => {
     // Add periodic polling every 30 seconds for crowd count
     const crowdInterval = setInterval(fetchCrowdStatus, 30000);
 
-    // Fetch Route and Driver Info
+    // Fetch Route and Driver Info for the dynamically active bus
     const fetchRouteData = async () => {
       try {
-        const res = await axios.get(`${BACKEND_URL}/api/routes/${user?.route_id || '4'}`, authHeaders);
+        const res = await axios.get(`${BACKEND_URL}/api/routes/${effectiveRouteId}`, authHeaders);
         if (res.data) {
           setRouteInfo(res.data);
           if (res.data.driver) {
             setDriverInfo(res.data.driver);
+          } else {
+            setDriverInfo(null);
           }
         }
       } catch (err) {
@@ -176,7 +228,6 @@ const Home = () => {
     const fetchNotifications = async () => {
       try {
         const res = await axios.get(`${BACKEND_URL}/api/notifications`, authHeaders);
-        // Backend returns array directly or { data: [] }
         const data = Array.isArray(res.data) ? res.data : (res.data?.data || []);
         if (data.length > 0) {
           setNotices(data);
@@ -196,22 +247,18 @@ const Home = () => {
     });
 
     socket.on('connect', () => {
-      console.log('Connected to real-time telemetry server');
-      // Join the route room so server emits targeted live_telemetry events
-      const routeIdToUse = user?.routeId || user?.route_id || '4';
       const loginId = user?.loginId || user?.login_id;
-      socket.emit('join_route', { route_id: routeIdToUse, login_id: loginId });
+      socket.emit('join_route', { route_id: effectiveRouteId, login_id: loginId });
     });
 
     let telemetryTimeout;
 
-    // Listen for live telemetry data (event name matches what server emits)
+    // Listen for live telemetry data
     socket.on('live_telemetry', (data) => {
-      // Update location
+      if (data.route_id && String(data.route_id) !== String(effectiveRouteId)) return;
       if (data.location && data.location.lat && data.location.lng) {
         setBusLocation([data.location.lat, data.location.lng]);
       }
-      // Update telemetry stats
       setTelemetry({
         speed: data.speed || 0,
         heading: data.heading || 0,
@@ -225,14 +272,29 @@ const Home = () => {
       }, 5000);
     });
 
-    socket.on('live_attendance', (data) => {
-       // Refresh crowd status whenever an attendance event happens
+    socket.on('live_attendance', () => {
        fetchCrowdStatus();
+    });
+
+    // Listen for real-time bus merge event
+    socket.on('your_route_merged', (data) => {
+      setMergeInfo(data);
+      toast.error(`🚌 BUS MERGED: ${data.message}`, { duration: 10000 });
+      if (data.newRouteId) {
+        socket.emit('join_route', { route_id: data.newRouteId });
+      }
+    });
+
+    // Listen for route restored event
+    socket.on('route_restored', () => {
+      setMergeInfo(null);
+      toast.success('Your original bus route has been restored!', { duration: 6000 });
+      const homeRouteId = user?.routeId || user?.route_id || '4';
+      socket.emit('join_route', { route_id: homeRouteId });
     });
 
     // Listen for global emergency broadcasts
     socket.on('global_broadcast', (data) => {
-      console.log('Received broadcast:', data);
       setActiveBroadcast(data);
     });
 
@@ -243,7 +305,6 @@ const Home = () => {
         icon: '⏰',
         style: { background: '#1d4ed8', color: 'white', fontWeight: 700, borderRadius: '12px' },
       });
-      // Play alarm sound
       try {
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         const oscillator = audioCtx.createOscillator();
@@ -261,9 +322,9 @@ const Home = () => {
     return () => {
       clearInterval(crowdInterval);
       if (telemetryTimeout) clearTimeout(telemetryTimeout);
-      setTimeout(() => socket.disconnect(), 500); // Delayed disconnect to avoid StrictMode console warnings
+      setTimeout(() => socket.disconnect(), 500);
     };
-  }, [user]);
+  }, [user, effectiveRouteId]);
 
 
   const acknowledgeBroadcast = () => {
@@ -572,6 +633,30 @@ const Home = () => {
       {/* MAIN CONTENT */}
       <main className="flex-1 p-4 md:p-8 lg:p-10 max-w-[1400px] mx-auto w-full flex flex-col gap-8 scroll-smooth pb-24">
         
+        {/* BUS MERGE & CANCELLATION NOTICE BANNER */}
+        {mergeInfo && (
+          <div className="p-5 rounded-3xl bg-gradient-to-r from-red-600 via-orange-600 to-amber-600 text-white shadow-xl shadow-orange-500/20 border-2 border-white/20 animate-fade-in flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5">
+              <div className="p-3 bg-white/20 rounded-2xl backdrop-blur-md shrink-0">
+                <GitMerge size={26} className="text-white" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="bg-white text-red-600 font-black text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider">Bus Changed Today</span>
+                  <h3 className="font-bold text-base m-0">Board Bus {mergeInfo.newBusNumber} ({mergeInfo.newRouteName})</h3>
+                </div>
+                <p className="text-xs text-white/90 m-0 mt-1">
+                  Your regular bus ({mergeInfo.cancelledBusNumber || 'assigned'}) was merged today. Your face recognition & attendance are eligible on <strong>Bus {mergeInfo.newBusNumber}</strong>.
+                </p>
+              </div>
+            </div>
+            <div className="bg-black/20 px-3.5 py-2 rounded-xl text-center shrink-0 w-full sm:w-auto">
+              <span className="text-[10px] uppercase font-bold text-orange-200 block">Tracking Active</span>
+              <span className="font-extrabold text-sm text-white">Route {mergeInfo.newRouteId}</span>
+            </div>
+          </div>
+        )}
+
         {/* ACTION BAR (Floating / Sticky) */}
         <div className="flex gap-3 overflow-x-auto pb-2 flex-shrink-0 hide-scrollbar snap-x z-0">
           <Button
@@ -641,25 +726,47 @@ const Home = () => {
 
                 <div className="flex flex-col gap-4">
                   <div className="flex items-center gap-4">
-                    <div className="bg-blue-50 dark:bg-blue-900/30 p-3 rounded-2xl text-blue-600 dark:text-blue-400">
+                    <div className="bg-blue-50 dark:bg-blue-900/30 p-3 rounded-2xl text-blue-600 dark:text-blue-400 shrink-0">
                       <Bus size={22} />
                     </div>
                     <div>
-                      <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{t('route')} {routeInfo?.route_id || '4'}</p>
-                      <p className="text-base font-bold text-slate-900 dark:text-white">{routeInfo?.bus_number || 'UP 25 AB 1234'}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs font-bold text-slate-500 dark:text-slate-400 m-0">
+                          {t('route')} {effectiveRouteId}
+                        </p>
+                        {mergeInfo && (
+                          <span className="bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300 font-extrabold text-[10px] px-2 py-0.5 rounded-full">
+                            Active Merged Bus
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-base font-bold text-slate-900 dark:text-white m-0 mt-0.5">
+                        {routeInfo?.busNumber || routeInfo?.bus_number || 'Loading...'}
+                        {routeInfo?.routeName && <span className="text-xs font-semibold text-slate-500 ml-1.5 font-normal">({routeInfo.routeName})</span>}
+                      </p>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-4">
-                    <div className="bg-orange-50 dark:bg-orange-900/30 p-3 rounded-2xl text-orange-500">
+                    <div className="bg-orange-50 dark:bg-orange-900/30 p-3 rounded-2xl text-orange-500 shrink-0">
                       <User size={22} />
                     </div>
-                    <div>
-                      <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{t('driverName')}</p>
-                      <p className="text-base font-bold text-slate-900 dark:text-white">{translateName(driverInfo?.name) || t('assigning')}</p>
-                      {driverInfo?.phone && <p className="text-sm font-semibold text-slate-600 dark:text-slate-400 mt-0.5">{driverInfo.phone}</p>}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-slate-500 dark:text-slate-400 m-0">{t('driverName')}</p>
+                      <p className="text-base font-bold text-slate-900 dark:text-white m-0 truncate">
+                        {translateName(driverInfo?.name) || (routeInfo?.driver ? routeInfo.driver.name : t('assigning'))}
+                      </p>
+                      {(driverInfo?.phone || routeInfo?.driver?.phone) && (
+                        <p className="text-sm font-semibold text-slate-600 dark:text-slate-400 m-0 mt-0.5">
+                          {driverInfo?.phone || routeInfo?.driver?.phone}
+                        </p>
+                      )}
                     </div>
-                    <a href={`tel:${driverInfo?.phone || '+919999999999'}`} className="ml-auto bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 p-3 rounded-full hover:bg-green-200 transition-colors shadow-sm">
+                    <a 
+                      href={`tel:${driverInfo?.phone || routeInfo?.driver?.phone || '+919999999999'}`} 
+                      className="ml-auto bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 p-3 rounded-full hover:bg-green-200 transition-colors shadow-sm shrink-0"
+                      title="Call Active Bus Driver"
+                    >
                       <Phone size={18} />
                     </a>
                   </div>

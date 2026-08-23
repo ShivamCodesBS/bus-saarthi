@@ -6,3 +6,8 @@ export function getISTMidnightUTC(): Date {
   istTime.setHours(0, 0, 0, 0);
   return new Date(istTime.getTime() - 330 * 60000);
 }
+
+export function getNextISTMidnightUTC(): Date {
+  const todayMidnight = getISTMidnightUTC();
+  return new Date(todayMidnight.getTime() + 24 * 60 * 60 * 1000);
+}

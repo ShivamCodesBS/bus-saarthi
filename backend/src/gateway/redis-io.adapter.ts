@@ -23,7 +23,10 @@ export class RedisIoAdapter extends IoAdapter {
       const { createClient } = await import('redis');
       const { createAdapter } = await import('@socket.io/redis-adapter');
 
-      const pubClient = createClient({ url: redisUrl });
+      const pubClient = createClient({ 
+        url: redisUrl,
+        socket: { reconnectStrategy: false }
+      });
       const subClient = pubClient.duplicate();
 
       // Catch error events to prevent unhandled rejections crashing the app

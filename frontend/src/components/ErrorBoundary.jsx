@@ -13,6 +13,20 @@ class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, errorInfo) {
+    // Check if the error is a dynamic import failure (common with Vite cache issues/deployments)
+    const isChunkLoadFailed = /Failed to fetch dynamically imported module/i.test(error?.message);
+    
+    if (isChunkLoadFailed) {
+      const lastReload = parseInt(sessionStorage.getItem('dynamic_import_reload_time') || '0', 10);
+      const now = Date.now();
+      // If we haven't reloaded for this error in the last 5 seconds, auto-reload to clear cache
+      if (now - lastReload > 5000) {
+        sessionStorage.setItem('dynamic_import_reload_time', now.toString());
+        window.location.reload();
+        return;
+      }
+    }
+
     // You can also log the error to an error reporting service here
     console.error('ErrorBoundary caught an error:', error, errorInfo);
     this.setState({ errorInfo });

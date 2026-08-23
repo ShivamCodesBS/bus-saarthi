@@ -127,13 +127,12 @@ export class EventsGateway
   ) {
     const lat = payload?.lat ?? payload?.latitude;
     const lng = payload?.lng ?? payload?.longitude;
-    const routeId = payload?.route_id ?? payload?.routeId ?? '4';
-
-    if (!lat || !lng) return;
+    const routeId = payload?.route_id ?? payload?.routeId;
+    if (!lat || !lng || !routeId) return;
 
     // Broadcast live location to all route subscribers (web dashboard, etc.)
     const formattedPayload = {
-      route_id: routeId,
+      route_id: String(routeId),
       location: { lat, lng },
       speed: payload?.mpu_speed_kmh || (payload?.gps_speed_knots ?? 0) * 1.852,
       heading: payload?.heading_deg,
@@ -186,6 +185,49 @@ export class EventsGateway
       .to(`route_${payload.route_id}`)
       .emit('live_attendance', payload);
     this.server.to('admin_room').emit('global_attendance', payload);
+  }
+
+  @OnEvent('merge.executed')
+  handleMergeExecuted(payload: any) {
+    const { mergeEvent, cancelledRoute, targetRoute, cancelledStudentCount } = payload;
+    
+    // Broadcast to admin room (Transport Incharge & Admin dashboards)
+    this.server.to('admin_room').emit('merge_executed', payload);
+
+    // Broadcast to students/drivers on the cancelled route
+    this.server.to(`route_${mergeEvent.cancelledRouteId}`).emit('your_route_merged', {
+      mergeEventId: mergeEvent.id,
+      cancelledRouteId: mergeEvent.cancelledRouteId,
+      newRouteId: mergeEvent.targetRouteId,
+      newBusNumber: targetRoute.busNumber,
+      newRouteName: targetRoute.routeName,
+      reason: mergeEvent.reason,
+      message: `Your bus (${cancelledRoute.busNumber}) has been cancelled. Please board Bus ${targetRoute.busNumber} (${targetRoute.routeName}).`,
+    });
+
+    // Broadcast to students/drivers on the target route
+    this.server.to(`route_${mergeEvent.targetRouteId}`).emit('students_incoming', {
+      fromRoute: cancelledRoute.routeName,
+      fromBus: cancelledRoute.busNumber,
+      fromRouteId: mergeEvent.cancelledRouteId,
+      count: cancelledStudentCount,
+      message: `${cancelledStudentCount} students from ${cancelledRoute.routeName} (Bus ${cancelledRoute.busNumber}) are merged into your bus.`,
+    });
+  }
+
+  @OnEvent('merge.undone')
+  handleMergeUndone(payload: any) {
+    const { merge } = payload;
+    
+    this.server.to('admin_room').emit('merge_undone', payload);
+    this.server.to(`route_${merge.cancelledRouteId}`).emit('route_restored', {
+      cancelledRouteId: merge.cancelledRouteId,
+      message: `Your original bus route (${merge.cancelledRouteName}) has been restored.`,
+    });
+    this.server.to(`route_${merge.targetRouteId}`).emit('students_removed', {
+      fromRouteId: merge.cancelledRouteId,
+      message: `Merge with ${merge.cancelledRouteName} was undone.`,
+    });
   }
 
   /**

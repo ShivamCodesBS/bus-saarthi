@@ -10,7 +10,8 @@ export class RoutesService {
   constructor(private prisma: PrismaService) {}
 
   async findAll() {
-    return this.prisma.route.findMany();
+    const routes = await this.prisma.route.findMany();
+    return { status: 'success', data: routes };
   }
 
   async findOne(routeId: string) {

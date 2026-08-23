@@ -14,6 +14,19 @@ export class TelemetryService {
   async addBatchToQueue(batchDto: TelemetryBatchDto) {
     const { route_id, data } = batchDto;
 
+    const todayStart = getISTMidnightUTC();
+    const isCancelled = await this.prisma.mergeEvent.findFirst({
+      where: {
+        cancelledRouteId: String(route_id),
+        status: 'active',
+        createdAt: { gte: todayStart },
+      },
+    });
+
+    if (isCancelled) {
+      return { status: 'success', received: 0, note: 'Route is cancelled today due to merge' };
+    }
+
     // Process directly (no Redis queue needed for local dev)
     const entities = data.map((item: any) => ({
       routeId: route_id,

@@ -59,6 +59,8 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
   const [step, setStep] = useState('choose'); // 'choose' | 'gps' | 'map' | 'confirm'
   const [position, setPosition] = useState(null);
   const [thresholdKm, setThresholdKm] = useState(2);
+  const [isCustomThreshold, setIsCustomThreshold] = useState(false);
+  const [customValue, setCustomValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [gpsStatus, setGpsStatus] = useState('idle'); // 'idle' | 'loading' | 'success' | 'error'
 
@@ -313,16 +315,16 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
                 <p style={{ margin: '0 0 0.75rem 0', fontWeight: 700, color: '#1e293b', fontSize: '0.9rem' }}>
                   Alert me when bus is within:
                 </p>
-                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
                   {KM_OPTIONS.map(km => (
                     <button
                       key={km}
-                      onClick={() => setThresholdKm(km)}
+                      onClick={() => { setThresholdKm(km); setIsCustomThreshold(false); }}
                       style={{
-                        flex: 1, padding: '0.75rem', borderRadius: '12px',
-                        border: `2px solid ${thresholdKm === km ? '#3b82f6' : '#e2e8f0'}`,
-                        background: thresholdKm === km ? '#eff6ff' : 'white',
-                        color: thresholdKm === km ? '#1d4ed8' : '#475569',
+                        flex: 1, padding: '0.75rem', borderRadius: '12px', minWidth: '60px',
+                        border: `2px solid ${!isCustomThreshold && thresholdKm === km ? '#3b82f6' : '#e2e8f0'}`,
+                        background: !isCustomThreshold && thresholdKm === km ? '#eff6ff' : 'white',
+                        color: !isCustomThreshold && thresholdKm === km ? '#1d4ed8' : '#475569',
                         fontWeight: 700, cursor: 'pointer', fontSize: '0.95rem',
                         transition: 'all 0.15s',
                       }}
@@ -330,7 +332,43 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
                       {km} km
                     </button>
                   ))}
+                  <button
+                    onClick={() => setIsCustomThreshold(true)}
+                    style={{
+                      flex: 1, padding: '0.75rem', borderRadius: '12px', minWidth: '70px',
+                      border: `2px solid ${isCustomThreshold ? '#3b82f6' : '#e2e8f0'}`,
+                      background: isCustomThreshold ? '#eff6ff' : 'white',
+                      color: isCustomThreshold ? '#1d4ed8' : '#475569',
+                      fontWeight: 700, cursor: 'pointer', fontSize: '0.95rem',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    Custom
+                  </button>
                 </div>
+                {isCustomThreshold && (
+                  <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      value={customValue}
+                      onChange={(e) => {
+                        setCustomValue(e.target.value);
+                        if (e.target.value && !isNaN(e.target.value)) {
+                          setThresholdKm(parseFloat(e.target.value));
+                        }
+                      }}
+                      placeholder="Enter distance"
+                      style={{
+                        flex: 1, padding: '0.75rem', borderRadius: '12px',
+                        border: '2px solid #e2e8f0', outline: 'none',
+                        fontSize: '0.95rem', color: '#1e293b'
+                      }}
+                    />
+                    <span style={{ fontWeight: 600, color: '#475569' }}>km</span>
+                  </div>
+                )}
               </div>
 
               {/* Info box */}
