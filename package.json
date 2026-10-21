@@ -9,7 +9,7 @@
     "admin-frontend"
   ],
   "scripts": {
-    "postinstall": "npm run prisma:generate --if-present",
+    "build": "npm --prefix frontend run build",
     "prisma:generate": "npm --prefix backend run prisma:generate",
     "install:all": "npm install --prefix backend && npm install --prefix frontend && npm install --prefix admin-frontend",
     "dev:backend": "npm run start:dev --prefix backend",
