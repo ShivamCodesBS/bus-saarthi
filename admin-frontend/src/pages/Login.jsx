@@ -17,7 +17,7 @@ export default function Login({ setAuthToken }) {
     setError('');
 
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
+      const apiUrl = import.meta.env.VITE_API_URL || 'https://bus-saarthi-j3lq.onrender.com';
       const res = await axios.post(`${apiUrl}/api/login`, {
         login_id: loginId,
         password: password,

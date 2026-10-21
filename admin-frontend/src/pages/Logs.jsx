@@ -13,7 +13,7 @@ export default function Logs({ authToken }) {
   useEffect(() => {
     if (!authToken) return;
 
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
+    const apiUrl = import.meta.env.VITE_API_URL || 'https://bus-saarthi-j3lq.onrender.com';
     
     const fetchLogs = async () => {
       try {

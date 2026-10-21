@@ -5,16 +5,16 @@
 ///   flutter build apk --dart-define=API_URL=https://your-vps.com
 class AppConstants {
   // API URL — configurable via --dart-define=API_URL=...
-  // Defaults to Android emulator localhost (10.0.2.2) for dev
+  // Defaults to production Render backend
   static const String restApiUrl = String.fromEnvironment(
     'API_URL',
-    defaultValue: 'http://10.0.2.2:5000',
+    defaultValue: 'https://bus-saarthi-j3lq.onrender.com',
   );
 
   // WebSocket URL — defaults to same as REST API
   static const String socketUrl = String.fromEnvironment(
     'SOCKET_URL',
-    defaultValue: restApiUrl,
+    defaultValue: 'https://bus-saarthi-j3lq.onrender.com',
   );
 
   // Hardware token — must match WEBHOOK_SECRET on the backend
