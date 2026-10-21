@@ -181,30 +181,58 @@ const Login = () => {
 
         {/* Toggle Switch */}
         <div style={{
-          display: 'flex', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: '12px', padding: '4px', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '2px'
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, 1fr)',
+          backgroundColor: 'rgba(255, 255, 255, 0.15)',
+          borderRadius: '14px',
+          padding: '4px',
+          marginBottom: '1.25rem',
+          gap: '3px',
+          border: '1px solid rgba(255, 255, 255, 0.15)',
         }}>
-          {['passenger', 'parent', 'transport_incharge', 'admin'].map((type) => (
-            <button
-              key={type}
-              type="button"
-              onClick={() => { setLoginType(type); setUserId(''); setPassword(''); }}
-              style={{
-                flex: 1, padding: '0.6rem 0.25rem', borderRadius: '10px', border: 'none',
-                backgroundColor: loginType === type ? 'rgba(255,255,255,0.3)' : 'transparent',
-                color: loginType === type ? 'white' : 'rgba(255,255,255,0.85)',
-                fontWeight: loginType === type ? '700' : '600',
-                fontSize: '0.8rem',
-                boxShadow: loginType === type ? '0 4px 12px rgba(0,0,0,0.15)' : 'none',
-                cursor: 'pointer', transition: 'all 0.3s', minWidth: '60px',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.3rem'
-              }}
-            >
-              {type === 'passenger' ? <><GraduationCap size={16} /> Passenger</> : 
-               type === 'parent' ? <><Users size={16} /> Parent</> : 
-               type === 'transport_incharge' ? <><Bus size={16} /> T.I.</> : 
-               <><Shield size={16} /> Admin</>}
-            </button>
-          ))}
+          {[
+            { id: 'passenger', label: lang === 'hi' ? 'यात्री' : 'Passenger', icon: GraduationCap },
+            { id: 'parent', label: lang === 'hi' ? 'पेरेंट' : 'Parent', icon: Users },
+            { id: 'transport_incharge', label: lang === 'hi' ? 'टी.आई.' : 'T.I.', icon: Bus },
+            { id: 'admin', label: lang === 'hi' ? 'एडमिन' : 'Admin', icon: Shield },
+          ].map(({ id, label, icon: Icon }) => {
+            const isActive = loginType === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => { setLoginType(id); setUserId(''); setPassword(''); }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '3px',
+                  padding: '0.55rem 0.15rem',
+                  borderRadius: '10px',
+                  border: isActive ? '1px solid rgba(255, 255, 255, 0.35)' : '1px solid transparent',
+                  backgroundColor: isActive ? 'rgba(255, 255, 255, 0.32)' : 'transparent',
+                  color: isActive ? '#ffffff' : 'rgba(255, 255, 255, 0.8)',
+                  fontWeight: isActive ? '700' : '600',
+                  fontSize: 'clamp(0.68rem, 2.2vw, 0.8rem)',
+                  letterSpacing: '-0.2px',
+                  boxShadow: isActive ? '0 2px 8px rgba(0, 0, 0, 0.18)' : 'none',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  minWidth: 0,
+                  width: '100%',
+                }}
+              >
+                <Icon size={14} style={{ flexShrink: 0 }} />
+                <span style={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap'
+                }}>
+                  {label}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
         <form onSubmit={handleLogin} className="flex flex-col" style={{ gap: '1rem' }}>

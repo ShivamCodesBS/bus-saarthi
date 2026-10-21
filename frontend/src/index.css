@@ -429,7 +429,7 @@ html, body, #root {
   
   /* Make Login Card more compact on mobile */
   .p-login { 
-    padding: 1.25rem 1.25rem;
+    padding: 1.25rem 0.85rem;
   }
   .p-login form { gap: 1rem !important; }
   .p-login input { padding-top: 0.6rem !important; padding-bottom: 0.6rem !important; }
