@@ -51,7 +51,8 @@ services:
       - .env
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgrespassword}@postgres:5432/${DB_NAME:-bus_saarthi}
+      DATABASE_URL: ${DATABASE_URL}
+      DIRECT_URL: ${DIRECT_URL}
       REDIS_URL: redis://redis:6379
     depends_on:
       postgres:
