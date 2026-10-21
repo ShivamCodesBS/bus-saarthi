@@ -24,7 +24,7 @@ export class UsersController {
 
   @Get()
   @UseGuards(RolesGuard)
-  @Roles(UserRole.admin, UserRole.transport_incharge)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
   findAll() {
     return this.usersService.findAll();
   }
@@ -36,14 +36,14 @@ export class UsersController {
 
   @Post()
   @UseGuards(RolesGuard)
-  @Roles(UserRole.admin, UserRole.transport_incharge)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
   create(@Body() body: CreateUserDto) {
     return this.usersService.create(body);
   }
 
   @Post('bulk')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.admin, UserRole.transport_incharge)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
   bulkCreate(@Body() body: { users: any[] }) {
     if (!body.users || !Array.isArray(body.users)) {
       throw new Error('Invalid payload: expected an array of users');
@@ -53,14 +53,14 @@ export class UsersController {
 
   @Put(':loginId')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.admin, UserRole.transport_incharge)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
   update(@Param('loginId') loginId: string, @Body() body: UpdateUserDto) {
     return this.usersService.update(loginId, body);
   }
 
   @Delete(':loginId')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.admin, UserRole.transport_incharge)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
   remove(@Param('loginId') loginId: string) {
     return this.usersService.remove(loginId);
   }

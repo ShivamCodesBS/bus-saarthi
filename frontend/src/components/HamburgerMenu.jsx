@@ -34,9 +34,15 @@ const HamburgerMenu = ({ isOpen, onClose }) => {
         }}
         className="animate-slide-up glass"
       >
-        <div style={{ padding: '1.5rem', display: 'flex', justifyContent: 'flex-end', borderBottom: '1px solid var(--border-color)' }}>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dark)' }}>
-            <X size={28} />
+        <div style={{ padding: '1.25rem 1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <img src="/logo.png" alt="Invertis Bus Saarthi" style={{ width: '38px', height: '38px', objectFit: 'contain' }} />
+            <span style={{ fontWeight: '800', fontSize: '1rem', color: 'var(--primary-blue)' }}>
+              BUS <span style={{ color: 'var(--secondary-orange)' }}>SAARTHI</span>
+            </span>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dark)', display: 'flex', alignItems: 'center' }}>
+            <X size={26} />
           </button>
         </div>
 

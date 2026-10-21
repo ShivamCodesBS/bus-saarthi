@@ -238,6 +238,19 @@ const Home = () => {
     };
     fetchNotifications();
 
+    // Check personal active SOS status
+    const checkSosStatus = async () => {
+      try {
+        const res = await axios.get(`${BACKEND_URL}/api/sos/my-status`, authHeaders);
+        if (res.data?.active) {
+          setSosActive(true);
+        }
+      } catch (err) {
+        // non-critical
+      }
+    };
+    checkSosStatus();
+
     // Socket.io connection for live data
     const socket = io(SOCKET_URL, {
       transports: ['websocket', 'polling'],
@@ -296,6 +309,32 @@ const Home = () => {
     // Listen for global emergency broadcasts
     socket.on('global_broadcast', (data) => {
       setActiveBroadcast(data);
+      setNotices((prev) => [data, ...prev.filter((n) => n.id !== data.id)]);
+      setHasUnread(true);
+      toast(`📢 ${data.title || 'Notice'}: ${data.message}`, {
+        duration: 9000,
+        icon: '🔔',
+        style: {
+          background: '#dc2626',
+          color: 'white',
+          fontWeight: 700,
+          borderRadius: '14px',
+        },
+      });
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        oscillator.type = 'triangle';
+        oscillator.frequency.setValueAtTime(660, audioCtx.currentTime);
+        gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+        oscillator.start();
+        oscillator.stop(audioCtx.currentTime + 0.6);
+      } catch (e) {
+        // Safe fallback if user hasn't interacted yet
+      }
     });
 
     // Listen for wake alarm trigger from server
@@ -369,14 +408,18 @@ const Home = () => {
 
     sosTimeoutRef.current = setTimeout(async () => {
       setSosTimer(null);
-      setSosActive(true);
       
-      // Call backend to trigger SOS (using /api/sos endpoint)
+      // Call backend to trigger SOS
       try {
         await axios.post(`${BACKEND_URL}/api/sos/trigger`, {}, { headers: { Authorization: `Bearer ${user?.token}` } });
-        toast.error("SOS Alert Triggered! Help is on the way.", { duration: 5000 });
+        setSosActive(true);
+        toast.error("🚨 SOS Alert Triggered! Admin and Transport Incharge alerted.", { duration: 6000 });
       } catch (err) {
-        toast.error("Failed to send SOS. Check connection.");
+        const errorMsg = err.response?.data?.message || "Failed to send SOS. Check connection.";
+        toast.error(errorMsg);
+        if (errorMsg.includes("already triggered recently")) {
+          setSosActive(true);
+        }
       }
     }, 5000);
   };
@@ -392,15 +435,11 @@ const Home = () => {
     if (sosActive) {
       if (!window.confirm("Do you want to cancel the active SOS alert?")) return;
       try {
-        await axios.post(`${BACKEND_URL}/api/sos/cancel`, {
-          passenger: user?.name || 'Anonymous',
-          login_id: user?.loginId || user?.login_id || user?.id || 'Unknown',
-          route: user?.routeId || user?.route_id || '4'
-        }, { headers: { Authorization: `Bearer ${user?.token}` } });
+        await axios.post(`${BACKEND_URL}/api/sos/cancel`, {}, { headers: { Authorization: `Bearer ${user?.token}` } });
         setSosActive(false);
         toast.success("SOS Alert Cancelled.");
       } catch (err) {
-        toast.error("Failed to cancel SOS. Check connection.");
+        toast.error(err.response?.data?.message || "Failed to cancel SOS. Check connection.");
       }
       return;
     }
@@ -441,8 +480,8 @@ const Home = () => {
       {/* HEADER */}
       <header className="flex justify-between items-center px-4 py-3 md:px-6 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800 z-50 sticky top-0 shadow-sm">
         <div className="flex items-center gap-3">
-          <div className="bg-blue-600 p-2 rounded-xl shadow-md shadow-blue-500/20">
-            <Bus size={24} className="text-white" />
+          <div className="w-11 h-11 rounded-2xl bg-white dark:bg-slate-800 p-1 shadow-md border border-slate-100 dark:border-slate-700/60 flex items-center justify-center shrink-0">
+            <img src="/logo.png" alt="Invertis Bus Saarthi" className="w-full h-full object-contain filter drop-shadow-sm" />
           </div>
           <div>
             <h1 className="text-lg md:text-xl font-extrabold text-blue-700 dark:text-blue-400 tracking-tight leading-tight">

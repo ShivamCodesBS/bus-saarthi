@@ -6,6 +6,7 @@ import {
 import { UserRole, FeeStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
+import { getISTMidnightUTC } from '../common/utils/ist-date.util';
 
 @Injectable()
 export class ParentsService {
@@ -79,8 +80,7 @@ export class ParentsService {
         });
         if (!child) return null;
 
-        const todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
+        const todayStart = getISTMidnightUTC();
 
         const todayAttendance = await this.prisma.attendance.findFirst({
           where: {
@@ -189,6 +189,24 @@ export class ParentsService {
     });
     if (!child || child.role !== UserRole.passenger) {
       throw new BadRequestException('Child not found or not a passenger');
+    }
+
+    try {
+      await this.prisma.leave.upsert({
+        where: {
+          loginId_date: {
+            loginId: childLoginId,
+            date: new Date(dateStr),
+          },
+        },
+        update: {},
+        create: {
+          loginId: childLoginId,
+          date: new Date(dateStr),
+        },
+      });
+    } catch (e: any) {
+      // Prisma unique constraint or duplicate handled cleanly
     }
 
     return {

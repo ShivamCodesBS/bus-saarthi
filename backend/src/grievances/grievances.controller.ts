@@ -43,7 +43,7 @@ export class GrievancesController {
   // Alias for Admin Dashboard: /api/admin/grievances
   @Get('admin/grievances')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.admin, UserRole.transport_incharge)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
   findAllAdmin(@Request() req: any) {
     return this.grievancesService.findAll(req.user?.loginId);
   }
@@ -62,14 +62,14 @@ export class GrievancesController {
   // Resolve — supports both PATCH (correct) and PUT (legacy frontend)
   @Patch('grievance/:id/resolve')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.admin, UserRole.transport_incharge)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
   resolveAdmin(@Param('id') id: string) {
     return this.grievancesService.resolve(id);
   }
 
   @Put('grievance/:id/resolve')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.admin, UserRole.transport_incharge)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
   resolvePut(@Param('id') id: string) {
     return this.grievancesService.resolve(id);
   }
@@ -77,7 +77,7 @@ export class GrievancesController {
   // Delete grievance
   @Delete('grievance/:id')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.admin, UserRole.transport_incharge)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
   remove(@Param('id') id: string) {
     return this.grievancesService.remove(id);
   }

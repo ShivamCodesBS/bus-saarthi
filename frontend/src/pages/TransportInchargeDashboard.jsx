@@ -152,7 +152,10 @@ const TransportInchargeDashboard = () => {
     socket.on('sos_alert', (data) => {
       const newAlert = { id: Date.now(), route: data.route, passenger: data.passenger, login_id: data.login_id, time: new Date().toLocaleTimeString() };
       setSosAlerts(prev => [newAlert, ...prev]);
-      try { new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg').play(); } catch (e) { }
+      try {
+        const audio = new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg');
+        audio.play().catch(() => {});
+      } catch (e) { }
     });
 
     socket.on('sos_cancelled', (data) => {
@@ -202,7 +205,7 @@ const TransportInchargeDashboard = () => {
       setIsLoading(true);
       const authHeaders = { headers: { Authorization: `Bearer ${user?.token}` } };
       try {
-        const [rRes, gRes, usersRes, attRes, mRes, sRes, hRes] = await Promise.all([
+        const [rRes, gRes, usersRes, attRes, mRes, sRes, hRes, sosRes] = await Promise.all([
           axios.get(`${BACKEND_URL}/api/routes`, authHeaders).catch(e => { console.warn('Routes fetch failed'); return { data: { status: 'error' } }; }),
           axios.get(`${BACKEND_URL}/api/admin/grievances`, authHeaders).catch(e => { console.warn('Grievances fetch failed'); return { data: { status: 'error' } }; }),
           axios.get(`${BACKEND_URL}/api/users`, authHeaders).catch(e => { console.warn('Users fetch failed'); return { data: { status: 'error' } }; }),
@@ -210,12 +213,14 @@ const TransportInchargeDashboard = () => {
           axios.get(`${BACKEND_URL}/api/merge/active`, authHeaders).catch(e => ({ data: { data: [] } })),
           axios.get(`${BACKEND_URL}/api/merge/suggestions`, authHeaders).catch(e => ({ data: { data: [] } })),
           axios.get(`${BACKEND_URL}/api/merge/history`, authHeaders).catch(e => ({ data: { data: [] } })),
+          axios.get(`${BACKEND_URL}/api/sos/active`, authHeaders).catch(e => ({ data: { data: [] } })),
         ]);
 
         const routes = Array.isArray(rRes.data) ? rRes.data : (rRes.data?.data || []);
         const grievancesData = Array.isArray(gRes.data) ? gRes.data : (gRes.data?.data || []);
         const usersData = Array.isArray(usersRes.data) ? usersRes.data : (usersRes.data?.data || []);
         const attendanceData = Array.isArray(attRes.data) ? attRes.data : (attRes.data?.data || []);
+        const sosData = Array.isArray(sosRes.data) ? sosRes.data : (sosRes.data?.data || []);
 
         setRoutesList(routes);
         if (routes.length > 0 && selectedRoute === '1') setSelectedRoute(routes[0].routeId || routes[0].route_id);
@@ -226,6 +231,7 @@ const TransportInchargeDashboard = () => {
         setActiveMerges(mRes.data?.data || []);
         setMergeSuggestions(sRes.data?.data || []);
         setMergeHistory(hRes.data?.data || []);
+        if (sosData.length > 0) setSosAlerts(sosData);
 
         if (routes.length === 0 || usersData.length === 0) {
           console.warn("Some data lists are empty. This might be normal or a fetch issue.");
@@ -543,8 +549,8 @@ const TransportInchargeDashboard = () => {
       {/* Header */}
       <header className="p-header z-50 sticky top-0" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--white)', boxShadow: 'var(--shadow)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <div style={{ backgroundColor: '#28a745', padding: '0.5rem', borderRadius: '10px' }}>
-            <Car size={24} color="white" />
+          <div style={{ width: '42px', height: '42px', borderRadius: '12px', padding: '4px', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(0,0,0,0.06)' }}>
+            <img src="/logo.png" alt="Invertis Bus Saarthi" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           </div>
           <div>
             <h1 style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--text-dark)', lineHeight: 1.2 }}>Transport <span style={{ color: '#28a745' }}>Incharge</span></h1>
@@ -1257,7 +1263,7 @@ const TransportInchargeDashboard = () => {
                     )}
                     {userFilter === 'passenger' && (
                       <td style={{ padding: '1rem', textAlign: 'center' }}>
-                        {u.aws_face_id ? (
+                        {Boolean(u.faceEnrolledAt || u.face_enrolled_at || u.aws_face_id || u.awsFaceId) ? (
                           <span style={{ backgroundColor: '#e6fae6', color: '#28a745', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 'bold' }}>Yes</span>
                         ) : (
                           <span style={{ backgroundColor: '#fff1f0', color: '#cf1322', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 'bold' }}>No</span>
@@ -1478,8 +1484,8 @@ const TransportInchargeDashboard = () => {
                 
                 <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700">
                   <p className="text-xs text-slate-500 dark:text-slate-400 m-0 mb-1 font-bold uppercase tracking-wider">Face Seeded (RFID/AI)</p>
-                  <p className={`font-bold m-0 ${viewingUser.aws_face_id || viewingUser.awsFaceId ? 'text-green-600' : 'text-red-500'}`}>
-                    {viewingUser.aws_face_id || viewingUser.awsFaceId ? 'Verified' : 'Not Seeded'}
+                  <p className={`font-bold m-0 ${viewingUser.faceEnrolledAt || viewingUser.face_enrolled_at || viewingUser.aws_face_id || viewingUser.awsFaceId ? 'text-green-600' : 'text-red-500'}`}>
+                    {viewingUser.faceEnrolledAt || viewingUser.face_enrolled_at || viewingUser.aws_face_id || viewingUser.awsFaceId ? 'Verified' : 'Not Seeded'}
                   </p>
                 </div>
               </div>

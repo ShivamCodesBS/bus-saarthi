@@ -59,11 +59,11 @@ export default function Login({ setAuthToken }) {
         <div className="bg-white/70 backdrop-blur-2xl border border-white/50 rounded-3xl shadow-2xl overflow-hidden p-8">
           
           <div className="flex flex-col items-center mb-8">
-            <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-violet-600 rounded-2xl shadow-lg flex items-center justify-center mb-4">
-              <ShieldAlert className="w-8 h-8 text-white" />
+            <div className="w-20 h-20 bg-white rounded-2xl shadow-lg border border-slate-100 flex items-center justify-center p-2 mb-4">
+              <img src="/logo.png" alt="Invertis Bus Saarthi" className="w-full h-full object-contain filter drop-shadow-sm" />
             </div>
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight text-center">Tech Admin Portal</h1>
-            <p className="text-slate-500 text-sm mt-1 text-center font-medium">Bus Saarthi System Control</p>
+            <p className="text-slate-500 text-sm mt-1 text-center font-medium">Invertis Bus Saarthi · System Control</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-5">

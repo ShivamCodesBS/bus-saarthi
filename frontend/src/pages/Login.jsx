@@ -134,11 +134,17 @@ const Login = () => {
         justifyContent: 'space-between',
         boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
       }}>
-        <img 
-          src="https://invertis-feedback-system-2.onrender.com/main%20logo.png" 
-          alt="Invertis University" 
-          style={{ height: '65px', maxHeight: '65px', objectFit: 'contain' }}
-        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <img 
+            src="/logo.png" 
+            alt="Invertis Bus Saarthi" 
+            style={{ height: '52px', maxHeight: '52px', objectFit: 'contain' }}
+            onError={(e) => { e.target.onerror = null; e.target.src = '/favicon.png'; }}
+          />
+          <span style={{ fontWeight: '800', fontSize: '1.2rem', color: 'var(--primary-blue)', letterSpacing: '-0.3px' }} className="hidden sm:inline">
+            INVERTIS <span style={{ color: 'var(--secondary-orange)' }}>BUS SAARTHI</span>
+          </span>
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <button 
             type="button"
@@ -166,16 +172,11 @@ const Login = () => {
         boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)'
       }}>
         <div className="flex flex-col items-center" style={{ marginBottom: '1.25rem' }}>
-          <div style={{
-            background: loginType === 'admin' ? 'var(--secondary-orange)' : loginType === 'transport_incharge' ? '#28a745' : loginType === 'parent' ? '#9b59b6' : 'var(--primary-blue)',
-            padding: '0.75rem',
-            borderRadius: '16px', marginBottom: '0.5rem',
-            transition: 'background-color 0.3s'
-          }}>
-            {loginType === 'admin' ? <Shield size={24} color="white" /> : loginType === 'transport_incharge' ? <Car size={24} color="white" /> : loginType === 'parent' ? <Heart size={24} color="white" /> : <Bus size={24} color="white" />}
+          <div className="w-20 h-20 mb-2 p-1.5 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 shadow-lg flex items-center justify-center">
+            <img src="/logo.png" alt="Invertis Bus Saarthi" className="w-full h-full object-contain filter drop-shadow-md" />
           </div>
           <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: 'white', margin: 0, lineHeight: 1.2 }}>{t('loginTitle')}</h2>
-          <p style={{ color: 'rgba(255,255,255,0.7)', margin: 0, fontSize: '0.9rem' }}>{t('loginSubtitle')}</p>
+          <p style={{ color: 'rgba(255,255,255,0.8)', margin: 0, fontSize: '0.9rem' }}>{t('loginSubtitle')}</p>
         </div>
 
         {/* Toggle Switch */}

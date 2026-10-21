@@ -36,8 +36,17 @@ export class NotificationsController {
 
   @Post('broadcast')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.admin, UserRole.transport_incharge)
-  broadcast(@Body() body: { message: string; title?: string }) {
-    return this.notificationsService.broadcastMessage(body.message, body.title);
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
+  broadcast(
+    @Request() req: any,
+    @Body() body: { message: string; title?: string; sender?: string },
+  ) {
+    const sender =
+      body.sender || req.user?.name || req.user?.loginId || 'Administration';
+    return this.notificationsService.broadcastMessage(
+      body.message,
+      body.title,
+      sender,
+    );
   }
 }

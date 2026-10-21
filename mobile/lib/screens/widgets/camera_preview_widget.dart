@@ -14,6 +14,7 @@ import '../../core/constants.dart';
 import '../../services/api_service.dart';
 import '../../models/attendance_payload.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/attendance_provider.dart';
 import 'loading_overlay.dart';
 
 class CameraPreviewWidget extends StatefulWidget {
@@ -198,20 +199,24 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget> {
 
         _showMatchSnackbar(result);
 
-        // Sync attendance to backend (fire-and-forget)
+        // Sync attendance to backend and queue offline if disconnected
         final auth = Provider.of<AuthProvider>(context, listen: false);
         final routeId = auth.user?.routeId ?? AppConstants.defaultRouteId;
-        _apiService.postAttendance(AttendancePayload(
-          data: AttendanceData(
-            studentId: result.loginId!,
-            loginId: result.loginId!,
-            name: result.name ?? 'Unknown',
-            feeStatus: result.feeStatus ?? 'unpaid',
-            confidence: result.confidence ?? 0,
-            checkInTime: now.toIso8601String(),
-            routeId: routeId,
-          ),
-        ));
+        final attendanceData = AttendanceData(
+          studentId: result.loginId!,
+          loginId: result.loginId!,
+          name: result.name ?? 'Unknown',
+          feeStatus: result.feeStatus ?? 'unpaid',
+          confidence: result.confidence ?? 0,
+          checkInTime: now.toIso8601String(),
+          routeId: routeId,
+        );
+
+        try {
+          Provider.of<AttendanceProvider>(context, listen: false).addAttendance(attendanceData);
+        } catch (_) {
+          _apiService.postAttendance(AttendancePayload(data: attendanceData));
+        }
       } else {
         if (_matchState != FaceMatchState.success && _matchState != FaceMatchState.duplicate) {
           setState(() {

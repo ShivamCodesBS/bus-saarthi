@@ -6,7 +6,12 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('Seeding database...');
   
-  const hashedPassword = await bcrypt.hash('Invertis@123', 10);
+  const adminPass = await bcrypt.hash('Admin@123', 10);
+  const techAdminPass = await bcrypt.hash('TechAdmin@123', 10);
+  const studentPass = await bcrypt.hash('Student@123', 10);
+  const parentPass = await bcrypt.hash('Parent@123', 10);
+  const transportPass = await bcrypt.hash('Transport@123', 10);
+  const driverPass = await bcrypt.hash('Driver@123', 10);
 
   const routeNames = ['Bus 1', 'Bus 2', 'Bus 3', 'Bus 4', 'Bus 5'];
   const destinations = ['Civil Lines', 'Rajendra Nagar', 'DD Puram', 'Subhash Nagar', 'Cantonment'];
@@ -27,52 +32,98 @@ async function main() {
     });
   }
 
+  // 1. General Admins (for Main Frontend Portal)
   const admin1 = await prisma.user.upsert({
     where: { loginId: 'AD001' },
-    update: {},
-    create: { loginId: 'AD001', name: 'System Admin 1', password: hashedPassword, role: UserRole.admin, phone: '9999999991' },
+    update: { password: adminPass, role: UserRole.admin },
+    create: { loginId: 'AD001', name: 'System Admin 1', password: adminPass, role: UserRole.admin, phone: '9999999991' },
   });
   const admin2 = await prisma.user.upsert({
     where: { loginId: 'AD002' },
-    update: {},
-    create: { loginId: 'AD002', name: 'System Admin 2', password: hashedPassword, role: UserRole.admin, phone: '9999999992' },
+    update: { password: adminPass, role: UserRole.admin },
+    create: { loginId: 'AD002', name: 'System Admin 2', password: adminPass, role: UserRole.admin, phone: '9999999992' },
   });
   const admin3 = await prisma.user.upsert({
     where: { loginId: 'AD003' },
-    update: {},
-    create: { loginId: 'AD003', name: 'System Admin 3', password: hashedPassword, role: UserRole.admin, phone: '9999999993' },
+    update: { password: adminPass, role: UserRole.admin },
+    create: { loginId: 'AD003', name: 'System Admin 3', password: adminPass, role: UserRole.admin, phone: '9999999993' },
   });
 
-  // Generate 10 Students and their Parents
+  // 2. Dedicated Tech Admins (for Tech Admin Frontend :81)
+  await prisma.user.upsert({
+    where: { loginId: 'techadmin' },
+    update: { password: techAdminPass, role: UserRole.tech_admin },
+    create: {
+      loginId: 'techadmin',
+      name: 'Head Tech Admin',
+      password: techAdminPass,
+      role: UserRole.tech_admin,
+      phone: '9999999990',
+      email: 'techadmin@bussaarthi.com',
+    },
+  });
+
+  await prisma.user.upsert({
+    where: { loginId: 'admin' },
+    update: { password: techAdminPass, role: UserRole.tech_admin },
+    create: {
+      loginId: 'admin',
+      name: 'System Administrator',
+      password: techAdminPass,
+      role: UserRole.tech_admin,
+      phone: '9999999999',
+      email: 'admin@bussaarthi.com',
+    },
+  });
+
+  await prisma.user.upsert({
+    where: { loginId: 'TECH001' },
+    update: { password: techAdminPass, role: UserRole.tech_admin },
+    create: {
+      loginId: 'TECH001',
+      name: 'Tech Operations Engineer',
+      password: techAdminPass,
+      role: UserRole.tech_admin,
+      phone: '9999999998',
+      email: 'tech001@bussaarthi.com',
+    },
+  });
+
+  // 3. Students (Passengers) and Parents
   for (let i = 1; i <= 10; i++) {
     const sId = `S${String(i).padStart(3, '0')}`;
     const pId = `P${String(i).padStart(3, '0')}`;
-    const parentPhone = `77777777${String(i - 1).padStart(2, '0')}`; // e.g. 7777777700, 7777777701...
+    const parentPhone = `77777777${String(i - 1).padStart(2, '0')}`;
 
-    const passenger = await prisma.user.upsert({
+    await prisma.user.upsert({
       where: { loginId: sId },
       update: {
-        routeId: String((i % 5) + 1), // Update existing students' routes too
+        password: studentPass,
+        role: UserRole.passenger,
+        routeId: String((i % 5) + 1),
       },
       create: {
         loginId: sId,
         name: `Student ${i}`,
-        password: hashedPassword,
+        password: studentPass,
         role: UserRole.passenger,
-        routeId: String((i % 5) + 1), // Route 1 to 5
+        routeId: String((i % 5) + 1),
         feeStatus: FeeStatus.paid,
         phone: `88888888${String(i - 1).padStart(2, '0')}`,
         gradeClass: 'B.Tech CS 3rd Year',
       },
     });
 
-    const parent = await prisma.user.upsert({
+    await prisma.user.upsert({
       where: { loginId: pId },
-      update: {},
+      update: {
+        password: parentPass,
+        role: UserRole.parent,
+      },
       create: {
         loginId: pId,
         name: `Parent ${i}`,
-        password: hashedPassword,
+        password: parentPass,
         role: UserRole.parent,
         phone: parentPhone,
       },
@@ -94,32 +145,33 @@ async function main() {
     });
   }
 
-  const ti1 = await prisma.user.upsert({
+  // 4. Transport Incharges (TI)
+  await prisma.user.upsert({
     where: { loginId: 'TI001' },
-    update: {},
-    create: { loginId: 'TI001', name: 'Transport Incharge 1', password: hashedPassword, role: UserRole.transport_incharge, phone: '6666666661' },
+    update: { password: transportPass, role: UserRole.transport_incharge },
+    create: { loginId: 'TI001', name: 'Transport Incharge 1', password: transportPass, role: UserRole.transport_incharge, phone: '6666666661' },
   });
-  const ti2 = await prisma.user.upsert({
+  await prisma.user.upsert({
     where: { loginId: 'TI002' },
-    update: {},
-    create: { loginId: 'TI002', name: 'Transport Incharge 2', password: hashedPassword, role: UserRole.transport_incharge, phone: '6666666662' },
+    update: { password: transportPass, role: UserRole.transport_incharge },
+    create: { loginId: 'TI002', name: 'Transport Incharge 2', password: transportPass, role: UserRole.transport_incharge, phone: '6666666662' },
   });
-  const ti3 = await prisma.user.upsert({
+  await prisma.user.upsert({
     where: { loginId: 'TI003' },
-    update: {},
-    create: { loginId: 'TI003', name: 'Transport Incharge 3', password: hashedPassword, role: UserRole.transport_incharge, phone: '6666666663' },
+    update: { password: transportPass, role: UserRole.transport_incharge },
+    create: { loginId: 'TI003', name: 'Transport Incharge 3', password: transportPass, role: UserRole.transport_incharge, phone: '6666666663' },
   });
 
-  // Generate 5 Drivers for the 5 Routes
+  // 5. Drivers for the 5 Routes
   for (let i = 1; i <= 5; i++) {
     const dId = `D${String(i).padStart(3, '0')}`;
     await prisma.user.upsert({
       where: { loginId: dId },
-      update: {},
+      update: { password: driverPass, role: UserRole.driver },
       create: {
         loginId: dId,
         name: `Driver ${i}`,
-        password: hashedPassword,
+        password: driverPass,
         role: UserRole.driver,
         routeId: String(i),
         phone: `555555555${i}`,

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as webpush from 'web-push';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
 export class NotificationsService {
@@ -10,6 +11,7 @@ export class NotificationsService {
   constructor(
     private prisma: PrismaService,
     private configService: ConfigService,
+    private eventEmitter: EventEmitter2,
   ) {
     const vapidPublicKey = this.configService.get<string>('VAPID_PUBLIC_KEY');
     const vapidPrivateKey = this.configService.get<string>('VAPID_PRIVATE_KEY');
@@ -70,8 +72,21 @@ export class NotificationsService {
     }
   }
 
-  async broadcastMessage(message: string, title?: string) {
-    await this.prisma.broadcast.create({ data: { message, title } });
+  async broadcastMessage(message: string, title?: string, sender?: string) {
+    const broadcast = await this.prisma.broadcast.create({
+      data: { message, title },
+    });
+
+    const broadcastPayload = {
+      id: broadcast.id,
+      title: title || 'Notice',
+      message,
+      sender: sender || 'Administration',
+      timestamp: broadcast.timestamp,
+    };
+
+    // Emit event so WebSocket Gateway can push it in real-time to all connected users
+    this.eventEmitter.emit('broadcast.created', broadcastPayload);
 
     const payload = {
       title: title || 'Bus Saarthi Broadcast',
@@ -94,7 +109,7 @@ export class NotificationsService {
       }
     }
 
-    return { status: 'success', message: 'Broadcast sent' };
+    return { status: 'success', message: 'Broadcast sent', data: broadcastPayload };
   }
 
   async getRecentBroadcasts() {

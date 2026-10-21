@@ -31,21 +31,21 @@ export class RoutesController {
 
   @Post()
   @UseGuards(RolesGuard)
-  @Roles(UserRole.admin, UserRole.transport_incharge)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
   create(@Body() body: any) {
     return this.routesService.create(body);
   }
 
   @Put(':routeId')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.admin, UserRole.transport_incharge)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
   update(@Param('routeId') routeId: string, @Body() body: any) {
     return this.routesService.update(routeId, body);
   }
 
   @Delete(':routeId')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.admin, UserRole.transport_incharge)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
   remove(@Param('routeId') routeId: string) {
     return this.routesService.remove(routeId);
   }

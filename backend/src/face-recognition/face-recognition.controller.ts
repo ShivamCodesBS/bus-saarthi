@@ -5,6 +5,8 @@ import {
   Get,
   Param,
   UseGuards,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { FaceRecognitionService } from './face-recognition.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -20,10 +22,16 @@ export class FaceRecognitionController {
   ) {}
 
   /**
-   * Called by mobile app after it successfully captures ArcFace embeddings on-device.
+   * Called by mobile app or admin portal after face enrollment is performed.
    */
   @Post(':passengerId/enroll')
-  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.driver)
+  @HttpCode(HttpStatus.OK)
+  @Roles(
+    UserRole.admin,
+    UserRole.transport_incharge,
+    UserRole.driver,
+    UserRole.tech_admin,
+  )
   async markEnrolled(@Param('passengerId') passengerId: string) {
     return this.faceRecognitionService.markFaceEnrolled(passengerId);
   }
@@ -40,7 +48,7 @@ export class FaceRecognitionController {
    * Clear face enrollment for a passenger.
    */
   @Delete(':passengerId')
-  @Roles(UserRole.admin, UserRole.transport_incharge)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
   async deleteFace(@Param('passengerId') passengerId: string) {
     return this.faceRecognitionService.deleteFace(passengerId);
   }

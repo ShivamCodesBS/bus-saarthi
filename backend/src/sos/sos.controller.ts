@@ -1,4 +1,4 @@
-import { Controller, Post, Request, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Request, UseGuards } from '@nestjs/common';
 import { SosService } from './sos.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 
@@ -16,6 +16,16 @@ export class SosController {
   @Post('cancel')
   cancel(@Request() req: any) {
     return this.sosService.cancel(req.user.loginId);
+  }
+
+  @Get('active')
+  getActive() {
+    return this.sosService.getActiveAlerts();
+  }
+
+  @Get('my-status')
+  getMyStatus(@Request() req: any) {
+    return this.sosService.getMyStatus(req.user.loginId);
   }
 }
 

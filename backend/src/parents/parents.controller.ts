@@ -21,7 +21,8 @@ export class ParentsController {
    */
   @Get('me')
   async getMe(@Request() req) {
-    return this.parentsService.getParentWithChildren(req.user.login_id);
+    const parentLoginId = req.user?.loginId || req.user?.login_id;
+    return this.parentsService.getParentWithChildren(parentLoginId);
   }
 
   /**
@@ -33,8 +34,9 @@ export class ParentsController {
     @Request() req,
     @Param('loginId') childLoginId: string,
   ) {
+    const parentLoginId = req.user?.loginId || req.user?.login_id;
     return this.parentsService.getChildAttendance(
-      req.user.login_id,
+      parentLoginId,
       childLoginId,
     );
   }
@@ -45,8 +47,9 @@ export class ParentsController {
    */
   @Get('child/:loginId/status')
   async getChildStatus(@Request() req, @Param('loginId') childLoginId: string) {
+    const parentLoginId = req.user?.loginId || req.user?.login_id;
     return this.parentsService.getChildTodayStatus(
-      req.user.login_id,
+      parentLoginId,
       childLoginId,
     );
   }
@@ -61,8 +64,9 @@ export class ParentsController {
     @Param('loginId') childLoginId: string,
     @Body('date') date: string,
   ) {
+    const parentLoginId = req.user?.loginId || req.user?.login_id;
     return this.parentsService.markChildLeave(
-      req.user.login_id,
+      parentLoginId,
       childLoginId,
       date,
     );

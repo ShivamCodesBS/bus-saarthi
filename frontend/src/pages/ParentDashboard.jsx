@@ -375,12 +375,12 @@ const ParentDashboard = () => {
         boxShadow: '0 4px 20px rgba(139,92,246,0.4)',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <div style={{ background: 'rgba(255,255,255,0.2)', borderRadius: '10px', padding: '6px' }}>
-            <Heart size={22} color="white" />
+          <div style={{ width: '40px', height: '40px', borderRadius: '12px', padding: '4px', backgroundColor: 'rgba(255,255,255,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
+            <img src="/logo.png" alt="Invertis Bus Saarthi" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           </div>
           <div>
             <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, letterSpacing: '-0.3px' }}>Parent Dashboard</h1>
-            <p style={{ margin: 0, fontSize: '0.72rem', opacity: 0.8 }}>Bus Saarthi · Guardian View</p>
+            <p style={{ margin: 0, fontSize: '0.72rem', opacity: 0.9 }}>Invertis Bus Saarthi · Guardian View</p>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>

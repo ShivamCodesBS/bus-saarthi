@@ -20,9 +20,9 @@ export default function Layout({ setAuthToken }) {
 
   const SidebarContent = () => (
     <>
-      <div className="h-20 flex items-center px-6 border-b border-slate-100 font-extrabold text-2xl tracking-tight text-slate-800">
-        <div className="bg-blue-600 p-2 rounded-xl mr-3 shadow-lg shadow-blue-500/20">
-          <ShieldAlert className="w-6 h-6 text-white" />
+      <div className="h-20 flex items-center px-6 border-b border-slate-100 font-extrabold text-xl tracking-tight text-slate-800">
+        <div className="w-10 h-10 rounded-xl mr-3 shadow-md flex items-center justify-center p-1 bg-white border border-slate-100 shrink-0">
+          <img src="/logo.png" alt="Invertis Bus Saarthi" className="w-full h-full object-contain filter drop-shadow-sm" />
         </div>
         Bus <span className="text-orange-500 ml-1">Admin</span>
       </div>
@@ -72,8 +72,9 @@ export default function Layout({ setAuthToken }) {
 
       {/* Mobile Header */}
       <div className="lg:hidden absolute top-0 left-0 right-0 h-16 bg-white/80 backdrop-blur-xl border-b border-slate-200 z-50 flex items-center justify-between px-4">
-        <div className="font-extrabold text-xl text-slate-800 flex items-center">
-          <ShieldAlert className="w-6 h-6 text-blue-600 mr-2" /> Tech Admin
+        <div className="font-extrabold text-lg text-slate-800 flex items-center gap-2">
+          <img src="/logo.png" alt="Invertis Bus Saarthi" className="w-8 h-8 object-contain" />
+          <span>Tech Admin</span>
         </div>
         <Button variant="ghost" size="icon" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
           {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}

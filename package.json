@@ -1,0 +1,23 @@
+{
+  "name": "bus-saarthi",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bus Saarthi - Smart Bus Management System Monorepo",
+  "workspaces": [
+    "backend",
+    "frontend",
+    "admin-frontend"
+  ],
+  "scripts": {
+    "postinstall": "npm run prisma:generate --if-present",
+    "prisma:generate": "npm --prefix backend run prisma:generate",
+    "install:all": "npm install --prefix backend && npm install --prefix frontend && npm install --prefix admin-frontend",
+    "dev:backend": "npm run start:dev --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "dev:admin": "npm run dev --prefix admin-frontend",
+    "build:backend": "npm run build --prefix backend",
+    "build:frontend": "npm run build --prefix frontend",
+    "build:admin": "npm run build --prefix admin-frontend",
+    "build:all": "npm run build:backend && npm run build:frontend && npm run build:admin"
+  }
+}

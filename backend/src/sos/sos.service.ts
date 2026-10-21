@@ -75,15 +75,23 @@ export class SosService {
     });
 
     // Notify Gateway
+    const timeFormatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     this.eventEmitter.emit('sos.triggered', {
       login_id: loginId,
-      passenger: user?.name,
+      passenger: user?.name || 'Anonymous',
       route: routeId,
+      time: timeFormatted,
     });
 
     return {
       status: 'success',
       message: 'SOS alert broadcasted to route ' + routeId,
+      data: {
+        login_id: loginId,
+        passenger: user?.name,
+        route: routeId,
+        time: timeFormatted,
+      },
     };
   }
 
@@ -95,7 +103,60 @@ export class SosService {
       this.inMemoryCooldown.delete(loginId);
     }
 
+    try {
+      await this.prisma.sosAlert.deleteMany({
+        where: { loginId },
+      });
+    } catch (e) {
+      this.logger.warn(`Failed to delete sosAlert records for ${loginId}: ${e.message}`);
+    }
+
     this.eventEmitter.emit('sos.cancelled', { login_id: loginId });
     return { status: 'success', message: 'SOS alert cancelled' };
+  }
+
+  async getActiveAlerts() {
+    const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
+    const alerts = await this.prisma.sosAlert.findMany({
+      where: {
+        time: { gte: twelveHoursAgo },
+      },
+      orderBy: { time: 'desc' },
+      take: 20,
+    });
+
+    return {
+      status: 'success',
+      data: alerts.map((a) => ({
+        id: a.id,
+        login_id: a.loginId,
+        passenger: a.passenger || 'Anonymous',
+        route: a.route,
+        time: new Date(a.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      })),
+    };
+  }
+
+  async getMyStatus(loginId: string) {
+    const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
+    const active = await this.prisma.sosAlert.findFirst({
+      where: {
+        loginId,
+        time: { gte: twelveHoursAgo },
+      },
+      orderBy: { time: 'desc' },
+    });
+
+    return {
+      status: 'success',
+      active: !!active,
+      alert: active
+        ? {
+            id: active.id,
+            route: active.route,
+            time: new Date(active.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          }
+        : null,
+    };
   }
 }

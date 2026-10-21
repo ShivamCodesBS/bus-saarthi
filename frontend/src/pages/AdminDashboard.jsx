@@ -187,7 +187,10 @@ const AdminDashboard = () => {
         time: new Date().toLocaleTimeString()
       };
       setSosAlerts(prev => [newAlert, ...prev]);
-      try { new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg').play(); } catch (e) { }
+      try {
+        const audio = new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg');
+        audio.play().catch(() => {});
+      } catch (e) { }
     });
 
     socket.on('sos_cancelled', (data) => {
@@ -264,7 +267,7 @@ const AdminDashboard = () => {
       setIsLoading(true);
       const authHeaders = { headers: { Authorization: `Bearer ${user?.token}` } };
       try {
-        const [rRes, gRes, usersRes, attRes, mRes, sRes, hRes] = await Promise.all([
+        const [rRes, gRes, usersRes, attRes, mRes, sRes, hRes, sosRes] = await Promise.all([
           axios.get(`${BACKEND_URL}/api/routes`, authHeaders).catch(e => { console.warn('Routes fetch failed'); return { data: { status: 'error' } }; }),
           axios.get(`${BACKEND_URL}/api/admin/grievances`, authHeaders).catch(e => { console.warn('Grievances fetch failed'); return { data: { status: 'error' } }; }),
           axios.get(`${BACKEND_URL}/api/users`, authHeaders).catch(e => { console.warn('Users fetch failed'); return { data: { status: 'error' } }; }),
@@ -272,12 +275,14 @@ const AdminDashboard = () => {
           axios.get(`${BACKEND_URL}/api/merge/active`, authHeaders).catch(e => ({ data: { data: [] } })),
           axios.get(`${BACKEND_URL}/api/merge/suggestions`, authHeaders).catch(e => ({ data: { data: [] } })),
           axios.get(`${BACKEND_URL}/api/merge/history`, authHeaders).catch(e => ({ data: { data: [] } })),
+          axios.get(`${BACKEND_URL}/api/sos/active`, authHeaders).catch(e => ({ data: { data: [] } })),
         ]);
 
         const routes = Array.isArray(rRes.data) ? rRes.data : (rRes.data?.data || []);
         const grievancesData = Array.isArray(gRes.data) ? gRes.data : (gRes.data?.data || []);
         const usersData = Array.isArray(usersRes.data) ? usersRes.data : (usersRes.data?.data || []);
         const attendanceData = Array.isArray(attRes.data) ? attRes.data : (attRes.data?.data || []);
+        const sosData = Array.isArray(sosRes.data) ? sosRes.data : (sosRes.data?.data || []);
 
         setRoutesList(routes);
         if (routes.length > 0 && selectedRoute === '1') setSelectedRoute(routes[0].routeId || routes[0].route_id);
@@ -288,6 +293,7 @@ const AdminDashboard = () => {
         setActiveMerges(mRes.data?.data || []);
         setMergeSuggestions(sRes.data?.data || []);
         setMergeHistory(hRes.data?.data || []);
+        if (sosData.length > 0) setSosAlerts(sosData);
 
       } catch (err) {
         console.error("Error fetching admin data", err);
@@ -544,6 +550,9 @@ const AdminDashboard = () => {
           const newU = { ...u };
           delete newU.face_descriptor;
           delete newU.awsFaceId;
+          delete newU.aws_face_id;
+          newU.faceEnrolledAt = null;
+          newU.face_enrolled_at = null;
           return newU;
         }
         return u;
@@ -551,6 +560,10 @@ const AdminDashboard = () => {
       if (editingUser && (editingUser.login_id || editingUser.loginId) === login_id) {
         const newEditingUser = { ...editingUser };
         delete newEditingUser.face_descriptor;
+        delete newEditingUser.awsFaceId;
+        delete newEditingUser.aws_face_id;
+        newEditingUser.faceEnrolledAt = null;
+        newEditingUser.face_enrolled_at = null;
         setEditingUser(newEditingUser);
       }
       toast.success("Face data removed successfully!");
@@ -657,8 +670,8 @@ const AdminDashboard = () => {
         backgroundColor: 'var(--white)', boxShadow: 'var(--shadow)'
       }}>
         <div className="flex items-center gap-2 md:gap-3 min-w-0">
-          <div className="bg-orange-500 p-2 rounded-xl shrink-0">
-            <Shield size={24} color="white" />
+          <div className="w-10 h-10 rounded-xl bg-orange-50 dark:bg-slate-800 p-1 shrink-0 flex items-center justify-center border border-orange-100 dark:border-slate-700 shadow-sm">
+            <img src="/logo.png" alt="Invertis Bus Saarthi" className="w-full h-full object-contain filter drop-shadow-sm" />
           </div>
           <div className="min-w-0">
             <h1 className="text-lg md:text-xl font-bold text-slate-800 dark:text-slate-100 leading-tight m-0 truncate">
@@ -1300,7 +1313,7 @@ const AdminDashboard = () => {
                         </td>
                         {userFilter === 'passenger' && (
                           <td style={{ padding: '1rem', textAlign: 'center' }}>
-                            {u.aws_face_id ? (
+                            {Boolean(u.faceEnrolledAt || u.face_enrolled_at || u.aws_face_id || u.awsFaceId) ? (
                               <span style={{ backgroundColor: '#e6fae6', color: '#28a745', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 'bold' }}>Yes</span>
                             ) : (
                               <span style={{ backgroundColor: '#fff1f0', color: '#cf1322', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 'bold' }}>No</span>
@@ -2031,8 +2044,8 @@ const AdminDashboard = () => {
                 
                 <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700">
                   <p className="text-xs text-slate-500 dark:text-slate-400 m-0 mb-1 font-bold uppercase tracking-wider">Face Seeded (RFID/AI)</p>
-                  <p className={`font-bold m-0 ${viewingUser.aws_face_id || viewingUser.awsFaceId ? 'text-green-600' : 'text-red-500'}`}>
-                    {viewingUser.aws_face_id || viewingUser.awsFaceId ? 'Verified' : 'Not Seeded'}
+                  <p className={`font-bold m-0 ${viewingUser.faceEnrolledAt || viewingUser.face_enrolled_at || viewingUser.aws_face_id || viewingUser.awsFaceId ? 'text-green-600' : 'text-red-500'}`}>
+                    {viewingUser.faceEnrolledAt || viewingUser.face_enrolled_at || viewingUser.aws_face_id || viewingUser.awsFaceId ? 'Verified' : 'Not Seeded'}
                   </p>
                 </div>
               </div>
@@ -2272,8 +2285,8 @@ const AdminDashboard = () => {
               )}
               <div className="flex flex-col sm:flex-row gap-4 mt-4">
                 <button type="button" onClick={() => setShowUserModal(false)} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', background: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Cancel</button>
-                {editingUser && editingUser.aws_face_id && (
-                  <button type="button" onClick={() => handleRemoveFace(editingUser.login_id)} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '1px solid #cf1322', background: '#fff1f0', color: '#cf1322', cursor: 'pointer', fontWeight: 'bold' }}>Remove Face</button>
+                {editingUser && (editingUser.faceEnrolledAt || editingUser.face_enrolled_at || editingUser.aws_face_id || editingUser.awsFaceId) && (
+                  <button type="button" onClick={() => handleRemoveFace(editingUser.login_id || editingUser.loginId)} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '1px solid #cf1322', background: '#fff1f0', color: '#cf1322', cursor: 'pointer', fontWeight: 'bold' }}>Remove Face</button>
                 )}
                 <button type="submit" style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: 'none', background: 'var(--primary-blue)', color: 'white', cursor: 'pointer', fontWeight: 'bold' }}>{editingUser ? 'Update' : 'Create'}</button>
               </div>

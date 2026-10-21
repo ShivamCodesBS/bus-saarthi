@@ -1,6 +1,5 @@
 import {
   IsString,
-  IsNotEmpty,
   IsArray,
   ValidateNested,
   IsOptional,
@@ -8,10 +7,18 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-class AttendanceRecordDto {
+export class AttendanceRecordDto {
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  passenger_id: string;
+  passenger_id?: string;
+
+  @IsOptional()
+  @IsString()
+  login_id?: string;
+
+  @IsOptional()
+  @IsString()
+  student_id?: string;
 
   @IsOptional()
   @IsString()
@@ -28,15 +35,59 @@ class AttendanceRecordDto {
   @IsOptional()
   @IsString()
   timestamp?: string;
+
+  @IsOptional()
+  @IsString()
+  check_in_time?: string;
+
+  @IsOptional()
+  @IsString()
+  route_id?: string;
 }
 
 export class SyncAttendanceDto {
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  route_id: string;
+  route_id?: string;
 
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => AttendanceRecordDto)
-  records: AttendanceRecordDto[];
+  records?: AttendanceRecordDto[];
+
+  @IsOptional()
+  @IsString()
+  passenger_id?: string;
+
+  @IsOptional()
+  @IsString()
+  login_id?: string;
+
+  @IsOptional()
+  @IsString()
+  student_id?: string;
+
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  fee_status?: string;
+
+  @IsOptional()
+  @IsNumber()
+  confidence?: number;
+
+  @IsOptional()
+  @IsString()
+  timestamp?: string;
+
+  @IsOptional()
+  @IsString()
+  check_in_time?: string;
+
+  @IsOptional()
+  data?: any;
 }

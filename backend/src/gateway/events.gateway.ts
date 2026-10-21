@@ -99,7 +99,8 @@ export class EventsGateway
       const decoded = this.jwtService.verify(token);
       if (
         decoded.role !== UserRole.tech_admin &&
-        decoded.role !== UserRole.admin
+        decoded.role !== UserRole.admin &&
+        decoded.role !== UserRole.transport_incharge
       ) {
         throw new Error('Unauthorized role');
       }
@@ -157,25 +158,27 @@ export class EventsGateway
 
   @OnEvent('telemetry.live')
   async handleLiveTelemetry(payload: any) {
+    const lat = payload.lat ?? payload.latitude;
+    const lng = payload.lng ?? payload.longitude;
     // Map backend DTO to frontend format
     const formattedPayload = {
-      route_id: payload.route_id,
+      route_id: String(payload.route_id),
       location: {
-        lat: payload.lat,
-        lng: payload.lng,
+        lat,
+        lng,
       },
-      speed: payload.mpu_speed_kmh || payload.gps_speed_knots * 1.852,
+      speed: payload.mpu_speed_kmh || (payload.gps_speed_knots ? payload.gps_speed_knots * 1.852 : 0),
       heading: payload.heading_deg,
       comfort: 'Smooth', // Mock since hardware doesn't send this yet
-      timestamp: payload.timestamp,
+      timestamp: payload.timestamp || new Date().toISOString(),
     };
     this.server
       .to(`route_${payload.route_id}`)
       .emit('live_telemetry', formattedPayload);
 
     // Check wake alarms for all users on this route
-    if (payload.lat && payload.lng) {
-      await this.checkWakeAlarms(payload.lat, payload.lng, payload.route_id);
+    if (lat && lng) {
+      await this.checkWakeAlarms(lat, lng, payload.route_id);
     }
   }
 
@@ -230,6 +233,31 @@ export class EventsGateway
     });
   }
 
+  @OnEvent('sos.triggered')
+  handleSosTriggered(payload: any) {
+    this.logger.warn(`🚨 SOS Alert triggered by ${payload.login_id} (Route ${payload.route})`);
+    // Broadcast to admin room (Admin Dashboard and Transport Incharge)
+    this.server.to('admin_room').emit('sos_alert', payload);
+    // Broadcast to specific bus route subscribers
+    this.server.to(`route_${payload.route}`).emit('sos_alert', payload);
+    // Broadcast globally to all connected sockets
+    this.server.emit('sos_alert', payload);
+  }
+
+  @OnEvent('sos.cancelled')
+  handleSosCancelled(payload: any) {
+    this.logger.log(`SOS Alert cancelled for ${payload.login_id}`);
+    this.server.to('admin_room').emit('sos_cancelled', payload);
+    this.server.to(`route_${payload.route}`).emit('sos_cancelled', payload);
+    this.server.emit('sos_cancelled', payload);
+  }
+
+  @OnEvent('broadcast.created')
+  handleBroadcastCreated(payload: any) {
+    this.logger.log(`📢 Broadcasting announcement globally: ${payload.title || 'Notice'}`);
+    this.server.emit('global_broadcast', payload);
+  }
+
   /**
    * Server-side wake alarm engine.
    * Runs on every telemetry event. Compares bus location vs saved user location.
@@ -242,6 +270,11 @@ export class EventsGateway
       const activeAlarms = await this.usersService.getActiveWakeAlarms();
 
       for (const u of activeAlarms) {
+        // Only trigger wake alarm if this bus is on user's route
+        if (routeId && u.routeId && String(u.routeId) !== String(routeId)) {
+          continue;
+        }
+
         const alarm = u.wakeAlarm as any;
         if (!alarm?.lat || !alarm?.lng) continue;
         if (alarm.firedAt === today) continue; // Already fired today, don't spam

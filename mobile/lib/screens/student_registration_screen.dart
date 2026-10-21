@@ -109,23 +109,30 @@ class _StudentRegistrationScreenState extends State<StudentRegistrationScreen> {
         BusSarthiLoader.show(context, label: 'Saving face embedding...');
       }
 
+      setState(() => _status = 'Fetching student profile...');
+      final userProfile = await _apiService.fetchUser(studentId);
+      final studentName = (userProfile?['name'] as String?)?.trim();
+      final feeStatus = (userProfile?['feeStatus'] as String?) ?? 'unpaid';
+      final routeId = userProfile?['routeId'] as String?;
+
       setState(() => _status = 'Storing ArcFace embedding locally...');
 
-      // Store embedding in local SQLite
+      // Store embedding in local SQLite with student's real name and status
       await _embeddingStore.upsert(
         loginId: studentId,
-        name: studentId, // Name will be synced from backend later
-        feeStatus: 'unpaid',
+        name: studentName != null && studentName.isNotEmpty ? studentName : studentId,
+        feeStatus: feeStatus,
+        routeId: routeId,
         embedding: result.embedding!,
       );
 
       // Notify backend that enrollment happened (metadata only — no image)
-      _apiService.markFaceEnrolled(studentId); // fire-and-forget
+      await _apiService.markFaceEnrolled(studentId);
 
       if (mounted) BusSarthiLoader.hide(context);
 
       if (mounted) {
-        await _showSuccessDialog(studentId);
+        await _showSuccessDialog(studentName != null && studentName.isNotEmpty ? '$studentName ($studentId)' : studentId);
         if (mounted) Navigator.pop(context);
       }
     } catch (e) {

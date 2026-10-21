@@ -47,6 +47,7 @@ export class UsersService {
         address: true,
         gradeClass: true,
         awsFaceId: true,
+        faceEnrolledAt: true,
       },
     });
   }
@@ -268,7 +269,7 @@ export class UsersService {
   async getActiveWakeAlarms() {
     // Fetch all users who have any wakeAlarm JSON set (enabled or disabled)
     const allUsers = await this.prisma.user.findMany({
-      select: { loginId: true, wakeAlarm: true },
+      select: { loginId: true, wakeAlarm: true, routeId: true },
     });
 
     return allUsers.filter((u) => {
