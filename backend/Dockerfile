@@ -39,4 +39,4 @@ EXPOSE 5000
 # DROP anything. `prisma db push` compared the schema with the live database
 # and aborted the deploy whenever the two differed, which took the service
 # down. The migrate command only ever moves forward.
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main.js"]
+CMD ["sh", "-c", "sh prisma/migrate-safe.sh && node dist/src/main.js"]
