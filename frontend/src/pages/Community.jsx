@@ -28,6 +28,8 @@ import { useLang } from '../context/LanguageContext';
 import axios from 'axios';
 import { BACKEND_URL } from '../config';
 import { friendlyError, reportError } from '../lib/errors';
+import BusPicker from '../components/BusPicker';
+import MediaViewer from '../components/MediaViewer';
 import '../index.css';
 
 /**
@@ -150,6 +152,9 @@ const Community = () => {
 
   /** The complaint whose full detail sheet is open. */
   const [detailId, setDetailId] = useState(null);
+
+  /** The attachment currently open in the media viewer. */
+  const [mediaOpen, setMediaOpen] = useState(null);
 
   /** Shows the "My complaints" panel for the signed-in user. */
   const [showMyComplaints, setShowMyComplaints] = useState(false);
@@ -1013,9 +1018,9 @@ const Community = () => {
       </div>
 
       {/* ── Staff pre-screen: pick a bus ─────────────────────────
-          Staff triage bus by bus. This is the first thing they see:
-          a card per bus with its live complaint counts. Only after
-          a bus is chosen do the complaints (and the filters) appear. */}
+          Staff triage bus by bus. The first screen is a card per bus
+          with its live complaint counts; choosing a bus opens that
+          bus's complaints. */}
       {isAdmin && (
         <div
           style={{
@@ -1025,53 +1030,39 @@ const Community = () => {
             padding: '1.25rem 1rem 0.5rem',
           }}
         >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'flex-end',
-              justifyContent: 'space-between',
-              gap: '1rem',
-              flexWrap: 'wrap',
-              marginBottom: '1rem',
-            }}
-          >
-            <div>
-              <h1
-                style={{
-                  margin: 0,
-                  fontSize: '1.45rem',
-                  fontWeight: '800',
-                  color: 'var(--text-dark)',
-                  letterSpacing: '-0.4px',
-                }}
-              >
-                Complaints by bus
-              </h1>
+          {selectedBus === 'all' ? (
+            <>
+              <BusPicker
+                busList={busList}
+                busCounts={busCounts}
+                selected={selectedBus}
+                onSelect={setSelectedBus}
+              />
               <p
                 style={{
-                  margin: '0.35rem 0 0',
-                  fontSize: '0.9rem',
                   color: 'var(--text-light)',
-                  maxWidth: '60ch',
-                  lineHeight: 1.5,
+                  margin: '0.75rem 0 0',
+                  fontSize: '0.85rem',
                 }}
               >
-                Every complaint raised against the campus buses. Choose a bus
-                to work through its complaints.
+                Choose a bus to work through its complaints. You can see the
+                real names of anonymous posters.
               </p>
-            </div>
-            {selectedBus !== 'all' && (
+            </>
+          ) : (
+            <>
               <button
                 onClick={() => setSelectedBus('all')}
                 style={{
-                  display: 'flex',
+                  display: 'inline-flex',
                   alignItems: 'center',
                   gap: '0.4rem',
+                  alignSelf: 'flex-start',
                   background: 'var(--card-bg)',
                   border: '1px solid var(--border-color)',
                   color: 'var(--text-dark)',
                   borderRadius: '20px',
-                  padding: '0.45rem 0.9rem',
+                  padding: '0.4rem 0.9rem',
                   fontSize: '0.8rem',
                   fontWeight: '700',
                   cursor: 'pointer',
@@ -1079,443 +1070,12 @@ const Community = () => {
               >
                 <ArrowLeft size={14} /> All buses
               </button>
-            )}
-          </div>
-
-          {/* The bus list */}
-          {isLoading ? (
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-                gap: '1rem',
-              }}
-            >
-              {[1, 2, 3, 4, 5].map((i) => (
-                <div
-                  key={i}
-                  className="glass"
-                  style={{
-                    borderRadius: '18px',
-                    padding: '1.25rem',
-                    border: '1px solid var(--border-color)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '0.9rem',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-                    <div
-                      className="animate-pulse"
-                      style={{
-                        width: '48px',
-                        height: '48px',
-                        borderRadius: '14px',
-                        background: 'var(--bg-color)',
-                      }}
-                    />
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
-                      <div
-                        className="animate-pulse"
-                        style={{ width: '110px', height: '15px', borderRadius: '5px', background: 'var(--bg-color)' }}
-                      />
-                      <div
-                        className="animate-pulse"
-                        style={{ width: '150px', height: '11px', borderRadius: '5px', background: 'var(--bg-color)' }}
-                      />
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '0.45rem' }}>
-                    {[1, 2, 3].map((k) => (
-                      <div
-                        key={k}
-                        className="animate-pulse"
-                        style={{ width: '78px', height: '22px', borderRadius: '7px', background: 'var(--bg-color)' }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : selectedBus === 'all' ? (
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-                gap: '1rem',
-              }}
-            >
-              {busList.map((b) => {
-                const counts = busCounts[b.busNumber] || {
-                  unresolved: 0,
-                  awaiting: 0,
-                  total: 0,
-                };
-                return (
-                  <button
-                    key={b.busNumber}
-                    onClick={() => setSelectedBus(b.busNumber)}
-                    className="glass"
-                    style={{
-                      borderRadius: '18px',
-                      padding: '1.25rem',
-                      textAlign: 'left',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '0.9rem',
-                      border: '1px solid var(--border-color)',
-                      boxShadow: '0 2px 10px rgba(16,24,40,0.05)',
-                      transition: 'transform 0.15s, box-shadow 0.15s',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.transform = 'translateY(-3px)';
-                      e.currentTarget.style.boxShadow =
-                        '0 10px 26px rgba(16,24,40,0.10)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.transform = 'translateY(0)';
-                      e.currentTarget.style.boxShadow =
-                        '0 2px 10px rgba(16,24,40,0.05)';
-                    }}
-                  >
-                    {/* Bus identity */}
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.85rem',
-                        minWidth: 0,
-                      }}
-                    >
-                      <span
-                        style={{
-                          width: '48px',
-                          height: '48px',
-                          borderRadius: '14px',
-                          background: 'var(--primary-blue)',
-                          color: 'white',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexShrink: 0,
-                        }}
-                      >
-                        <Bus size={24} />
-                      </span>
-                      <div style={{ minWidth: 0 }}>
-                        <p
-                          style={{
-                            margin: 0,
-                            fontSize: '1.15rem',
-                            fontWeight: '800',
-                            color: 'var(--text-dark)',
-                            letterSpacing: '-0.3px',
-                          }}
-                        >
-                          {b.busNumber}
-                        </p>
-                        <p
-                          style={{
-                            margin: 0,
-                            fontSize: '0.8rem',
-                            color: 'var(--text-light)',
-                          }}
-                        >
-                          {b.routeName}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Live counts */}
-                    <div
-                      style={{
-                        display: 'flex',
-                        gap: '0.45rem',
-                        flexWrap: 'wrap',
-                      }}
-                    >
-                      <span
-                        title="Not yet resolved — new, in progress, or reopened"
-                        style={{
-                          fontSize: '0.72rem',
-                          fontWeight: '800',
-                          padding: '0.25rem 0.6rem',
-                          borderRadius: '7px',
-                          background: counts.unresolved > 0 ? '#cf1322' : '#e9ecef',
-                          color: counts.unresolved > 0 ? 'white' : '#666',
-                        }}
-                      >
-                        {counts.unresolved} unresolved
-                      </span>
-                      {counts.awaiting > 0 && (
-                        <span
-                          title="Marked as fixed — waiting for the complainant to confirm"
-                          style={{
-                            fontSize: '0.72rem',
-                            fontWeight: '800',
-                            padding: '0.25rem 0.6rem',
-                            borderRadius: '7px',
-                            background: '#0958d9',
-                            color: 'white',
-                          }}
-                        >
-                          {counts.awaiting} awaiting confirmation
-                        </span>
-                      )}
-                      <span
-                        title="Every complaint ever raised against this bus"
-                        style={{
-                          fontSize: '0.72rem',
-                          fontWeight: '700',
-                          padding: '0.25rem 0.6rem',
-                          borderRadius: '7px',
-                          background: '#e9ecef',
-                          color: '#666',
-                        }}
-                      >
-                        {counts.total} all time
-                      </span>
-                    </div>
-
-                    {/* Bus details */}
-                    <div
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns:
-                          'repeat(2, minmax(0, 1fr))',
-                        gap: '0.45rem 0.85rem',
-                        fontSize: '0.75rem',
-                        color: 'var(--text-light)',
-                        borderTop: '1px solid var(--border-color)',
-                        paddingTop: '0.8rem',
-                      }}
-                    >
-                      <span>
-                        <strong style={{ color: 'var(--text-dark)' }}>
-                          Route ID:
-                        </strong>{' '}
-                        {b.routeId}
-                      </span>
-                      <span>
-                        <strong style={{ color: 'var(--text-dark)' }}>
-                          Capacity:
-                        </strong>{' '}
-                        {b.capacity}
-                      </span>
-                      <span>
-                        <strong style={{ color: 'var(--text-dark)' }}>
-                          Registration:
-                        </strong>{' '}
-                        {b.registrationNumber}
-                      </span>
-                      <span>
-                        <strong style={{ color: 'var(--text-dark)' }}>
-                          City:
-                        </strong>{' '}
-                        {b.city}
-                      </span>
-                      <span>
-                        <strong style={{ color: 'var(--text-dark)' }}>
-                          Model:
-                        </strong>{' '}
-                        {b.vehicleModel}
-                      </span>
-                      <span>
-                        <strong style={{ color: 'var(--text-dark)' }}>
-                          Driver:
-                        </strong>{' '}
-                        {b.driverId}
-                      </span>
-                    </div>
-
-                    <span
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.35rem',
-                        fontSize: '0.82rem',
-                        fontWeight: '700',
-                        color: 'var(--primary-blue)',
-                      }}
-                    >
-                      <ClipboardList size={15} />
-                      Open this bus
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <>
-              {/* The selected bus */}
-              {(() => {
-                const b = busList.find((x) => x.busNumber === selectedBus);
-                if (!b) return null;
-                const counts = busCounts[b.busNumber] || {
-                  unresolved: 0,
-                  awaiting: 0,
-                  total: 0,
-                };
-                return (
-                  <section
-                    className="glass"
-                    style={{
-                      borderRadius: '18px',
-                      padding: '1.25rem',
-                      border: '1px solid var(--border-color)',
-                      boxShadow: '0 2px 10px rgba(16,24,40,0.05)',
-                      marginBottom: '1rem',
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.85rem',
-                        flexWrap: 'wrap',
-                        marginBottom: '0.9rem',
-                      }}
-                    >
-                      <span
-                        style={{
-                          width: '44px',
-                          height: '44px',
-                          borderRadius: '13px',
-                          background: 'var(--primary-blue)',
-                          color: 'white',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexShrink: 0,
-                        }}
-                      >
-                        <Bus size={22} />
-                      </span>
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <p
-                          style={{
-                            margin: 0,
-                            fontSize: '1.1rem',
-                            fontWeight: '800',
-                            color: 'var(--text-dark)',
-                            letterSpacing: '-0.3px',
-                          }}
-                        >
-                          {b.busNumber}
-                        </p>
-                        <p
-                          style={{
-                            margin: 0,
-                            fontSize: '0.8rem',
-                            color: 'var(--text-light)',
-                          }}
-                        >
-                          {b.routeName}
-                        </p>
-                      </div>
-                      <div
-                        style={{
-                          display: 'flex',
-                          gap: '0.4rem',
-                          flexWrap: 'wrap',
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: '0.72rem',
-                            fontWeight: '800',
-                            padding: '0.25rem 0.6rem',
-                            borderRadius: '7px',
-                            background:
-                              counts.unresolved > 0 ? '#cf1322' : '#e9ecef',
-                            color:
-                              counts.unresolved > 0 ? 'white' : '#666',
-                          }}
-                        >
-                          {counts.unresolved} unresolved
-                        </span>
-                        {counts.awaiting > 0 && (
-                          <span
-                            style={{
-                              fontSize: '0.72rem',
-                              fontWeight: '800',
-                              padding: '0.25rem 0.6rem',
-                              borderRadius: '7px',
-                              background: '#0958d9',
-                              color: 'white',
-                            }}
-                          >
-                            {counts.awaiting} awaiting
-                          </span>
-                        )}
-                        <span
-                          style={{
-                            fontSize: '0.72rem',
-                            fontWeight: '700',
-                            padding: '0.25rem 0.6rem',
-                            borderRadius: '7px',
-                            background: '#e9ecef',
-                            color: '#666',
-                          }}
-                        >
-                          {counts.total} all time
-                        </span>
-                      </div>
-                    </div>
-
-                    <div
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns:
-                          'repeat(auto-fit, minmax(140px, 1fr))',
-                        gap: '0.45rem 1rem',
-                        fontSize: '0.76rem',
-                        color: 'var(--text-light)',
-                        borderTop: '1px solid var(--border-color)',
-                        paddingTop: '0.85rem',
-                      }}
-                    >
-                      <span>
-                        <strong style={{ color: 'var(--text-dark)' }}>
-                          Route ID:
-                        </strong>{' '}
-                        {b.routeId}
-                      </span>
-                      <span>
-                        <strong style={{ color: 'var(--text-dark)' }}>
-                          Registration:
-                        </strong>{' '}
-                        {b.registrationNumber}
-                      </span>
-                      <span>
-                        <strong style={{ color: 'var(--text-dark)' }}>
-                          Model:
-                        </strong>{' '}
-                        {b.vehicleModel}
-                      </span>
-                      <span>
-                        <strong style={{ color: 'var(--text-dark)' }}>
-                          Capacity:
-                        </strong>{' '}
-                        {b.capacity}
-                      </span>
-                      <span>
-                        <strong style={{ color: 'var(--text-dark)' }}>
-                          City:
-                        </strong>{' '}
-                        {b.city}
-                      </span>
-                      <span>
-                        <strong style={{ color: 'var(--text-dark)' }}>
-                          Driver:
-                        </strong>{' '}
-                        {b.driverId}
-                      </span>
-                    </div>
-                  </section>
-                );
-              })()}
+              <BusPicker
+                busList={busList}
+                busCounts={busCounts}
+                selected={selectedBus}
+                onSelect={setSelectedBus}
+              />
             </>
           )}
         </div>
@@ -1984,21 +1544,30 @@ const Community = () => {
 
                 {/* Media Attachment */}
                 {comp.type === 'photo' && comp.mediaUrl && (
-                  <div
+                  <button
+                    onClick={() =>
+                      setMediaOpen({ type: 'photo', url: comp.mediaUrl })
+                    }
                     style={{
+                      display: 'block',
+                      width: '100%',
                       borderRadius: '12px',
                       overflow: 'hidden',
                       marginTop: '0.5rem',
                       border: '1px solid var(--border-color)',
-                      backgroundColor: '#f8f9fa',
-                      display: 'flex',
-                      justifyContent: 'center',
+                      backgroundColor: 'var(--bg-color)',
+                      cursor: 'zoom-in',
+                      padding: 0,
                     }}
                   >
                     <img
                       src={comp.mediaUrl}
                       alt="Complaint attachment"
                       loading="lazy"
+                      onError={(e) => {
+                        // A broken image URL must not leave a blank frame.
+                        e.currentTarget.style.display = 'none';
+                      }}
                       style={{
                         width: '100%',
                         height: 'auto',
@@ -2007,39 +1576,121 @@ const Community = () => {
                         objectFit: 'contain',
                       }}
                     />
-                  </div>
+                  </button>
                 )}
                 {comp.type === 'video' && comp.mediaUrl && (
-                  <div
+                  <button
+                    onClick={() =>
+                      setMediaOpen({ type: 'video', url: comp.mediaUrl })
+                    }
                     style={{
-                      position: 'relative',
-                      borderRadius: '12px',
-                      overflow: 'hidden',
-                      marginTop: '0.5rem',
-                      border: '1px solid var(--border-color)',
-                      backgroundColor: 'black',
-                    }}
-                  >
-                    <video
-                      src={comp.mediaUrl}
-                      controls
-                      preload="metadata"
-                      style={{ width: '100%', height: 'auto', maxHeight: '400px' }}
-                    />
-                  </div>
-                )}
-                {comp.type === 'audio' && comp.mediaUrl && (
-                  <div
-                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      width: '100%',
                       marginTop: '0.5rem',
                       padding: '1rem',
-                      backgroundColor: 'var(--bg-color)',
-                      borderRadius: '30px',
+                      borderRadius: '12px',
                       border: '1px solid var(--border-color)',
+                      backgroundColor: 'var(--bg-color)',
+                      cursor: 'pointer',
+                      textAlign: 'left',
                     }}
                   >
-                    <audio src={comp.mediaUrl} controls style={{ width: '100%' }} />
-                  </div>
+                    <span
+                      style={{
+                        width: '42px',
+                        height: '42px',
+                        borderRadius: '50%',
+                        background: 'var(--primary-blue)',
+                        color: 'white',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Play size={18} fill="white" />
+                    </span>
+                    <span style={{ minWidth: 0 }}>
+                      <span
+                        style={{
+                          display: 'block',
+                          fontSize: '0.88rem',
+                          fontWeight: '700',
+                          color: 'var(--text-dark)',
+                        }}
+                      >
+                        Video attachment
+                      </span>
+                      <span
+                        style={{
+                          display: 'block',
+                          fontSize: '0.76rem',
+                          color: 'var(--text-light)',
+                        }}
+                      >
+                        Tap to play
+                      </span>
+                    </span>
+                  </button>
+                )}
+                {comp.type === 'audio' && comp.mediaUrl && (
+                  <button
+                    onClick={() =>
+                      setMediaOpen({ type: 'audio', url: comp.mediaUrl })
+                    }
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      width: '100%',
+                      marginTop: '0.5rem',
+                      padding: '1rem',
+                      borderRadius: '30px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'var(--bg-color)',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: '42px',
+                        height: '42px',
+                        borderRadius: '50%',
+                        background: 'var(--secondary-orange)',
+                        color: 'white',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Mic size={18} />
+                    </span>
+                    <span style={{ minWidth: 0 }}>
+                      <span
+                        style={{
+                          display: 'block',
+                          fontSize: '0.88rem',
+                          fontWeight: '700',
+                          color: 'var(--text-dark)',
+                        }}
+                      >
+                        Audio attachment
+                      </span>
+                      <span
+                        style={{
+                          display: 'block',
+                          fontSize: '0.76rem',
+                          color: 'var(--text-light)',
+                        }}
+                      >
+                        Tap to listen
+                      </span>
+                    </span>
+                  </button>
                 )}
 
                 {/* The transport team's reply — only to the person who

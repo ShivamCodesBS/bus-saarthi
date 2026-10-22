@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Users, MapPin, Shield, LogOut, Settings, Bell, AlertOctagon, CheckCircle2, MessageSquare, Trash2, UserPlus, Navigation, Plus, X, User, Menu, Eye, Download, Upload, Activity, GitMerge, Undo2, Sparkles, AlertTriangle, ArrowRight, History, Layers, Wrench, Timer, RotateCcw } from 'lucide-react';
+import { Users, MapPin, Shield, LogOut, Settings, Bell, AlertOctagon, CheckCircle2, MessageSquare, Trash2, UserPlus, Navigation, Plus, X, User, Menu, Eye, Download, Upload, Activity, GitMerge, Undo2, Sparkles, ArrowLeft, AlertTriangle, ArrowRight, History, Layers, Wrench, Timer, RotateCcw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
@@ -15,6 +15,8 @@ import HamburgerMenu from '../components/HamburgerMenu';
 import Papa from 'papaparse';
 import { sanitizePayload, normalizeFeeStatus, USER_PAYLOAD_KEYS } from '../lib/utils';
 import UserAvatar from '../components/UserAvatar';
+import BusPicker from '../components/BusPicker';
+import MediaViewer from '../components/MediaViewer';
 import { friendlyError } from '../lib/errors';
 import WebRTCPlayer from '../components/WebRTCPlayer';
 
@@ -126,6 +128,35 @@ const AdminDashboard = () => {
   // Grievance triage state
   const [grievanceFilter, setGrievanceFilter] = useState('all');
   const [grievanceBusy, setGrievanceBusy] = useState(new Set());
+  // The bus the staff member is working on. The complaint list is only shown
+  // once a bus has been chosen.
+  const [grievanceBus, setGrievanceBus] = useState('all');
+  // The bus list, built from the routes that were already fetched.
+  const [grievanceBuses, setGrievanceBuses] = useState([]);
+
+  /**
+   * Live complaint counts per bus. A complaint belongs to the bus that was
+   * serving its route when it was raised.
+   */
+  const grievanceBusCounts = useMemo(() => {
+    const counts = {};
+    grievances.forEach((g) => {
+      const bus = g.busNumber;
+      if (!bus) return;
+      if (!counts[bus]) counts[bus] = { unresolved: 0, awaiting: 0, total: 0 };
+      counts[bus].total += 1;
+      if (
+        g.status === 'pending' ||
+        g.status === 'in_progress' ||
+        g.status === 'reopened'
+      ) {
+        counts[bus].unresolved += 1;
+      } else if (g.status === 'resolved') {
+        counts[bus].awaiting += 1;
+      }
+    });
+    return counts;
+  }, [grievances]);
 
   // Route Management State
   const [routesList, setRoutesList] = useState([]);
@@ -381,6 +412,26 @@ const AdminDashboard = () => {
         const sosData = Array.isArray(sosRes.data) ? sosRes.data : (sosRes.data?.data || []);
 
         setRoutesList(routes);
+
+        // The bus list for the grievance picker. The live bus serving each
+        // route is what a complaint is attributed to.
+        setGrievanceBuses(
+          routes.map((r) => {
+            const liveBus = r.bus?.busNumber || r.busNumber;
+            return {
+              routeId: String(r.routeId || r.route_id),
+              routeName: r.routeName || r.route_name || `Route ${r.routeId || r.route_id}`,
+              busNumber: liveBus || 'Unknown bus',
+              registrationNumber:
+                r.registrationNumber || r.bus?.registrationNumber || '—',
+              vehicleModel: r.vehicleModel || r.bus?.vehicleModel || '—',
+              capacity: r.seatingCapacity || r.bus?.seatingCapacity || '—',
+              city: r.city || 'Bareilly',
+              driverId: r.driverId || '—',
+            };
+          }),
+        );
+
         // Auto-select the first real route once. The old '1' sentinel stopped
         // working if route 1 was ever deleted.
         setSelectedRoute((prev) => {
@@ -1490,22 +1541,73 @@ const AdminDashboard = () => {
         {/* ----------------- TAB: GRIEVANCES ----------------- */}
         {activeTab === 'grievances' && (
           <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--text-dark)', marginBottom: '0.5rem' }}>Grievance Triage</h2>
-            <p style={{ color: 'var(--text-light)', marginTop: '-1rem', marginBottom: '1rem' }}>
-              You can see real names of anonymous posters. A complaint only closes when the
-              complainant confirms the fix.
-            </p>
+            {/* The bus is chosen first. The complaint list is only shown
+                once a bus has been picked. */}
+            {grievanceBus === 'all' ? (
+              <>
+                <BusPicker
+                  busList={grievanceBuses}
+                  busCounts={grievanceBusCounts}
+                  selected={grievanceBus}
+                  onSelect={setGrievanceBus}
+                />
+                <p style={{ color: 'var(--text-light)', margin: 0, fontSize: '0.85rem' }}>
+                  Choose a bus to work through its complaints. You can see the
+                  real names of anonymous posters.
+                </p>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => setGrievanceBus('all')}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    alignSelf: 'flex-start',
+                    background: 'var(--card-bg)',
+                    border: '1px solid var(--border-color)',
+                    color: 'var(--text-dark)',
+                    borderRadius: '20px',
+                    padding: '0.4rem 0.9rem',
+                    fontSize: '0.8rem',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <ArrowLeft size={14} /> All buses
+                </button>
+
+                <BusPicker
+                  busList={grievanceBuses}
+                  busCounts={grievanceBusCounts}
+                  selected={grievanceBus}
+                  onSelect={setGrievanceBus}
+                />
+              </>
+            )}
 
             {/* Triage summary + filters */}
+            {grievanceBus !== 'all' && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-              {[
-                { key: 'all', label: 'All', count: grievances.length },
-                { key: 'reopened', label: 'Not Resolved', count: grievances.filter(g => g.status === 'reopened').length },
-                { key: 'pending', label: 'Pending', count: grievances.filter(g => g.status === 'pending').length },
-                { key: 'in_progress', label: 'In Progress', count: grievances.filter(g => g.status === 'in_progress').length },
-                { key: 'resolved', label: 'Awaiting Confirmation', count: grievances.filter(g => g.status === 'resolved').length },
-                { key: 'closed', label: 'Closed', count: grievances.filter(g => g.status === 'closed').length },
-              ].map(f => (
+              {(() => {
+                // The counts are for the bus being worked on, not the
+                // whole fleet.
+                const busRouteId = String(
+                  grievanceBuses.find(b => b.busNumber === grievanceBus)?.routeId || '',
+                );
+                const scoped = grievances.filter(
+                  (g) => String(g.route) === busRouteId,
+                );
+                return [
+                { key: 'all', label: 'All', count: scoped.length },
+                { key: 'reopened', label: 'Not Resolved', count: scoped.filter(g => g.status === 'reopened').length },
+                { key: 'pending', label: 'Pending', count: scoped.filter(g => g.status === 'pending').length },
+                { key: 'in_progress', label: 'In Progress', count: scoped.filter(g => g.status === 'in_progress').length },
+                { key: 'resolved', label: 'Awaiting Confirmation', count: scoped.filter(g => g.status === 'resolved').length },
+                { key: 'closed', label: 'Closed', count: scoped.filter(g => g.status === 'closed').length },
+              ];
+              })().map(f => (
                 <button
                   key={f.key}
                   onClick={() => setGrievanceFilter(f.key)}
@@ -1523,12 +1625,20 @@ const AdminDashboard = () => {
                 </button>
               ))}
             </div>
+            )}
 
-            {isLoading ? <p>Loading complaints...</p> : (
+            {grievanceBus !== 'all' && (isLoading ? <p>Loading complaints...</p> : (
               (() => {
+                // Only the complaints raised against the selected bus.
+                const busRouteId = String(
+                  grievanceBuses.find(b => b.busNumber === grievanceBus)?.routeId || '',
+                );
+                const forBus = grievances.filter(
+                  (g) => String(g.route) === busRouteId,
+                );
                 const list = grievanceFilter === 'all'
-                  ? grievances
-                  : grievances.filter(g => g.status === grievanceFilter);
+                  ? forBus
+                  : forBus.filter(g => g.status === grievanceFilter);
                 if (list.length === 0) {
                   return <p style={{ color: 'var(--text-light)' }}>No complaints in this state.</p>;
                 }
@@ -1650,7 +1760,7 @@ const AdminDashboard = () => {
                   );
                 });
               })()
-            )}
+            ))}
           </div>
         )}
 
@@ -2700,48 +2810,11 @@ const AdminDashboard = () => {
         </div>
       )}
 
-      {/* Full Screen Media Modal */}
-      {fullScreenMedia && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.9)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
-          <button onClick={() => { setFullScreenMedia(null); setZoomLevel(1); }} style={{ position: 'absolute', top: '20px', right: '20px', background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', padding: '10px', borderRadius: '50%', cursor: 'pointer', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <X size={24} />
-          </button>
-          
-          {fullScreenMedia.type === 'photo' && (
-            <>
-              <div style={{ display: 'flex', gap: '1rem', position: 'absolute', top: '20px', left: '20px', zIndex: 10000 }}>
-                <button onClick={() => setZoomLevel(prev => Math.min(prev + 0.5, 4))} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', padding: '10px 15px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>Zoom In +</button>
-                <button onClick={() => setZoomLevel(prev => Math.max(prev - 0.5, 1))} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', padding: '10px 15px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>Zoom Out -</button>
-              </div>
-              <div style={{ overflow: 'auto', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <img 
-                  src={fullScreenMedia.url} 
-                  alt="Full Screen" 
-                  style={{ 
-                    maxHeight: '90vh', 
-                    maxWidth: '90vw', 
-                    objectFit: 'contain', 
-                    transform: `scale(${zoomLevel})`,
-                    transition: 'transform 0.2s ease-in-out',
-                    transformOrigin: 'center'
-                  }} 
-                />
-              </div>
-            </>
-          )}
-
-          {fullScreenMedia.type === 'video' && (
-            <div style={{ width: '90vw', height: '90vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <video 
-                src={fullScreenMedia.url} 
-                controls 
-                autoPlay
-                style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} 
-              />
-            </div>
-          )}
-        </div>
-      )}
+      {/* The shared media viewer replaces the old full-screen modal. */}
+      <MediaViewer
+        media={fullScreenMedia}
+        onClose={() => setFullScreenMedia(null)}
+      />
     </div>
   );
 };
