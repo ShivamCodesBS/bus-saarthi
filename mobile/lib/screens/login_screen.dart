@@ -153,7 +153,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   color: AppTheme.black,
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
               // ── How this phone is being used ──────────────────────
               Container(
                 padding: const EdgeInsets.all(4),
@@ -177,8 +177,19 @@ class _LoginScreenState extends State<LoginScreen> {
                       icon: Icons.sensors,
                       label: 'In-bus device',
                       selected: _mode == AppConstants.modeBusDevice,
-                      onTap: () => setState(
-                          () => _mode = AppConstants.modeBusDevice),
+                      onTap: () {
+                        setState(() => _mode = AppConstants.modeBusDevice);
+                        // The device in the bus has no user account; it
+                        // identifies itself with the hardware token.
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const DashboardScreen(
+                              mode: AppConstants.modeBusDevice,
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ],
                 ),
@@ -186,8 +197,8 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 6),
               Text(
                 _mode == AppConstants.modeBusDevice
-                    ? 'Runs sensors and the face scanner for the whole bus.'
-                    : 'Dashboard and navigation aid for the driver.',
+                    ? 'Runs the sensors and the face scanner for the whole bus. No sign-in needed.'
+                    : 'Sign in as the driver. Dashboard and navigation aid only.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontSize: 12,

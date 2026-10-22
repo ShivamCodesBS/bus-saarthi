@@ -29,6 +29,9 @@ logs/
 *.log
 *.csv
 
+# ============= Built APKs (regenerate with flutter build apk) =============
+release-apks/
+
 # ============= Binary Files (never commit these) =============
 *.exe
 *.zip

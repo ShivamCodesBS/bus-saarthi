@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../core/theme.dart';
+import '../core/constants.dart';
 import 'login_screen.dart';
 import 'dashboard_screen.dart';
 
@@ -21,9 +22,9 @@ class _SplashScreenState extends State<SplashScreen> {
 
   Future<void> _checkAuth() async {
     await Future.delayed(const Duration(seconds: 2)); // Show splash for 2s
-    
+
     if (!mounted) return;
-    
+
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final isLoggedIn = await authProvider.init();
 
@@ -31,6 +32,18 @@ class _SplashScreenState extends State<SplashScreen> {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const DashboardScreen()),
+      );
+    } else if (AppConstants.appMode == AppConstants.modeBusDevice) {
+      // The device fixed inside the bus has no user account. It identifies
+      // itself with the hardware token, so it goes straight to the
+      // sensor + face-scanner screen without anyone signing in.
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const DashboardScreen(
+            mode: AppConstants.modeBusDevice,
+          ),
+        ),
       );
     } else {
       Navigator.pushReplacement(
