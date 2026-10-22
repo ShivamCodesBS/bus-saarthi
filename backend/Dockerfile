@@ -3,7 +3,9 @@ FROM node:22-alpine AS deps
 WORKDIR /app
 RUN apk add --no-cache openssl
 COPY package.json package-lock.json ./
-RUN npm ci
+# `npm ci` must not run any lifecycle script here — the Prisma schema is
+# copied in the next stage, so a `prisma generate` hook would fail.
+RUN npm ci --ignore-scripts
 
 # ── Stage 2: Build TypeScript & Generate Prisma ──
 FROM node:22-alpine AS builder
