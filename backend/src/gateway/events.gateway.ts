@@ -70,6 +70,7 @@ export class EventsGateway
     const loginId = payload?.login_id || payload?.loginId;
     if (loginId) {
       this.onlineUsers.set(loginId, client.id);
+      client.join(`user_${loginId}`);
     }
 
     this.logger.log(`Client ${client.id} joined route_${routeId}`);
@@ -235,27 +236,50 @@ export class EventsGateway
 
   @OnEvent('sos.triggered')
   handleSosTriggered(payload: any) {
-    this.logger.warn(`🚨 SOS Alert triggered by ${payload.login_id} (Route ${payload.route})`);
+    this.logger.warn(
+      `🚨 SOS Alert triggered by ${payload.login_id} (Route ${payload.route})`,
+    );
     // Broadcast to admin room (Admin Dashboard and Transport Incharge)
     this.server.to('admin_room').emit('sos_alert', payload);
-    // Broadcast to specific bus route subscribers
-    this.server.to(`route_${payload.route}`).emit('sos_alert', payload);
-    // Broadcast globally to all connected sockets
-    this.server.emit('sos_alert', payload);
+    // Broadcast to specific bus route subscribers.
+    // NOTE: we must NOT also `this.server.emit(...)` globally — the admin
+    // dashboards are members of `admin_room` AND of `route_<id>`, so a global
+    // broadcast delivered the same alert to them three times.
+    if (payload.route && payload.route !== 'unknown') {
+      this.server.to(`route_${payload.route}`).emit('sos_alert', payload);
+    }
   }
 
   @OnEvent('sos.cancelled')
   handleSosCancelled(payload: any) {
     this.logger.log(`SOS Alert cancelled for ${payload.login_id}`);
     this.server.to('admin_room').emit('sos_cancelled', payload);
-    this.server.to(`route_${payload.route}`).emit('sos_cancelled', payload);
-    this.server.emit('sos_cancelled', payload);
+    if (payload.route && payload.route !== 'unknown') {
+      this.server.to(`route_${payload.route}`).emit('sos_cancelled', payload);
+    }
   }
 
   @OnEvent('broadcast.created')
   handleBroadcastCreated(payload: any) {
     this.logger.log(`📢 Broadcasting announcement globally: ${payload.title || 'Notice'}`);
     this.server.emit('global_broadcast', payload);
+  }
+
+  /**
+   * Deliver a personal in-app notification to the user's open tabs.
+   * The persistent record lives in the `notifications` table; this is the
+   * real-time half of it.
+   */
+  @OnEvent('notification.created')
+  handleNotificationCreated(payload: any) {
+    if (!payload?.login_id) return;
+    const socketId = this.onlineUsers.get(payload.login_id);
+    if (socketId) {
+      this.server.to(socketId).emit('notification', payload);
+    }
+    // Also broadcast on a per-login channel so tabs that joined the route
+    // room still receive it.
+    this.server.to(`user_${payload.login_id}`).emit('notification', payload);
   }
 
   /**

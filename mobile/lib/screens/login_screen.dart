@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../core/theme.dart';
+import '../core/constants.dart';
 import 'dashboard_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -17,6 +18,11 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   bool _obscurePassword = true;
   String _selectedRole = 'driver';
+
+  /// Which way this phone is being used:
+  ///   driver     the driver's own phone — dashboard and navigation aid
+  ///   busDevice  a device fixed inside the bus — sensors + face scanner
+  String _mode = AppConstants.appMode;
 
   @override
   void dispose() {
@@ -48,7 +54,9 @@ class _LoginScreenState extends State<LoginScreen> {
       } else {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const DashboardScreen()),
+          MaterialPageRoute(
+            builder: (_) => DashboardScreen(mode: _mode),
+          ),
         );
       }
     } else {
@@ -57,6 +65,53 @@ class _LoginScreenState extends State<LoginScreen> {
       final error = authProvider.lastError ?? 'Login failed. Please try again.';
       _showError(error);
     }
+  }
+
+  Widget _modeButton({
+    required Key key,
+    required IconData icon,
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      key: key,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          decoration: BoxDecoration(
+            color: selected ? Colors.white.withOpacity(0.24) : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected ? Colors.white38 : Colors.transparent,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 18,
+                color: selected ? Colors.white : Colors.white70,
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    color: selected ? Colors.white : Colors.white70,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _showError(String message) {
@@ -98,7 +153,49 @@ class _LoginScreenState extends State<LoginScreen> {
                   color: AppTheme.black,
                 ),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 24),
+              // ── How this phone is being used ──────────────────────
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: Row(
+                  children: [
+                    _modeButton(
+                      key: const ValueKey('mode-driver'),
+                      icon: Icons.directions_car,
+                      label: 'Driver phone',
+                      selected: _mode == AppConstants.modeDriver,
+                      onTap: () => setState(
+                          () => _mode = AppConstants.modeDriver),
+                    ),
+                    _modeButton(
+                      key: const ValueKey('mode-device'),
+                      icon: Icons.sensors,
+                      label: 'In-bus device',
+                      selected: _mode == AppConstants.modeBusDevice,
+                      onTap: () => setState(
+                          () => _mode = AppConstants.modeBusDevice),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _mode == AppConstants.modeBusDevice
+                    ? 'Runs sensors and the face scanner for the whole bus.'
+                    : 'Dashboard and navigation aid for the driver.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Colors.white70,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 22),
               DropdownButtonFormField<String>(
                 value: _selectedRole,
                 dropdownColor: AppTheme.surface,

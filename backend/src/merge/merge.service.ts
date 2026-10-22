@@ -326,48 +326,70 @@ export class MergeService {
 
   /**
    * Smart suggestions: find routes with low attendance today.
+   *
+   * The previous implementation ran one `attendance.count` and one
+   * `user.count` per route, plus a merge lookup per candidate target — an
+   * N×M query storm on every dashboard load. It is now three grouped
+   * queries total.
    */
   async getMergeSuggestions() {
     const todayStart = getISTMidnightUTC();
     const routes = await this.prisma.route.findMany();
+    if (routes.length === 0) return [];
+
+    // 1. Which routes are cancelled today?
+    const activeMerges = await this.prisma.mergeEvent.findMany({
+      where: { status: 'active', createdAt: { gte: todayStart } },
+      select: { cancelledRouteId: true },
+    });
+    const cancelledRouteIds = new Set(
+      activeMerges.map((m) => String(m.cancelledRouteId)),
+    );
+
+    // 2. Today's attendance counts, grouped by route.
+    const attendanceByRoute = await this.prisma.attendance.groupBy({
+      by: ['routeId'],
+      where: { timestamp: { gte: todayStart } },
+      _count: { _all: true },
+    });
+    const attendanceMap = new Map(
+      attendanceByRoute.map((a) => [String(a.routeId), a._count._all]),
+    );
+
+    // 3. Student counts per route, grouped.
+    const studentsByRoute = await this.prisma.user.groupBy({
+      by: ['routeId'],
+      where: { role: 'passenger' },
+      _count: { _all: true },
+    });
+    const studentMap = new Map(
+      studentsByRoute.map((s) => [String(s.routeId), s._count._all]),
+    );
+
     const suggestions: any[] = [];
 
     for (const route of routes) {
-      // Skip already-cancelled routes
-      const isCancelled = await this.isRouteCancelledToday(route.routeId);
-      if (isCancelled) continue;
+      if (cancelledRouteIds.has(String(route.routeId))) continue;
 
-      const attendanceCount = await this.prisma.attendance.count({
-        where: { routeId: route.routeId, timestamp: { gte: todayStart } },
-      });
+      const attendanceCount = attendanceMap.get(String(route.routeId)) ?? 0;
+      const totalStudents = studentMap.get(String(route.routeId)) ?? 0;
 
-      const totalStudents = await this.prisma.user.count({
-        where: { routeId: route.routeId, role: 'passenger' },
-      });
-
-      // Suggest merge if fewer than 5 students have marked attendance
-      // and there are students assigned to this route
+      // Suggest a merge when very few students have marked attendance today
+      // but students are still assigned to this route.
       if (totalStudents > 0 && attendanceCount < 5) {
-        // Find best target: same city, most capacity remaining
         const sameCityRoutes = routes.filter(
-          (r) => r.city === route.city && r.routeId !== route.routeId,
+          (r) =>
+            r.city === route.city &&
+            String(r.routeId) !== String(route.routeId) &&
+            !cancelledRouteIds.has(String(r.routeId)),
         );
 
         let bestTarget: any = null;
         let maxAvailable = 0;
 
         for (const target of sameCityRoutes) {
-          const targetCancelled = await this.isRouteCancelledToday(
-            target.routeId,
-          );
-          if (targetCancelled) continue;
-
-          const targetAttendance = await this.prisma.attendance.count({
-            where: {
-              routeId: target.routeId,
-              timestamp: { gte: todayStart },
-            },
-          });
+          const targetAttendance =
+            attendanceMap.get(String(target.routeId)) ?? 0;
           const available =
             (target.seatingCapacity || 50) - targetAttendance;
           if (available > maxAvailable) {
@@ -388,6 +410,9 @@ export class MergeService {
             },
             targetRoute: bestTarget,
             availableSeats: maxAvailable,
+            // Flat aliases so the UI does not have to reach into nested objects.
+            studentCount: totalStudents,
+            currentAttendance: attendanceCount,
           });
         }
       }

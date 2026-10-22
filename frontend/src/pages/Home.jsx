@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/componen
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { friendlyError, reportError } from '../lib/errors';
 
 // Fix for default marker icon in react-leaflet
 delete L.Icon.Default.prototype._getIconUrl;
@@ -384,7 +385,7 @@ const Home = () => {
         localStorage.removeItem('wake_alarm_data');
         toast.success('🔕 Wake alarm cancelled.', { style: { borderRadius: '10px' } });
       } catch (err) {
-        toast.error('Failed to cancel alarm.');
+        toast.error('We could not cancel the alarm. Please try again.');
       } finally {
         setAlarmLoading(false);
       }
@@ -415,9 +416,15 @@ const Home = () => {
         setSosActive(true);
         toast.error("🚨 SOS Alert Triggered! Admin and Transport Incharge alerted.", { duration: 6000 });
       } catch (err) {
-        const errorMsg = err.response?.data?.message || "Failed to send SOS. Check connection.";
-        toast.error(errorMsg);
-        if (errorMsg.includes("already triggered recently")) {
+        const errorMsg =
+          err.response?.data?.message ||
+          err.response?.data?.detail ||
+          'Failed to send SOS. Check connection.';
+        toast.error(
+          friendlyError(err, 'We could not send the SOS. Please try again.'),
+        );
+        // An SOS that was already sent recently is still active.
+        if (String(errorMsg).includes('already triggered recently')) {
           setSosActive(true);
         }
       }
@@ -439,7 +446,7 @@ const Home = () => {
         setSosActive(false);
         toast.success("SOS Alert Cancelled.");
       } catch (err) {
-        toast.error(err.response?.data?.message || "Failed to cancel SOS. Check connection.");
+        toast.error(friendlyError(err, 'We could not cancel the SOS. Please try again.'));
       }
       return;
     }
@@ -701,7 +708,7 @@ const Home = () => {
           <Button
             variant={sosTimer !== null ? "default" : (sosActive ? "outline" : "destructive")}
             onClick={handleSosClick}
-            className={`flex-1 min-w-[140px] h-12 md:h-14 rounded-2xl font-bold shadow-sm snap-center transition-all duration-300 ${sosTimer !== null ? 'bg-amber-500 hover:bg-amber-600 text-white' : (sosActive ? 'border-red-500 text-red-600 bg-red-50 dark:bg-red-950/30 hover:bg-red-100' : 'bg-[#E52B36] hover:bg-red-700 text-white')}`}
+            className={`flex-1 min-w-[140px] h-12 md:h-14 rounded-2xl font-bold shadow-sm snap-center transition-all duration-300 !bg-[#E52B36] hover:!bg-red-700 text-white ${sosTimer !== null ? '!bg-amber-500 hover:!bg-amber-600' : (sosActive ? '!border-red-500 !text-red-600 !bg-red-50 dark:!bg-red-950/30 hover:!bg-red-100' : '')}`}
           >
             <AlertOctagon size={18} className="mr-2" />
             {sosTimer !== null ? `${t('cancelCountdown')} (${sosTimer}s)` : (sosActive ? t('cancelSos') : t('emergency').toUpperCase())}
@@ -721,9 +728,16 @@ const Home = () => {
         {/* BENTO GRID */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 transition-all duration-500">
           
-          {/* LEFT COLUMN: Info & Telemetry */}
-          <div className={`${showMap ? 'lg:col-span-6 xl:col-span-5' : 'lg:col-span-8 lg:col-start-3 xl:col-span-6 xl:col-start-4'} flex flex-col gap-8 transition-all duration-500`}>
+          {/* LEFT COLUMN: Info & Telemetry
+              When the map is hidden the content must FILL the row. The old
+              `lg:col-start-3` left the first two of twelve grid columns
+              permanently empty, which made the whole page read as a narrow
+              strip floating in dead space on a wide screen. */}
+          <div className={`${showMap ? 'lg:col-span-6 xl:col-span-5' : 'lg:col-span-12 xl:col-span-12'} flex flex-col gap-8 transition-all duration-500`}>
             
+            {/* With the map hidden the column is wide, so the cards sit
+                side by side instead of one tall narrow stack. */}
+            <div className={`grid gap-8 ${showMap ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-2'}`}>
             {/* ROUTE DETAILS CARD */}
             <Card className="rounded-3xl border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl">
               <CardHeader className="border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50 pb-5 px-6 pt-6">
@@ -939,6 +953,7 @@ const Home = () => {
                  </div>
                </CardContent>
             </Card>
+            </div>
 
           </div>
 

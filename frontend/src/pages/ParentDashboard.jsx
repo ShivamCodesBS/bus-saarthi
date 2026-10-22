@@ -3,7 +3,8 @@ import {
   Heart, MapPin, Bus, User, LogOut, Bell, Calendar, CheckCircle2,
   XCircle, Clock, TrendingUp, BookOpen, Phone, Navigation,
   Gauge, Compass, AlertOctagon, Menu, X, Activity, ChevronLeft, ChevronRight,
-  IndianRupee, Megaphone, Settings, Eye, ArrowLeft, GitMerge
+  IndianRupee, Megaphone, Settings, Eye, ArrowLeft, GitMerge,
+  MessageSquareWarning, RotateCcw, Check, Wrench, Timer, ShieldAlert
 } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -19,6 +20,7 @@ import {
   ResponsiveContainer, ReferenceLine
 } from 'recharts';
 import '../index.css';
+import { friendlyError, reportError } from '../lib/errors';
 
 // Fix Leaflet default icon
 delete L.Icon.Default.prototype._getIconUrl;
@@ -38,6 +40,15 @@ const busIcon = new L.Icon({
 const PURPLE = '#8b5cf6';
 const PURPLE_DARK = '#7c3aed';
 const PURPLE_LIGHT = 'rgba(139,92,246,0.12)';
+
+// -- Grievance lifecycle states, mirroring the backend enum --
+const GRIEVANCE_STATUS = {
+  pending: { label: 'Pending', bg: '#fff1f0', color: '#cf1322', Icon: ShieldAlert },
+  in_progress: { label: 'In Progress', bg: '#fff7e6', color: '#d46b08', Icon: Wrench },
+  resolved: { label: 'Awaiting Your Confirmation', bg: '#e6f4ff', color: '#0958d9', Icon: Timer },
+  reopened: { label: 'Reopened — Not Resolved', bg: '#fff1f0', color: '#cf1322', Icon: RotateCcw },
+  closed: { label: 'Closed — Confirmed', bg: '#e6fae6', color: '#28a745', Icon: CheckCircle2 },
+};
 
 // Map auto-invalidate on resize
 const MapResizer = () => {
@@ -195,6 +206,10 @@ const ParentDashboard = () => {
   const [speedData, setSpeedData] = useState(null);
   const [analyticsDate, setAnalyticsDate] = useState(new Date().toISOString().split('T')[0]);
   const [childMergeInfo, setChildMergeInfo] = useState(null);
+  const [childGrievances, setChildGrievances] = useState([]);
+  const [grievanceBusy, setGrievanceBusy] = useState(new Set());
+  const [rejectingId, setRejectingId] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
 
   // Live tracking states
   const [busLocation, setBusLocation] = useState([28.3180, 79.4670]);
@@ -205,7 +220,12 @@ const ParentDashboard = () => {
   const pollingRef = useRef(null);
   const staleTimerRef = useRef(null);
 
-  const authHeaders = { headers: { Authorization: `Bearer ${user?.token}` } };
+  // A shared headers object is a new reference on every render, which makes
+  // the useCallback dependency lists permanently stale. A ref keeps one
+  // stable object that always carries the current token.
+  const authHeadersRef = useRef({ headers: {} });
+  authHeadersRef.current = { headers: { Authorization: `Bearer ${user?.token}` } };
+  const authHeaders = authHeadersRef.current;
 
   // ---- Data fetching ----
   const fetchAll = useCallback(async () => {
@@ -264,6 +284,82 @@ const ParentDashboard = () => {
     }
   }, [user?.token]);
 
+  /**
+   * Grievances raised by any linked child. This is what lets a parent follow
+   * up on their child's complaints and confirm or reject a fix.
+   */
+  const fetchChildGrievances = useCallback(async () => {
+    try {
+      const res = await axios.get(`${BACKEND_URL}/api/parents/grievances`, authHeaders);
+      const data = Array.isArray(res.data) ? res.data : (res.data?.data || []);
+      setChildGrievances(data);
+    } catch (err) {
+      console.error('Failed to fetch child grievances', err);
+    }
+  }, [user?.token]);
+
+  /** The parent confirms the transport team's fix — the complaint closes. */
+  const handleConfirmGrievance = async (id) => {
+    setGrievanceBusy((prev) => new Set([...prev, id]));
+    try {
+      await axios.patch(
+        `${BACKEND_URL}/api/grievance/${id}/confirm`,
+        {},
+        authHeaders,
+      );
+      setChildGrievances((prev) =>
+        prev.map((g) => (g.id === id ? { ...g, status: 'closed' } : g)),
+      );
+      toast.success('Thank you! The complaint is now closed.');
+    } catch (err) {
+      toast.error(friendlyError(err, 'We could not confirm the fix. Please try again.'));
+    } finally {
+      setGrievanceBusy((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
+  /**
+   * The parent says the issue is still not fixed. The complaint is reopened
+   * and moves back to the top of the transport team's queue.
+   */
+  const handleRejectGrievance = async (id) => {
+    setGrievanceBusy((prev) => new Set([...prev, id]));
+    try {
+      await axios.patch(
+        `${BACKEND_URL}/api/grievance/${id}/reopen`,
+        { reason: rejectReason },
+        authHeaders,
+      );
+      setChildGrievances((prev) =>
+        prev.map((g) =>
+          g.id === id
+            ? {
+                ...g,
+                status: 'reopened',
+                reopenCount: (g.reopenCount || 0) + 1,
+                priority: (g.priority || 0) + 10,
+              }
+            : g,
+        ),
+      );
+      setRejectingId(null);
+      setRejectReason('');
+      toast.success('Complaint reopened. It is now at the top of the queue.');
+    } catch (err) {
+      toast.error(friendlyError(err, 'We could not reopen the complaint. Please try again.'));
+    } finally {
+      setGrievanceBusy((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
   const fetchSpeedAnalytics = useCallback(async (routeId, date) => {
     if (!routeId) return;
     try {
@@ -307,7 +403,8 @@ const ParentDashboard = () => {
   useEffect(() => {
     fetchAll();
     fetchBroadcasts();
-  }, [fetchAll, fetchBroadcasts]);
+    fetchChildGrievances();
+  }, [fetchAll, fetchBroadcasts, fetchChildGrievances]);
 
   useEffect(() => {
     const routeToTrack = childMergeInfo?.activeRouteId || child?.routeId;
@@ -334,7 +431,7 @@ const ParentDashboard = () => {
       await axios.post(`${BACKEND_URL}/api/parents/child/${child.loginId}/leave`, { date }, authHeaders);
       toast.success(`Leave marked for ${date}`);
     } catch (err) {
-      toast.error('Failed to mark leave');
+      toast.error('We could not mark the leave. Please try again.');
     }
   };
 
@@ -413,6 +510,7 @@ const ParentDashboard = () => {
             {[
               { icon: <Bus size={18} />, label: 'Overview', tab: 'overview' },
               { icon: <Calendar size={18} />, label: 'Attendance', tab: 'attendance' },
+              { icon: <MessageSquareWarning size={18} />, label: 'Complaints', tab: 'complaints' },
               { icon: <Megaphone size={18} />, label: 'Announcements', tab: 'announcements' },
               { icon: <Activity size={18} />, label: 'Speed Analytics', tab: 'analytics' },
             ].map(item => (
@@ -492,6 +590,7 @@ const ParentDashboard = () => {
         {[
           { id: 'overview', icon: <Bus size={16} />, label: 'Overview' },
           { id: 'attendance', icon: <Calendar size={16} />, label: 'Attendance' },
+          { id: 'complaints', icon: <MessageSquareWarning size={16} />, label: 'Complaints' },
           { id: 'announcements', icon: <Megaphone size={16} />, label: 'Notices' },
           { id: 'analytics', icon: <Activity size={16} />, label: 'Analytics' },
         ].map(tab => (
@@ -828,6 +927,187 @@ const ParentDashboard = () => {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* ===== COMPLAINTS TAB ===== */}
+        {activeTab === 'complaints' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+            <p style={{ margin: 0, color: 'var(--text-light)', fontSize: '0.85rem' }}>
+              {childGrievances.length} complaint{childGrievances.length === 1 ? '' : 's'} raised by your child
+            </p>
+
+            {childGrievances.length === 0 && (
+              <div style={{
+                background: 'var(--card-bg)', borderRadius: '20px', padding: '2.5rem',
+                textAlign: 'center', border: '1px solid var(--border-color)',
+              }}>
+                <MessageSquareWarning size={40} color={PURPLE} style={{ opacity: 0.4 }} />
+                <p style={{ margin: '0.75rem 0 0', color: 'var(--text-light)', fontWeight: 500 }}>
+                  No complaints have been raised yet
+                </p>
+              </div>
+            )}
+
+            {childGrievances.map((g) => {
+              const meta = GRIEVANCE_STATUS[g.status] || GRIEVANCE_STATUS.pending;
+              const { Icon } = meta;
+              const busy = grievanceBusy.has(g.id);
+              return (
+                <div key={g.id} style={{
+                  background: 'var(--card-bg)', borderRadius: '16px', padding: '1.1rem 1.25rem',
+                  border: '1px solid var(--border-color)',
+                  borderLeft: `4px solid ${meta.color}`,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
+                }}>
+                  <div style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+                    gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.6rem',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', minWidth: 0 }}>
+                      <div style={{ background: meta.bg, borderRadius: '9px', padding: '6px', flexShrink: 0 }}>
+                        <Icon size={15} color={meta.color} />
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <p style={{ margin: 0, fontWeight: 700, color: 'var(--text-dark)', fontSize: '0.9rem' }}>
+                          {g.childName || 'Your child'}
+                        </p>
+                        <p style={{ margin: 0, fontSize: '0.74rem', color: 'var(--text-light)' }}>
+                          #{String(g.id).substring(0, 6).toUpperCase()}
+                          {g.category ? ` · ${g.category}` : ''}
+                          {g.busNumber ? ` · Bus ${g.busNumber}` : ''}
+                        </p>
+                      </div>
+                    </div>
+                    <span style={{
+                      background: meta.bg, color: meta.color, fontWeight: 700,
+                      fontSize: '0.7rem', padding: '4px 10px', borderRadius: '20px',
+                      display: 'flex', alignItems: 'center', gap: '0.25rem',
+                      whiteSpace: 'nowrap',
+                    }}>
+                      <Icon size={11} /> {meta.label}
+                    </span>
+                  </div>
+
+                  <p style={{ margin: 0, color: 'var(--text-dark)', fontSize: '0.9rem', lineHeight: 1.5, overflowWrap: 'anywhere' }}>
+                    {g.text}
+                  </p>
+
+                  {g.adminResponse && (
+                    <div style={{
+                      marginTop: '0.7rem', padding: '0.7rem 0.9rem',
+                      background: 'rgba(0,86,179,0.06)', borderLeft: '3px solid var(--primary-blue)',
+                      borderRadius: '8px',
+                    }}>
+                      <p style={{ margin: 0, fontSize: '0.68rem', fontWeight: 700, color: 'var(--primary-blue)', textTransform: 'uppercase' }}>
+                        Response from the transport team
+                      </p>
+                      <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: 'var(--text-dark)', lineHeight: 1.5 }}>
+                        {g.adminResponse}
+                      </p>
+                    </div>
+                  )}
+
+                  {g.reopenCount > 0 && (
+                    <p style={{ margin: '0.5rem 0 0', fontSize: '0.72rem', fontWeight: 700, color: '#cf1322' }}>
+                      Reopened {g.reopenCount} time{g.reopenCount === 1 ? '' : 's'} — still not resolved
+                    </p>
+                  )}
+
+                  {/* The parent confirms or rejects the fix. */}
+                  {g.status === 'resolved' && (
+                    <div style={{ marginTop: '0.8rem' }}>
+                      <p style={{ margin: '0 0 0.55rem', fontSize: '0.8rem', color: 'var(--text-light)' }}>
+                        Has this been fixed? Your answer decides whether the complaint closes.
+                      </p>
+                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <button
+                          onClick={() => handleConfirmGrievance(g.id)}
+                          disabled={busy}
+                          style={{
+                            background: '#28a745', color: 'white', border: 'none',
+                            padding: '0.45rem 1rem', borderRadius: '8px', fontWeight: 700,
+                            fontSize: '0.8rem', cursor: busy ? 'default' : 'pointer',
+                            display: 'flex', alignItems: 'center', gap: '0.3rem',
+                          }}
+                        >
+                          <Check size={14} /> Yes, Fixed
+                        </button>
+                        <button
+                          onClick={() => {
+                            setRejectingId(rejectingId === g.id ? null : g.id);
+                            setRejectReason('');
+                          }}
+                          disabled={busy}
+                          style={{
+                            background: '#cf1322', color: 'white', border: 'none',
+                            padding: '0.45rem 1rem', borderRadius: '8px', fontWeight: 700,
+                            fontSize: '0.8rem', cursor: busy ? 'default' : 'pointer',
+                            display: 'flex', alignItems: 'center', gap: '0.3rem',
+                          }}
+                        >
+                          <RotateCcw size={14} /> Not Fixed Yet
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {rejectingId === g.id && (
+                    <div style={{
+                      marginTop: '0.7rem', display: 'flex', flexDirection: 'column', gap: '0.6rem',
+                      padding: '0.9rem', background: 'rgba(207,19,34,0.05)',
+                      borderRadius: '10px', border: '1px solid rgba(207,19,34,0.2)',
+                    }}>
+                      <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-dark)' }}>
+                        What is still not fixed?
+                      </label>
+                      <textarea
+                        value={rejectReason}
+                        onChange={(e) => setRejectReason(e.target.value)}
+                        rows={3}
+                        placeholder="e.g. The bus was on time today but the AC was still not working."
+                        style={{
+                          width: '100%', padding: '0.7rem', borderRadius: '8px',
+                          border: '1px solid var(--border-color)', fontSize: '0.9rem',
+                          outline: 'none', resize: 'vertical', fontFamily: 'inherit',
+                          boxSizing: 'border-box', background: 'var(--card-bg)', color: 'var(--text-dark)',
+                        }}
+                      />
+                      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          onClick={() => { setRejectingId(null); setRejectReason(''); }}
+                          style={{
+                            padding: '0.45rem 1rem', borderRadius: '8px',
+                            border: '1px solid var(--border-color)', background: 'transparent',
+                            cursor: 'pointer', fontWeight: 600, fontSize: '0.82rem', color: 'var(--text-dark)',
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRejectGrievance(g.id)}
+                          disabled={busy}
+                          style={{
+                            padding: '0.45rem 1rem', borderRadius: '8px', border: 'none',
+                            background: '#cf1322', color: 'white', cursor: busy ? 'default' : 'pointer',
+                            fontWeight: 600, fontSize: '0.82rem',
+                          }}
+                        >
+                          Reopen Complaint
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <p style={{ margin: '0.6rem 0 0', fontSize: '0.72rem', color: 'var(--text-light)' }}>
+                    Raised {g.createdAt ? new Date(g.createdAt).toLocaleString('en-IN') : ''}
+                    {g.resolvedAt && ` · Marked fixed ${new Date(g.resolvedAt).toLocaleString('en-IN')}`}
+                  </p>
+                </div>
+              );
+            })}
           </div>
         )}
 

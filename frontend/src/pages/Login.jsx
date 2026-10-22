@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bus, User, Lock, ArrowRight, Shield, Car, Eye, EyeOff, Languages, Heart, Phone, GraduationCap, Users } from 'lucide-react';
+import { Bus, User, Lock, ArrowRight, Shield, Car, Eye, EyeOff, Languages, Heart, Phone, GraduationCap, Users, ChevronDown, Briefcase, Check } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
 import '../index.css';
@@ -13,6 +13,11 @@ const Login = () => {
   const { login } = useAuth();
   const { t, lang, setLanguage } = useLang();
   const [loginType, setLoginType] = useState('passenger'); // 'passenger', 'admin', 'transport_incharge', 'parent'
+  // Inside "Passenger" the user can be a student or a member of staff
+  // (teacher / driver). It only changes the label and the role sent to the
+  // backend — the styling stays exactly as it was.
+  const [passengerKind, setPassengerKind] = useState('student'); // 'student' | 'staff'
+  const [passengerMenuOpen, setPassengerMenuOpen] = useState(false);
   const [userId, setUserId] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -20,6 +25,18 @@ const Login = () => {
   const [errorMessage, setErrorMessage] = useState('');
   const [lockoutTimer, setLockoutTimer] = useState(null);
   const [isLocked, setIsLocked] = useState(false);
+
+  // Close the Student/Staff dropdown when clicking outside of it.
+  useEffect(() => {
+    if (!passengerMenuOpen) return;
+    const onDocClick = (e) => {
+      if (!e.target.closest?.('[data-passenger-select]')) {
+        setPassengerMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [passengerMenuOpen]);
 
   useEffect(() => {
     let interval;
@@ -40,6 +57,15 @@ const Login = () => {
     }
     return () => clearInterval(interval);
   }, [lockoutTimer]);
+
+  /**
+   * The role actually sent to the backend. For the "Passenger" tile this
+   * depends on whether the user picked Student or Staff.
+   */
+  const resolveRole = () => {
+    if (loginType !== 'passenger') return loginType;
+    return passengerKind === 'staff' ? 'teacher' : 'passenger';
+  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -191,7 +217,17 @@ const Login = () => {
           border: '1px solid rgba(255, 255, 255, 0.15)',
         }}>
           {[
-            { id: 'passenger', label: lang === 'hi' ? 'यात्री' : 'Passenger', icon: GraduationCap },
+            {
+              id: 'passenger',
+              label:
+                loginType === 'passenger' && passengerKind === 'staff'
+                  ? (lang === 'hi' ? 'स्टाफ़' : 'Staff')
+                  : (lang === 'hi' ? 'यात्री' : 'Passenger'),
+              icon:
+                loginType === 'passenger' && passengerKind === 'staff'
+                  ? Briefcase
+                  : GraduationCap,
+            },
             { id: 'parent', label: lang === 'hi' ? 'पेरेंट' : 'Parent', icon: Users },
             { id: 'transport_incharge', label: lang === 'hi' ? 'टी.आई.' : 'T.I.', icon: Bus },
             { id: 'admin', label: lang === 'hi' ? 'एडमिन' : 'Admin', icon: Shield },
@@ -235,18 +271,161 @@ const Login = () => {
           })}
         </div>
 
+        {/* Student / Staff sub-selection.
+            Only shown for the "Passenger" tile. It reuses the same
+            translucent white styling as the tile row above so the page
+            keeps its original look. */}
+        {loginType === 'passenger' && (
+          <div data-passenger-select style={{ position: 'relative', marginTop: '-0.5rem', marginBottom: '1.25rem' }}>
+            <button
+              type="button"
+              onClick={() => setPassengerMenuOpen((v) => !v)}
+              aria-haspopup="listbox"
+              aria-expanded={passengerMenuOpen}
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.6rem 0.9rem',
+                borderRadius: '12px',
+                border: '1px solid rgba(255, 255, 255, 0.22)',
+                backgroundColor: 'rgba(12, 30, 54, 0.62)',
+                backdropFilter: 'blur(16px)',
+                WebkitBackdropFilter: 'blur(16px)',
+                color: 'white',
+                fontSize: '0.9rem',
+                fontWeight: '600',
+                cursor: 'pointer',
+                textAlign: 'left',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              {passengerKind === 'staff' ? (
+                <Briefcase size={16} style={{ flexShrink: 0 }} />
+              ) : (
+                <GraduationCap size={16} style={{ flexShrink: 0 }} />
+              )}
+              <span style={{ flex: 1, minWidth: 0 }}>
+                {passengerKind === 'staff'
+                  ? (lang === 'hi' ? 'स्टाफ़ / शिक्षक' : 'Staff / Teacher')
+                  : (lang === 'hi' ? 'विद्यार्थी' : 'Student')}
+              </span>
+              <ChevronDown
+                size={16}
+                style={{
+                  flexShrink: 0,
+                  transform: passengerMenuOpen ? 'rotate(180deg)' : 'none',
+                  transition: 'transform 0.2s ease',
+                }}
+              />
+            </button>
+
+            {passengerMenuOpen && (
+              <div
+                role="listbox"
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  marginTop: '0.35rem',
+                  zIndex: 60,
+                  background: 'rgba(12, 30, 54, 0.82)',
+                  backdropFilter: 'blur(20px) saturate(140%)',
+                  WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+                  borderRadius: '12px',
+                  border: '1px solid rgba(255, 255, 255, 0.22)',
+                  boxShadow: '0 12px 32px rgba(0, 0, 0, 0.4)',
+                  overflow: 'hidden',
+                }}
+              >
+                {[
+                  {
+                    id: 'student',
+                    icon: GraduationCap,
+                    en: 'Student',
+                    hi: 'विद्यार्थी',
+                    hint: { en: 'Bus pass, attendance, complaints', hi: 'बस पास, उपस्थिति, शिकायतें' },
+                  },
+                  {
+                    id: 'staff',
+                    icon: Briefcase,
+                    en: 'Staff / Teacher',
+                    hi: 'स्टाफ़ / शिक्षक',
+                    hint: { en: 'Employee ID for faculty and drivers', hi: 'faculty और drivers के लिए कर्मचारी आईडी' },
+                  },
+                ].map((opt) => {
+                  const active = passengerKind === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      role="option"
+                      aria-selected={active}
+                      onClick={() => {
+                        setPassengerKind(opt.id);
+                        setPassengerMenuOpen(false);
+                        setUserId('');
+                        setPassword('');
+                      }}
+                      style={{
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.7rem',
+                        padding: '0.7rem 0.9rem',
+                        background: active
+                          ? 'rgba(255, 255, 255, 0.18)'
+                          : 'transparent',
+                        border: 'none',
+                        borderLeft: active
+                          ? '3px solid rgba(255, 255, 255, 0.85)'
+                          : '3px solid transparent',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        color: '#ffffff',
+                        transition: 'background 0.15s ease',
+                      }}
+                    >
+                      <opt.icon
+                        size={17}
+                        color={active ? '#ffffff' : 'rgba(255,255,255,0.75)'}
+                        style={{ flexShrink: 0 }}
+                      />
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ display: 'block', fontWeight: 700, fontSize: '0.9rem' }}>
+                          {lang === 'hi' ? opt.hi : opt.en}
+                        </span>
+                        <span style={{ display: 'block', fontSize: '0.74rem', color: 'rgba(255,255,255,0.75)' }}>
+                          {lang === 'hi' ? opt.hint.hi : opt.hint.en}
+                        </span>
+                      </span>
+                      {active && <Check size={16} color="#ffffff" style={{ flexShrink: 0 }} />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         <form onSubmit={handleLogin} className="flex flex-col" style={{ gap: '1rem' }}>
           <div className="animate-fade-in" key={loginType + 'id'}>
             <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', fontWeight: '500', color: 'white' }}>
-              {loginType === 'passenger' ? t('passengerId') : loginType === 'parent' ? 'Phone Number / Parent ID' : loginType === 'transport_incharge' ? t('transportInchargeId') : t('adminId')}
+              {loginType === 'passenger'
+                ? (passengerKind === 'staff' ? 'Employee ID' : t('passengerId'))
+                : loginType === 'parent' ? 'Phone Number / Parent ID' : loginType === 'transport_incharge' ? t('transportInchargeId') : t('adminId')}
             </label>
             <div className="relative">
               <div style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.7)' }}>
-                {loginType === 'parent' ? <Phone size={18} /> : <User size={18} />}
+                {loginType === 'parent' ? <Phone size={18} /> : loginType === 'passenger' && passengerKind === 'staff' ? <Briefcase size={18} /> : <User size={18} />}
               </div>
               <input
                 type="text"
-                placeholder={loginType === 'passenger' ? t('enterPassengerId') : loginType === 'parent' ? 'Enter Phone Number or ID' : loginType === 'transport_incharge' ? t('enterTransportInchargeId') : t('enterAdminId')}
+                placeholder={loginType === 'passenger'
+                  ? (passengerKind === 'staff' ? 'e.g. T001' : t('enterPassengerId'))
+                  : loginType === 'parent' ? 'Enter Phone Number or ID' : loginType === 'transport_incharge' ? t('enterTransportInchargeId') : t('enterAdminId')}
                 value={userId}
                 onChange={(e) => setUserId(e.target.value)}
                 required

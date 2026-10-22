@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule as NestConfigModule } from '@nestjs/config';
+import { existsSync } from 'fs';
+import { join, resolve } from 'path';
 import appConfig from './app.config';
 import databaseConfig from './database.config';
 import jwtConfig from './jwt.config';
@@ -7,10 +9,27 @@ import awsConfig from './aws.config';
 import redisConfig from './redis.config';
 import Joi from 'joi';
 
+/**
+ * Locate the env files, walking up from this file so the shared root `.env`
+ * is found no matter where the process was started from.
+ */
+function resolveEnvFiles(): string[] {
+  const candidates = [
+    join(__dirname, '../../../../.env'), // repo root .env
+    join(__dirname, '../../.env'), // backend/.env
+    join(process.cwd(), '.env'),
+    join(process.cwd(), '../.env'),
+  ];
+  return candidates.filter((p) => existsSync(p));
+}
+
 @Module({
   imports: [
     NestConfigModule.forRoot({
       isGlobal: true,
+      // The root `.env` holds the shared settings; `backend/.env` can
+      // override them for backend-only values.
+      envFilePath: resolveEnvFiles(),
       load: [appConfig, databaseConfig, jwtConfig, awsConfig, redisConfig],
       validationSchema: Joi.object({
         // Server

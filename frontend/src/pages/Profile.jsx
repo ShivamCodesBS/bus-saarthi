@@ -7,6 +7,7 @@ import { BACKEND_URL } from '../config';
 import toast from 'react-hot-toast';
 import { useLang } from '../context/LanguageContext';
 import '../index.css';
+import { friendlyError, reportError } from '../lib/errors';
 
 const Profile = () => {
   const navigate = useNavigate();
@@ -38,11 +39,11 @@ const Profile = () => {
         }
         toast.success('Profile picture updated!', { id: loadingToast });
       } else {
-        toast.error('Upload failed: ' + (res.data.detail || 'Unknown error'), { id: loadingToast });
+        toast.error('The upload did not succeed. Please try a smaller file.', { id: loadingToast });
       }
     } catch (err) {
       const msg = err.response?.data?.detail || err.message || 'Network error';
-      toast.error('Failed to upload image: ' + msg, { id: loadingToast });
+      toast.error('We could not upload the image. Please try again.', { id: loadingToast });
       console.error('Profile pic upload error:', err.response?.data || err);
     }
   };

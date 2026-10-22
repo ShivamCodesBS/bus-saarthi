@@ -1,8 +1,9 @@
-import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, MaxLength } from 'class-validator';
 
 export class CreateGrievanceDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(2000)
   text: string;
 
   @IsString()
@@ -20,4 +21,13 @@ export class CreateGrievanceDto {
   @IsString()
   @IsOptional()
   realName?: string;
+
+  /**
+   * Route the complainant believes the issue relates to. The server always
+   * resolves the route from the account's own allocation, so this is only a
+   * hint — but it is accepted so the client can be explicit.
+   */
+  @IsString()
+  @IsOptional()
+  route?: string;
 }

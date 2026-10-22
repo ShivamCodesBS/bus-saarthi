@@ -16,14 +16,15 @@ const HamburgerMenu = ({ isOpen, onClose }) => {
 
   return (
     <>
-      <div 
+      <div
         style={{
           position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)',
           backdropFilter: 'blur(4px)', zIndex: 40, transition: 'opacity 0.3s'
         }}
+        className="mobile-menu-overlay"
         onClick={onClose}
       />
-      <div 
+      <div
         style={{
           position: 'fixed', top: 0, right: 0, bottom: 0,
           width: '70%', maxWidth: '350px',
@@ -32,7 +33,7 @@ const HamburgerMenu = ({ isOpen, onClose }) => {
           transition: 'transform 0.3s ease-in-out',
           display: 'flex', flexDirection: 'column'
         }}
-        className="animate-slide-up glass"
+        className="animate-slide-up glass mobile-menu-panel"
       >
         <div style={{ padding: '1.25rem 1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>

@@ -17,7 +17,9 @@ axios.interceptors.request.use((config) => {
           config.headers['Authorization'] = `Bearer ${user.token}`;
         }
       }
-    } catch (e) {}
+    } catch {
+      // A malformed stored session is ignored — the user simply signs in again.
+    }
   }
   return config;
 });
@@ -25,12 +27,34 @@ axios.interceptors.request.use((config) => {
 axios.interceptors.response.use(
   (response) => response,
   (error) => {
-    // Disabled aggressive auto-logout.
-    // If a specific route fails (like a 403 WAF block on Render), 
-    // it will now just return the error gracefully to the component instead of kicking you out.
+    // An expired session should send the user back to the login screen
+    // rather than leaving them on a page that silently does nothing.
+    // Every other failure is handled by the calling component, which shows
+    // a human-readable message — the raw error never reaches the screen.
+    const status = error?.response?.status;
+    if (status === 401) {
+      if (localStorage.getItem('bus_saarthi_user')) {
+        // The login endpoint itself returning 401 is a normal
+        // "wrong password", not an expired session.
+        const isLoginCall = String(error?.config?.url || '').includes(
+          '/api/login',
+        );
+        if (!isLoginCall) {
+          localStorage.removeItem('bus_saarthi_user');
+          if (window.location.pathname !== '/login') {
+            window.location.replace('/login');
+          }
+        }
+      }
+    }
     return Promise.reject(error);
   }
 );
+
+// Any unhandled promise rejection is logged, never shown raw.
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('[unhandled rejection]', event.reason);
+});
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

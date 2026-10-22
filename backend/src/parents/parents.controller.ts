@@ -9,6 +9,9 @@ import {
 } from '@nestjs/common';
 import { ParentsService } from './parents.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UserRole } from '@prisma/client';
 
 @Controller('api/parents')
 @UseGuards(JwtAuthGuard)
@@ -26,6 +29,29 @@ export class ParentsController {
   }
 
   /**
+   * GET /api/parents/grievances
+   * Every grievance raised by any linked child, newest and most-urgent first.
+   */
+  @Get('grievances')
+  async getGrievances(@Request() req) {
+    const parentLoginId = req.user?.loginId || req.user?.login_id;
+    return this.parentsService.getChildGrievances(parentLoginId);
+  }
+
+  /**
+   * GET /api/parents/child/:loginId/grievances
+   * Grievances for one specific linked child.
+   */
+  @Get('child/:loginId/grievances')
+  async getChildGrievances(
+    @Request() req,
+    @Param('loginId') childLoginId: string,
+  ) {
+    const parentLoginId = req.user?.loginId || req.user?.login_id;
+    return this.parentsService.getChildGrievancesFor(parentLoginId, childLoginId);
+  }
+
+  /**
    * GET /api/parents/child/:loginId/attendance
    * Returns attendance history + monthly % for a linked child
    */
@@ -35,10 +61,7 @@ export class ParentsController {
     @Param('loginId') childLoginId: string,
   ) {
     const parentLoginId = req.user?.loginId || req.user?.login_id;
-    return this.parentsService.getChildAttendance(
-      parentLoginId,
-      childLoginId,
-    );
+    return this.parentsService.getChildAttendance(parentLoginId, childLoginId);
   }
 
   /**
@@ -48,10 +71,7 @@ export class ParentsController {
   @Get('child/:loginId/status')
   async getChildStatus(@Request() req, @Param('loginId') childLoginId: string) {
     const parentLoginId = req.user?.loginId || req.user?.login_id;
-    return this.parentsService.getChildTodayStatus(
-      parentLoginId,
-      childLoginId,
-    );
+    return this.parentsService.getChildTodayStatus(parentLoginId, childLoginId);
   }
 
   /**
@@ -65,18 +85,16 @@ export class ParentsController {
     @Body('date') date: string,
   ) {
     const parentLoginId = req.user?.loginId || req.user?.login_id;
-    return this.parentsService.markChildLeave(
-      parentLoginId,
-      childLoginId,
-      date,
-    );
+    return this.parentsService.markChildLeave(parentLoginId, childLoginId, date);
   }
 
   /**
    * POST /api/parents/create-and-link
-   * Admin-only: Create parent account and link to student
+   * Staff-only: create a parent account and link it to a student.
    */
   @Post('create-and-link')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
   async createAndLink(
     @Body()
     body: {
@@ -98,9 +116,11 @@ export class ParentsController {
 
   /**
    * GET /api/parents/links
-   * Admin: get all parent-child links
+   * Staff: get all parent-child links
    */
   @Get('links')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
   async getAllLinks() {
     return this.parentsService.getAllLinks();
   }

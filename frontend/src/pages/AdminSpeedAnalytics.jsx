@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Activity, Calendar, AlertOctagon, Zap, MapPin, Search } from 'lucide-react';
 import axios from 'axios';
@@ -18,11 +18,7 @@ export default function AdminSpeedAnalytics() {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
 
-  useEffect(() => {
-    fetchAnalytics();
-  }, [routeId, date]);
-
-  const fetchAnalytics = async () => {
+  const fetchAnalytics = useCallback(async () => {
     setLoading(true);
     try {
       const res = await axios.get(`${BACKEND_URL}/api/telemetry/history/${routeId}?date=${date}`, {
@@ -37,7 +33,11 @@ export default function AdminSpeedAnalytics() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [routeId, date, user?.token]);
+
+  useEffect(() => {
+    fetchAnalytics();
+  }, [fetchAnalytics]);
 
   // Format chart time
   const formatXAxis = (tickItem) => {

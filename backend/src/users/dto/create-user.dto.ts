@@ -45,6 +45,11 @@ export class CreateUserDto {
   @IsOptional()
   designation?: string;
 
+  /** Subject taught — only meaningful for the `teacher` role. */
+  @IsString()
+  @IsOptional()
+  subject?: string;
+
   @IsString()
   @IsOptional()
   licenseNumber?: string;
@@ -87,7 +92,7 @@ export class CreateUserDto {
 
   @IsString()
   @IsOptional()
-  wake_alarm?: boolean; // Wait, boolean is @IsBoolean, but users.service.ts reads it. Let's use @IsOptional().
+  wake_alarm?: string;
 
   @IsNumber()
   @IsOptional()

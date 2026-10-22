@@ -2,20 +2,33 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { CacheService } from '../cache/cache.service';
 
 @Injectable()
 export class RoutesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cache: CacheService,
+  ) {}
 
   async findAll() {
-    const routes = await this.prisma.route.findMany();
+    const routes = await this.cache.remember('routes:all', 30, () =>
+      this.prisma.route.findMany({
+        include: { bus: true },
+        orderBy: { routeId: 'asc' },
+      }),
+    );
     return { status: 'success', data: routes };
   }
 
   async findOne(routeId: string) {
-    const route = await this.prisma.route.findUnique({ where: { routeId } });
+    const route = await this.prisma.route.findUnique({
+      where: { routeId },
+      include: { bus: true },
+    });
     if (!route) {
       throw new NotFoundException(`Route ${routeId} not found`);
     }
@@ -34,6 +47,22 @@ export class RoutesService {
     };
   }
 
+  /**
+   * The bus currently serving a route. The route identity is stable; the bus
+   * number can change (fleet swap or merge), so it is always resolved live.
+   */
+  async getLiveBus(routeId: string) {
+    const route = await this.prisma.route.findUnique({
+      where: { routeId },
+      select: { busNumber: true, routeName: true, bus: { select: { busNumber: true } } },
+    });
+    if (!route) return null;
+    return {
+      busNumber: route.bus?.busNumber ?? route.busNumber,
+      routeName: route.routeName,
+    };
+  }
+
   async create(body: any) {
     const existing = await this.prisma.route.findUnique({
       where: { routeId: body.route_id },
@@ -41,11 +70,15 @@ export class RoutesService {
     if (existing)
       throw new ConflictException(`Route ${body.route_id} already exists`);
 
+    // Link (or create) the Bus entity that serves this route.
+    const busId = await this.resolveBusId(body.bus_number);
+
     const route = await this.prisma.route.create({
       data: {
         routeId: body.route_id,
         routeName: body.route_name,
         busNumber: body.bus_number,
+        busId,
         driverId: body.driver_id,
         stops:
           typeof body.stops === 'string'
@@ -62,6 +95,7 @@ export class RoutesService {
           : null,
       },
     });
+    await this.invalidate();
     return { status: 'success', message: 'Route created', route };
   }
 
@@ -69,11 +103,17 @@ export class RoutesService {
     const route = await this.prisma.route.findUnique({ where: { routeId } });
     if (!route) throw new NotFoundException(`Route ${routeId} not found`);
 
+    const busId =
+      body.bus_number !== undefined
+        ? await this.resolveBusId(body.bus_number)
+        : undefined;
+
     const updatedRoute = await this.prisma.route.update({
       where: { routeId },
       data: {
         routeName: body.route_name,
         busNumber: body.bus_number,
+        busId,
         driverId: body.driver_id,
         stops:
           body.stops !== undefined
@@ -97,13 +137,46 @@ export class RoutesService {
       },
     });
 
+    await this.invalidate();
     return { status: 'success', message: 'Route updated', route: updatedRoute };
   }
 
   async remove(routeId: string) {
     const route = await this.prisma.route.findUnique({ where: { routeId } });
     if (!route) throw new NotFoundException(`Route ${routeId} not found`);
+
+    // A route with students attached must not be deleted — the students
+    // would be left pointing at a route that no longer exists.
+    const studentCount = await this.prisma.user.count({
+      where: { routeId, role: 'passenger' },
+    });
+    if (studentCount > 0) {
+      throw new BadRequestException(
+        `Cannot delete route ${routeId}: ${studentCount} student(s) are still assigned to it. Move them to another route first.`,
+      );
+    }
+
     await this.prisma.route.delete({ where: { routeId } });
+    await this.invalidate();
     return { status: 'success', message: 'Route deleted' };
+  }
+
+  /**
+   * Find the Bus record for a bus number, creating it if this is the first
+   * time we see that bus. This is what lets a route reference a bus
+   * independently of the bus number string.
+   */
+  private async resolveBusId(busNumber?: string): Promise<string | undefined> {
+    if (!busNumber) return undefined;
+    const bus = await this.prisma.bus.upsert({
+      where: { busNumber },
+      update: {},
+      create: { busNumber },
+    });
+    return bus.id;
+  }
+
+  private async invalidate() {
+    await this.cache.delByPattern('routes:*');
   }
 }

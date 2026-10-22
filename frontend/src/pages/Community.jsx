@@ -1,14 +1,116 @@
 import toast from 'react-hot-toast';
-import { useState, useEffect, useRef, useMemo } from 'react';
-import { ArrowLeft, Plus, Image as ImageIcon, Video, Mic, X, ThumbsUp, ShieldAlert, CheckCircle2, UserCircle2, Search, SlidersHorizontal, TrendingUp, Clock, MapPin } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import {
+  ArrowLeft,
+  Plus,
+  Image as ImageIcon,
+  Video,
+  Mic,
+  X,
+  ThumbsUp,
+  ShieldAlert,
+  CheckCircle2,
+  UserCircle2,
+  Search,
+  SlidersHorizontal,
+  MapPin,
+  Wrench,
+  RotateCcw,
+  Check,
+  Bus,
+  AlertTriangle,
+  Timer,
+  ClipboardList,
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
 import axios from 'axios';
 import { BACKEND_URL } from '../config';
+import { friendlyError, reportError } from '../lib/errors';
 import '../index.css';
 
-const CATEGORIES = ['AC Problem', 'Late Arrival', 'Rash Driving', 'Overcrowding', 'Cleanliness', 'Driver Behavior', 'Route Issue', 'Other'];
+/**
+ * Bus-service categories. Every grievance is anchored to the passenger's
+ * route, so the categories describe the bus service itself.
+ */
+const CATEGORIES = [
+  'AC Problem',
+  'Late Arrival',
+  'Rash Driving',
+  'Overcrowding',
+  'Cleanliness',
+  'Driver Behavior',
+  'Route Issue',
+  'Other',
+];
+
+/** Visual treatment for each lifecycle state. */
+const STATUS_META = {
+  pending: {
+    label: 'Pending',
+    bg: '#fff1f0',
+    color: '#cf1322',
+    Icon: ShieldAlert,
+  },
+  in_progress: {
+    label: 'In Progress',
+    bg: '#fff7e6',
+    color: '#d46b08',
+    Icon: Wrench,
+  },
+  resolved: {
+    label: 'Awaiting Your Confirmation',
+    bg: '#e6f4ff',
+    color: '#0958d9',
+    Icon: Timer,
+  },
+  reopened: {
+    label: 'Reopened — Not Resolved',
+    bg: '#fff1f0',
+    color: '#cf1322',
+    Icon: RotateCcw,
+  },
+  closed: {
+    label: 'Closed — Confirmed',
+    bg: '#e6fae6',
+    color: '#28a745',
+    Icon: CheckCircle2,
+  },
+};
+
+const STATUS_ORDER = ['reopened', 'pending', 'in_progress', 'resolved', 'closed'];
+
+/** One row of the complaint timeline shown in the detail sheet. */
+const TimelineRow = ({ icon: Icon, tone, label, value, note }) => (
+  <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'flex-start' }}>
+    <span
+      style={{
+        width: '22px',
+        height: '22px',
+        borderRadius: '50%',
+        background: tone,
+        color: 'white',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+        marginTop: '1px',
+      }}
+    >
+      <Icon size={12} />
+    </span>
+    <div style={{ minWidth: 0 }}>
+      <p style={{ margin: 0, fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-dark)' }}>
+        {label}
+      </p>
+      <p style={{ margin: 0, fontSize: '0.76rem', color: 'var(--text-light)' }}>
+        {value}
+        {note ? ` — ${note}` : ''}
+      </p>
+    </div>
+  </div>
+);
 
 const Community = () => {
   const navigate = useNavigate();
@@ -23,115 +125,288 @@ const Community = () => {
   const [processingUpvotes, setProcessingUpvotes] = useState(new Set());
   const [mediaType, setMediaType] = useState('');
   const [isUploading, setIsUploading] = useState(false);
+  // Complaints are anonymous by default. The reporter may choose to have
+  // their name shown to the transport staff instead.
+  const [showMyName, setShowMyName] = useState(false);
+  const [busyIds, setBusyIds] = useState(new Set());
+  const [rejectingId, setRejectingId] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
   const fileInputRef = useRef(null);
 
   // Filter & Sort State
   const [searchQuery, setSearchQuery] = useState('');
-  const [sortBy, setSortBy] = useState('newest'); // 'newest' | 'oldest' | 'most_agreed'
-  const [filterStatus, setFilterStatus] = useState('all'); // 'all' | 'pending' | 'resolved'
-  const [filterRoute, setFilterRoute] = useState('all'); // 'all' | user's route
+  const [sortBy, setSortBy] = useState('newest');
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterRoute, setFilterRoute] = useState('all');
   const [showFilters, setShowFilters] = useState(false);
 
-  const isAdmin = user?.role === 'admin';
+  /**
+   * Staff work bus by bus: they pick a bus and see only that bus's
+   * complaints. The bus shown is the LIVE one serving the route — the
+   * route is the stable identity, the bus can be swapped out.
+   */
+  const [selectedBus, setSelectedBus] = useState('all');
+  const [busList, setBusList] = useState([]);
+
+  /** The complaint whose full detail sheet is open. */
+  const [detailId, setDetailId] = useState(null);
+
+  /** Shows the "My complaints" panel for the signed-in user. */
+  const [showMyComplaints, setShowMyComplaints] = useState(false);
+
+  const isAdmin =
+    user?.role === 'admin' ||
+    user?.role === 'tech_admin' ||
+    user?.role === 'transport_incharge';
 
   // Route name lookup — fetched from backend
   const [routeMap, setRouteMap] = useState({});
 
-  const formatTime = (createdAtStr) => {
-    if (!createdAtStr) return t('justNow') || 'Just now';
-    const date = new Date(createdAtStr);
-    if (isNaN(date.getTime())) return createdAtStr;
-    const diffMs = Date.now() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
-    if (diffMins < 1) return lang === 'hi' ? 'अभी-अभी' : 'Just now';
-    if (diffMins < 60) return lang === 'hi' ? `${diffMins} मिनट पहले` : `${diffMins}m ago`;
-    if (diffHours < 24) return lang === 'hi' ? `${diffHours} घंटे पहले` : `${diffHours}h ago`;
-    if (diffDays === 1) return lang === 'hi' ? 'कल' : 'Yesterday';
-    if (diffDays < 7) return lang === 'hi' ? `${diffDays} दिन पहले` : `${diffDays}d ago`;
-    return date.toLocaleDateString(lang === 'hi' ? 'hi-IN' : 'en-US', { month: 'short', day: 'numeric' });
-  };
+  const token = user?.token;
+
+  const formatTime = useCallback(
+    (createdAtStr) => {
+      if (!createdAtStr) return lang === 'hi' ? 'अभी-अभी' : 'Just now';
+      const date = new Date(createdAtStr);
+      if (isNaN(date.getTime())) return createdAtStr;
+      const diffMs = Date.now() - date.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMins / 60);
+      const diffDays = Math.floor(diffHours / 24);
+      if (diffMins < 1) return lang === 'hi' ? 'अभी-अभी' : 'Just now';
+      if (diffMins < 60)
+        return lang === 'hi' ? `${diffMins} मिनट पहले` : `${diffMins}m ago`;
+      if (diffHours < 24)
+        return lang === 'hi' ? `${diffHours} घंटे पहले` : `${diffHours}h ago`;
+      if (diffDays === 1) return lang === 'hi' ? 'कल' : 'Yesterday';
+      if (diffDays < 7)
+        return lang === 'hi' ? `${diffDays} दिन पहले` : `${diffDays}d ago`;
+      return date.toLocaleDateString(lang === 'hi' ? 'hi-IN' : 'en-US', {
+        month: 'short',
+        day: 'numeric',
+      });
+    },
+    [lang],
+  );
 
   // Fetch complaints + routes in parallel
   useEffect(() => {
+    let cancelled = false;
+
     const fetchData = async () => {
       try {
-        const token = user?.token || JSON.parse(localStorage.getItem('bus_saarthi_user') || '{}').token;
         const headers = { Authorization: `Bearer ${token}` };
         const [grievancesRes, routesRes] = await Promise.all([
           axios.get(`${BACKEND_URL}/api/grievances`, { headers }),
-          axios.get(`${BACKEND_URL}/api/routes`, { headers }).catch(() => ({ data: [] })),
+          axios
+            .get(`${BACKEND_URL}/api/routes`, { headers })
+            .catch(() => ({ data: { data: [] } })),
         ]);
-        const data = Array.isArray(grievancesRes.data) ? grievancesRes.data : (grievancesRes.data?.data || []);
+        if (cancelled) return;
+
+        // The endpoint returns a bare array.
+        const data = Array.isArray(grievancesRes.data)
+          ? grievancesRes.data
+          : (grievancesRes.data?.data || []);
         setComplaints(data);
 
-        // Build routeId → friendly name map
-        const routes = Array.isArray(routesRes.data) ? routesRes.data : (routesRes.data?.data || []);
+        const routes = Array.isArray(routesRes.data)
+          ? routesRes.data
+          : (routesRes.data?.data || []);
         const map = {};
-        routes.forEach(r => { map[r.routeId] = r.routeName || `Route ${r.routeId}`; });
+        routes.forEach((r) => {
+          const liveBus = r.bus?.busNumber || r.busNumber;
+          map[r.routeId] = {
+            name: r.routeName || `Route ${r.routeId}`,
+            // The live bus serving the route. The route is the stable
+            // identity; the bus can change.
+            busNumber: liveBus,
+          };
+        });
         setRouteMap(map);
+
+        // The bus list for the staff selector.
+        setBusList(
+          routes.map((r) => {
+            const liveBus = r.bus?.busNumber || r.busNumber;
+            return {
+              routeId: String(r.routeId),
+              routeName: r.routeName || `Route ${r.routeId}`,
+              busNumber: liveBus || 'Unknown',
+              registrationNumber: r.registrationNumber || r.bus?.registrationNumber || '—',
+              vehicleModel: r.vehicleModel || r.bus?.vehicleModel || '—',
+              capacity: r.seatingCapacity || r.bus?.seatingCapacity || '—',
+              city: r.city || 'Bareilly',
+              driverId: r.driverId || '—',
+            };
+          }),
+        );
       } catch (error) {
-        console.error("Failed to load grievances", error);
+        if (cancelled) return;
+        reportError(error, 'community.load');
+        toast.error(friendlyError(error, 'We could not load the complaints right now. Please try again.'));
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
-    fetchData();
-  }, [user?.token]);
 
-  // Helper: convert raw routeId '4' → 'Bus 4' or actual name
-  const formatRoute = (routeId) => {
-    if (!routeId || routeId === 'unknown') return 'Unknown Route';
-    return routeMap[routeId] || `Bus ${routeId}`;
-  };
+    fetchData();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  /**
+   * Format the route of a complaint. Shows the route name and the bus that
+   * is currently serving it.
+   */
+  const formatRoute = useCallback(
+    (routeId, busNumber) => {
+      if (!routeId || routeId === 'unknown') return 'Route not assigned';
+      const info = routeMap[routeId];
+      if (!info) return `Route ${routeId}`;
+      const liveBus = busNumber || info.busNumber;
+      return liveBus ? `${info.name} · Bus ${liveBus}` : info.name;
+    },
+    [routeMap],
+  );
 
   // Derived stats
   const stats = useMemo(() => {
     const total = complaints.length;
-    const resolved = complaints.filter(c => c.status === 'resolved').length;
-    const totalAgreements = complaints.reduce((sum, c) => sum + (c.upvotes || 0), 0);
-    return { total, resolved, pending: total - resolved, totalAgreements };
+    const closed = complaints.filter((c) => c.status === 'closed').length;
+    const pending = complaints.filter(
+      (c) => c.status === 'pending' || c.status === 'in_progress',
+    ).length;
+    const awaiting = complaints.filter((c) => c.status === 'resolved').length;
+    const reopened = complaints.filter((c) => c.status === 'reopened').length;
+    return { total, closed, pending, awaiting, reopened };
   }, [complaints]);
+
+  /**
+   * Live complaint counts per bus. A complaint is attributed to the bus that
+   * was serving its route when it was raised, so the operator can see which
+   * bus needs attention before selecting it.
+   */
+  const busCounts = useMemo(() => {
+    const counts = {};
+    complaints.forEach((c) => {
+      const bus = c.busNumber || routeMap[c.route]?.busNumber;
+      if (!bus) return;
+      if (!counts[bus])
+        counts[bus] = { unresolved: 0, awaiting: 0, total: 0 };
+      counts[bus].total += 1;
+      if (
+        c.status === 'pending' ||
+        c.status === 'in_progress' ||
+        c.status === 'reopened'
+      ) {
+        counts[bus].unresolved += 1;
+      } else if (c.status === 'resolved') {
+        counts[bus].awaiting += 1;
+      }
+    });
+    return counts;
+  }, [complaints, routeMap]);
+
+  /**
+   * The complaints the signed-in user raised themselves. A student or a
+   * parent gets their own list here, with the full status of each one.
+   */
+  const myComplaints = useMemo(
+    () => complaints.filter((c) => c.isMine || c.loginId === user?.login_id),
+    [complaints, user],
+  );
 
   // Filtered + sorted complaints
   const filteredComplaints = useMemo(() => {
     let list = [...complaints];
 
-    // Route filter
     if (filterRoute === 'mine') {
       const myRoute = user?.route_id || user?.routeId;
-      if (myRoute) list = list.filter(c => String(c.route || c.routeId) === String(myRoute));
+      if (myRoute) {
+        list = list.filter((c) => String(c.route) === String(myRoute));
+      }
     }
 
-    // Status filter
-    if (filterStatus !== 'all') list = list.filter(c => c.status === filterStatus);
+    // A student, teacher or parent only ever sees the complaints for the
+    // route they are allocated to. They never get a bus picker — the
+    // transport staff do that.
+    const myRoute = user?.route_id || user?.routeId;
+    if (!isAdmin && myRoute) {
+      list = list.filter((c) => String(c.route) === String(myRoute));
+    }
 
-    // Search
+    // The transport staff can narrow the list to one bus.
+    if (isAdmin && selectedBus !== 'all') {
+      const bus = busList.find((b) => b.busNumber === selectedBus);
+      if (bus) {
+        list = list.filter(
+          (c) => String(c.route) === String(bus.routeId),
+        );
+      }
+    }
+
+    if (filterStatus !== 'all') list = list.filter((c) => c.status === filterStatus);
+
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       const qWithoutHash = q.replace(/^#/, '');
-      
-      list = list.filter(c => {
+
+      list = list.filter((c) => {
         const textMatch = (c.text || '').toLowerCase().includes(q);
         const routeIdMatch = String(c.route || '').toLowerCase().includes(q);
-        const routeNameMatch = formatRoute(c.route).toLowerCase().includes(q);
+        const routeNameMatch = formatRoute(c.route, c.busNumber)
+          .toLowerCase()
+          .includes(q);
         const statusMatch = (c.status || '').toLowerCase().includes(q);
-        
-        const ticketId = (c.id || c._id || '').substring(0, 6).toLowerCase();
-        const ticketIdMatch = ticketId ? (ticketId.includes(qWithoutHash) || q.includes(ticketId)) : false;
-        
-        return textMatch || routeIdMatch || routeNameMatch || statusMatch || ticketIdMatch;
+        const categoryMatch = (c.category || '').toLowerCase().includes(q);
+
+        const ticketId = (c.id || '').substring(0, 6).toLowerCase();
+        const ticketIdMatch = ticketId
+          ? ticketId.includes(qWithoutHash) || q.includes(ticketId)
+          : false;
+
+        return (
+          textMatch ||
+          routeIdMatch ||
+          routeNameMatch ||
+          statusMatch ||
+          categoryMatch ||
+          ticketIdMatch
+        );
       });
     }
 
-    // Sort
-    if (sortBy === 'newest') list.sort((a, b) => new Date(b.createdAt || b.created_at || 0) - new Date(a.createdAt || a.created_at || 0));
-    else if (sortBy === 'oldest') list.sort((a, b) => new Date(a.createdAt || a.created_at || 0) - new Date(b.createdAt || b.created_at || 0));
-    else if (sortBy === 'most_agreed') list.sort((a, b) => (b.upvotes || 0) - (a.upvotes || 0));
+    if (sortBy === 'newest') {
+      list.sort(
+        (a, b) =>
+          new Date(b.createdAt || 0).getTime() -
+          new Date(a.createdAt || 0).getTime(),
+      );
+    } else if (sortBy === 'oldest') {
+      list.sort(
+        (a, b) =>
+          new Date(a.createdAt || 0).getTime() -
+          new Date(b.createdAt || 0).getTime(),
+      );
+    } else if (sortBy === 'most_agreed') {
+      list.sort((a, b) => (b.upvotes || 0) - (a.upvotes || 0));
+    } else if (sortBy === 'priority') {
+      // Reopened and still-open complaints float to the top.
+      list.sort((a, b) => {
+        const rank = (c) => {
+          const idx = STATUS_ORDER.indexOf(c.status);
+          return idx === -1 ? STATUS_ORDER.length : idx;
+        };
+        const diff = rank(a) - rank(b);
+        if (diff !== 0) return diff;
+        return (b.priority || 0) - (a.priority || 0);
+      });
+    }
 
     return list;
-  }, [complaints, filterRoute, filterStatus, searchQuery, sortBy, user]);
+  }, [complaints, filterRoute, filterStatus, searchQuery, sortBy, user, formatRoute, isAdmin, selectedBus, busList]);
 
   const handlePostComplaint = async (e) => {
     e.preventDefault();
@@ -142,42 +417,61 @@ const Community = () => {
       const formData = new FormData();
       formData.append('file', mediaFile);
       try {
-        const token = user?.token || JSON.parse(localStorage.getItem('bus_saarthi_user') || '{}').token;
-        const uploadRes = await axios.post(`${BACKEND_URL}/api/upload`, formData, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const uploadRes = await axios.post(
+          `${BACKEND_URL}/api/upload`,
+          formData,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
         if (uploadRes.data.url) uploadedMediaUrl = uploadRes.data.url;
       } catch (err) {
-        toast.error("Failed to upload media. Posting text only.");
+        toast.error('We could not upload the attachment. Posting the text only.');
       }
     }
     try {
-      const token = user?.token || JSON.parse(localStorage.getItem('bus_saarthi_user') || '{}').token;
       const payload = {
-        realName: user?.name || 'Passenger User',
-        login_id: user?.login_id || 'Unknown',
+        // When the reporter stays anonymous, no name is stored at all.
+        realName: showMyName ? user?.name || 'Passenger User' : 'Anonymous Passenger',
         text: newComplaintText,
         type: mediaFile ? mediaType : 'text',
         mediaUrl: uploadedMediaUrl,
         category: selectedCategory,
-        route: user?.route_id || 'Route 4',
-        time: 'Just now'
+        // The route is resolved server-side from the account's allocation.
+        route: user?.route_id || undefined,
       };
       const response = await axios.post(`${BACKEND_URL}/api/grievance`, payload, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
       });
-      if (response.data.status === 'success' || response.status === 201) {
-        const newComp = { ...payload, id: response.data.id, upvotes: 0, status: 'pending', createdAt: new Date().toISOString() };
-        setComplaints([newComp, ...complaints]);
+      if (response.data.status === 'success') {
+        const created = response.data.data || {};
+        setComplaints((prev) => [
+          {
+            id: created.id,
+            loginId: user?.login_id,
+            route: created.route,
+            busNumber: created.busNumber,
+            text: newComplaintText,
+            type: mediaFile ? mediaType : 'text',
+            mediaUrl: uploadedMediaUrl,
+            category: selectedCategory,
+            realName: user?.name,
+            status: 'pending',
+            upvotes: 0,
+            createdAt: created.createdAt || new Date().toISOString(),
+            isMine: true,
+          },
+          ...prev,
+        ]);
         setShowModal(false);
         setNewComplaintText('');
         setSelectedCategory('');
         setMediaFile(null);
         setMediaType('');
-        toast.success("Complaint raised anonymously!");
+        toast.success('Complaint raised! You will be notified when it is fixed.');
       }
     } catch (error) {
-      toast.error("Failed to submit. Please try again.");
+      toast.error(
+        friendlyError(error, 'We could not submit your complaint. Please try again.'),
+      );
     } finally {
       setIsUploading(false);
     }
@@ -199,263 +493,2197 @@ const Community = () => {
 
   const handleUpvote = async (id) => {
     if (processingUpvotes.has(id)) return;
-    const token = user?.token || JSON.parse(localStorage.getItem('bus_saarthi_user') || '{}').token;
-    if (!token) { toast.error("You must be logged in to agree."); return; }
-    setProcessingUpvotes(prev => new Set([...prev, id]));
-    setComplaints(complaints.map(c => {
-      const compId = c.id || c._id;
-      if (compId === id) {
-        const isCurrentlyUpvoted = !!c.hasUpvotedLocally;
-        return { ...c, hasUpvotedLocally: !isCurrentlyUpvoted, upvotes: isCurrentlyUpvoted ? Math.max(0, (c.upvotes || 0) - 1) : (c.upvotes || 0) + 1 };
-      }
-      return c;
-    }));
+    if (!token) {
+      toast.error('You must be logged in to agree.');
+      return;
+    }
+    setProcessingUpvotes((prev) => new Set([...prev, id]));
+    // Optimistic update using the functional form so a concurrent update
+    // cannot clobber it.
+    setComplaints((prev) =>
+      prev.map((c) => {
+        if (c.id !== id) return c;
+        const wasUpvoted = !!c.hasUpvotedLocally;
+        return {
+          ...c,
+          hasUpvotedLocally: !wasUpvoted,
+          upvotes: Math.max(0, (c.upvotes || 0) + (wasUpvoted ? -1 : 1)),
+        };
+      }),
+    );
     try {
-      const res = await axios.post(`${BACKEND_URL}/api/grievance/${id}/upvote`, {}, { headers: { 'Authorization': `Bearer ${token}` } });
-      setComplaints(prev => prev.map(c => (c.id || c._id) === id ? { ...c, upvotes: res.data.upvotes ?? c.upvotes } : c));
+      const res = await axios.post(
+        `${BACKEND_URL}/api/grievance/${id}/upvote`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      setComplaints((prev) =>
+        prev.map((c) =>
+          c.id === id
+            ? { ...c, upvotes: res.data.upvotes ?? c.upvotes }
+            : c,
+        ),
+      );
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to upvote");
-      setComplaints(prev => prev.map(c => {
-        const compId = c.id || c._id;
-        if (compId === id) {
+      toast.error(friendlyError(err, 'We could not register your vote. Please try again.'));
+      setComplaints((prev) =>
+        prev.map((c) => {
+          if (c.id !== id) return c;
           const wasUpvoted = !!c.hasUpvotedLocally;
-          return { ...c, hasUpvotedLocally: !wasUpvoted, upvotes: wasUpvoted ? Math.max(0, (c.upvotes || 0) - 1) : (c.upvotes || 0) + 1 };
-        }
-        return c;
-      }));
+          return {
+            ...c,
+            hasUpvotedLocally: !wasUpvoted,
+            upvotes: Math.max(0, (c.upvotes || 0) + (wasUpvoted ? -1 : 1)),
+          };
+        }),
+      );
     } finally {
-      setProcessingUpvotes(prev => { const next = new Set(prev); next.delete(id); return next; });
+      setProcessingUpvotes((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
   };
 
+  /**
+   * Staff marks the issue as fixed. The complaint stays open until the
+   * complainant confirms — it does NOT disappear from the queue.
+   */
   const handleResolve = async (id) => {
-    if (!isAdmin) return;
+    const response = await axios.patch(
+      `${BACKEND_URL}/api/grievance/${id}/resolve`,
+      {},
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    setComplaints((prev) =>
+      prev.map((c) =>
+        c.id === id
+          ? { ...c, status: 'resolved', dueAt: response.data?.data?.dueAt }
+          : c,
+      ),
+    );
+    toast.success(
+      'Marked as fixed. It stays open until the complainant confirms it.',
+    );
+  };
+
+  const handleStart = async (id) => {
+    setBusyIds((prev) => new Set([...prev, id]));
     try {
-      const token = user?.token || JSON.parse(localStorage.getItem('bus_saarthi_user') || '{}').token;
-      await axios.patch(`${BACKEND_URL}/api/grievance/${id}/resolve`, {}, { headers: { 'Authorization': `Bearer ${token}` } });
-      setComplaints(complaints.map(c => (c.id === id || c._id === id) ? { ...c, status: 'resolved' } : c));
-      toast.success("Complaint resolved!");
+      await axios.patch(
+        `${BACKEND_URL}/api/grievance/${id}/start`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      setComplaints((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, status: 'in_progress' } : c)),
+      );
+      toast.success('Marked as in progress.');
     } catch (err) {
-      toast.error("Failed to resolve complaint.");
+      toast.error(friendlyError(err, 'We could not update the complaint. Please try again.'));
+    } finally {
+      setBusyIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
+  };
+
+  /** The complainant confirms the fix — this closes the complaint. */
+  const handleConfirm = async (id) => {
+    setBusyIds((prev) => new Set([...prev, id]));
+    try {
+      await axios.patch(
+        `${BACKEND_URL}/api/grievance/${id}/confirm`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      setComplaints((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, status: 'closed' } : c)),
+      );
+      toast.success('Thank you! Your complaint is now closed.');
+    } catch (err) {
+      toast.error(friendlyError(err, 'We could not confirm the fix. Please try again.'));
+    } finally {
+      setBusyIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
+  /** The complainant rejects the fix — the complaint is reopened. */
+  const handleReject = async (id) => {
+    setBusyIds((prev) => new Set([...prev, id]));
+    try {
+      await axios.patch(
+        `${BACKEND_URL}/api/grievance/${id}/reopen`,
+        { reason: rejectReason },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      setComplaints((prev) =>
+        prev.map((c) =>
+          c.id === id
+            ? {
+                ...c,
+                status: 'reopened',
+                reopenCount: (c.reopenCount || 0) + 1,
+                priority: (c.priority || 0) + 10,
+              }
+            : c,
+        ),
+      );
+      setRejectingId(null);
+      setRejectReason('');
+      toast.success('Complaint reopened. It is now at the top of the queue.');
+    } catch (err) {
+      toast.error(friendlyError(err, 'We could not reopen the complaint. Please try again.'));
+    } finally {
+      setBusyIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
+  const handleExtend = async (id) => {
+    setBusyIds((prev) => new Set([...prev, id]));
+    try {
+      await axios.patch(
+        `${BACKEND_URL}/api/grievance/${id}/extend`,
+        { hours: 24 },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      toast.success('Confirmation window extended by 24 hours.');
+    } catch (err) {
+      toast.error(friendlyError(err, 'We could not extend the deadline. Please try again.'));
+    } finally {
+      setBusyIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
+  const renderStatusBadge = (status) => {
+    const meta = STATUS_META[status] || STATUS_META.pending;
+    const { Icon } = meta;
+    return (
+      <span
+        style={{
+          fontSize: '0.7rem',
+          fontWeight: 'bold',
+          padding: '0.25rem 0.5rem',
+          borderRadius: '8px',
+          backgroundColor: meta.bg,
+          color: meta.color,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.25rem',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        <Icon size={12} />
+        {meta.label}
+      </span>
+    );
   };
 
   return (
     <div className="min-h-screen flex flex-col relative">
-      {/* Unified Hero Header — contains title + stats + search all in blue zone */}
-      <div className="sticky top-0" style={{ backgroundColor: 'var(--primary-blue)', zIndex: 50, boxShadow: '0 2px 12px rgba(0,0,0,0.15)' }}>
-        {/* Top Row: Back + Title + Search + Sort + Filter */}
-        <div className="p-header" style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', paddingBottom: '0.75rem' }}>
-          
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexShrink: 0 }}>
-            <button onClick={() => navigate(-1)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', padding: '4px' }}>
+      {/* Unified Hero Header */}
+      <div
+        className="sticky top-0"
+        style={{
+          backgroundColor: 'var(--primary-blue)',
+          zIndex: 50,
+          boxShadow: '0 2px 12px rgba(0,0,0,0.15)',
+        }}
+      >
+        <div
+          className="p-header"
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '1rem',
+            paddingBottom: '0.75rem',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '1rem',
+              flexShrink: 0,
+            }}
+          >
+            <button
+              onClick={() => navigate(-1)}
+              aria-label="Go back"
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'white',
+                cursor: 'pointer',
+                padding: '4px',
+              }}
+            >
               <ArrowLeft size={24} />
             </button>
             <div>
-              <h1 style={{ fontSize: '1.15rem', fontWeight: '700', margin: 0, color: 'white' }}>{t('grievancePortal')}</h1>
-              <div style={{ display: 'flex', gap: '0.4rem', fontSize: '0.65rem', color: 'rgba(255,255,255,0.7)', marginTop: '2px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+              <h1
+                style={{
+                  fontSize: '1.15rem',
+                  fontWeight: '700',
+                  margin: 0,
+                  color: 'white',
+                }}
+              >
+                {t('grievancePortal')}
+              </h1>
+              <div
+                style={{
+                  display: 'flex',
+                  gap: '0.4rem',
+                  fontSize: '0.65rem',
+                  color: 'rgba(255,255,255,0.7)',
+                  marginTop: '2px',
+                  fontWeight: '600',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.02em',
+                  flexWrap: 'wrap',
+                }}
+              >
                 <span>{stats.total} Total</span>
                 <span>•</span>
-                <span style={{ color: '#fcd34d' }}>{stats.pending} Pending</span>
+                <span style={{ color: '#fcd34d' }}>{stats.pending} Open</span>
+                {stats.awaiting > 0 && (
+                  <>
+                    <span>•</span>
+                    <span style={{ color: '#91d5ff' }}>
+                      {stats.awaiting} Awaiting Confirmation
+                    </span>
+                  </>
+                )}
+                {stats.reopened > 0 && (
+                  <>
+                    <span>•</span>
+                    <span style={{ color: '#ffa39e' }}>
+                      {stats.reopened} Reopened
+                    </span>
+                  </>
+                )}
                 <span>•</span>
-                <span style={{ color: '#86efac' }}>{stats.resolved} Resolved</span>
+                <span style={{ color: '#86efac' }}>{stats.closed} Closed</span>
               </div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', flex: 1, gap: '0.6rem', alignItems: 'center', minWidth: '300px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-            <div style={{ position: 'relative', flex: '1 1 200px', maxWidth: '350px' }}>
-              <Search size={15} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.6)' }} />
+          <div
+            style={{
+              display: 'flex',
+              flex: 1,
+              gap: '0.6rem',
+              alignItems: 'center',
+              minWidth: '260px',
+              justifyContent: 'flex-end',
+              flexWrap: 'wrap',
+            }}
+          >
+            <div
+              style={{
+                position: 'relative',
+                flex: '1 1 180px',
+                maxWidth: '320px',
+                minWidth: 0,
+              }}
+            >
+              <Search
+                size={15}
+                style={{
+                  position: 'absolute',
+                  left: '0.75rem',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'rgba(255,255,255,0.6)',
+                }}
+              />
               <input
                 type="text"
                 placeholder="Search..."
                 value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                style={{ width: '100%', paddingLeft: '2.2rem', paddingRight: '0.9rem', paddingTop: '0.55rem', paddingBottom: '0.55rem', borderRadius: '24px', border: '1px solid rgba(255,255,255,0.25)', fontSize: '0.875rem', outline: 'none', fontFamily: 'inherit', backgroundColor: 'rgba(255,255,255,0.14)', color: 'white', boxSizing: 'border-box' }}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{
+                  width: '100%',
+                  paddingLeft: '2.2rem',
+                  paddingRight: '0.9rem',
+                  paddingTop: '0.55rem',
+                  paddingBottom: '0.55rem',
+                  borderRadius: '24px',
+                  border: '1px solid rgba(255,255,255,0.25)',
+                  fontSize: '0.875rem',
+                  outline: 'none',
+                  fontFamily: 'inherit',
+                  backgroundColor: 'rgba(255,255,255,0.14)',
+                  color: 'white',
+                  boxSizing: 'border-box',
+                }}
               />
             </div>
 
             <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
               {[
-                { key: 'newest', icon: <Clock size={12} />, label: 'New' },
-                { key: 'most_agreed', icon: <TrendingUp size={12} />, label: 'Top' },
-                { key: 'oldest', icon: <Clock size={12} />, label: 'Old' },
-              ].map(tab => (
-                <button key={tab.key} onClick={() => setSortBy(tab.key)} style={{
-                  display: 'flex', alignItems: 'center', gap: '0.25rem', padding: '0.45rem 0.65rem', borderRadius: '20px',
-                  border: '1px solid rgba(255,255,255,0.25)', cursor: 'pointer', fontSize: '0.72rem', fontWeight: '700',
-                  backgroundColor: sortBy === tab.key ? 'white' : 'rgba(255,255,255,0.12)',
-                  color: sortBy === tab.key ? 'var(--primary-blue)' : 'white',
-                  transition: 'all 0.15s'
-                }}>
-                  {tab.icon} {tab.label}
+                { key: 'newest', label: 'New' },
+                { key: 'priority', label: 'Priority' },
+                { key: 'most_agreed', label: 'Top' },
+                { key: 'oldest', label: 'Old' },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setSortBy(tab.key)}
+                  style={{
+                    padding: '0.45rem 0.65rem',
+                    borderRadius: '20px',
+                    border: '1px solid rgba(255,255,255,0.25)',
+                    cursor: 'pointer',
+                    fontSize: '0.72rem',
+                    fontWeight: '700',
+                    backgroundColor:
+                      sortBy === tab.key ? 'white' : 'rgba(255,255,255,0.12)',
+                    color: sortBy === tab.key ? 'var(--primary-blue)' : 'white',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  {tab.label}
                 </button>
               ))}
             </div>
 
+            {!isAdmin && (
+              <button
+                onClick={() => setShowMyComplaints((v) => !v)}
+                style={{
+                  background: showMyComplaints
+                    ? 'rgba(255,255,255,0.28)'
+                    : 'rgba(255,255,255,0.12)',
+                  border: '1px solid rgba(255,255,255,0.25)',
+                  borderRadius: '20px',
+                  padding: '0.45rem 0.85rem',
+                  color: 'white',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  fontSize: '0.72rem',
+                  fontWeight: '700',
+                  flexShrink: 0,
+                }}
+              >
+                <ClipboardList size={13} /> My complaints
+                {myComplaints.length > 0 && (
+                  <span
+                    style={{
+                      background: 'rgba(255,255,255,0.28)',
+                      borderRadius: '10px',
+                      padding: '0.05rem 0.4rem',
+                      fontSize: '0.68rem',
+                    }}
+                  >
+                    {myComplaints.length}
+                  </span>
+                )}
+              </button>
+            )}
+
             <button
               onClick={() => setShowFilters(!showFilters)}
-              style={{ background: showFilters ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.25)', borderRadius: '20px', padding: '0.45rem 0.85rem', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.72rem', fontWeight: '700' }}
+              style={{
+                background: showFilters
+                  ? 'rgba(255,255,255,0.25)'
+                  : 'rgba(255,255,255,0.12)',
+                border: '1px solid rgba(255,255,255,0.25)',
+                borderRadius: '20px',
+                padding: '0.45rem 0.85rem',
+                color: 'white',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                fontSize: '0.72rem',
+                fontWeight: '700',
+                flexShrink: 0,
+              }}
             >
               <SlidersHorizontal size={14} /> Filter
             </button>
           </div>
         </div>
 
-        {/* Collapsible extra filters */}
         {showFilters && (
-          <div style={{ paddingLeft: '1rem', paddingRight: '1rem', paddingBottom: '0.875rem', maxWidth: '850px', margin: '0 auto', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.12)', paddingTop: '0.75rem' }}>
-            {/* Status filter */}
-            {['all', 'pending', 'resolved'].map(s => (
-                <button key={s} onClick={() => setFilterStatus(s)} style={{
-                  padding: '0.35rem 0.75rem', borderRadius: '20px', border: '1px solid var(--border-color)',
-                  cursor: 'pointer', fontSize: '0.78rem', fontWeight: '600',
-                  backgroundColor: filterStatus === s ? '#28a745' : 'transparent',
+          <div
+            style={{
+              paddingLeft: '1rem',
+              paddingRight: '1rem',
+              paddingBottom: '0.875rem',
+              maxWidth: '850px',
+              margin: '0 auto',
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '0.5rem',
+              borderTop: '1px solid rgba(255,255,255,0.12)',
+              paddingTop: '0.75rem',
+            }}
+          >
+            {[
+              'all',
+              'pending',
+              'in_progress',
+              'resolved',
+              'reopened',
+              'closed',
+            ].map((s) => (
+              <button
+                key={s}
+                onClick={() => setFilterStatus(s)}
+                style={{
+                  padding: '0.35rem 0.75rem',
+                  borderRadius: '20px',
+                  border: '1px solid var(--border-color)',
+                  cursor: 'pointer',
+                  fontSize: '0.78rem',
+                  fontWeight: '600',
+                  backgroundColor:
+                    filterStatus === s ? '#28a745' : 'transparent',
                   color: filterStatus === s ? 'white' : 'var(--text-dark)',
-                }}>
-                  {s.charAt(0).toUpperCase() + s.slice(1)}
-                </button>
-              ))}
-                <button onClick={() => setFilterRoute(filterRoute === 'mine' ? 'all' : 'mine')} style={{
-                display: 'flex', alignItems: 'center', gap: '0.3rem', padding: '0.35rem 0.75rem', borderRadius: '20px',
-                border: '1px solid rgba(255,255,255,0.25)', cursor: 'pointer', fontSize: '0.78rem', fontWeight: '600',
-                backgroundColor: filterRoute === 'mine' ? 'var(--secondary-orange)' : 'rgba(255,255,255,0.12)',
-                color: 'white',
-              }}>
-                <MapPin size={12} /> My Route Only
+                }}
+              >
+                {s === 'all'
+                  ? 'All'
+                  : STATUS_META[s]?.label ||
+                    s.charAt(0).toUpperCase() + s.slice(1)}
               </button>
+            ))}
+            {isAdmin && (
+            <button
+              onClick={() => setFilterRoute(filterRoute === 'mine' ? 'all' : 'mine')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.3rem',
+                padding: '0.35rem 0.75rem',
+                borderRadius: '20px',
+                border: '1px solid rgba(255,255,255,0.25)',
+                cursor: 'pointer',
+                fontSize: '0.78rem',
+                fontWeight: '600',
+                backgroundColor:
+                  filterRoute === 'mine'
+                    ? 'var(--secondary-orange)'
+                    : 'rgba(255,255,255,0.12)',
+                color: 'white',
+              }}
+            >
+              <MapPin size={12} /> My Route Only
+            </button>
+            )}
           </div>
         )}
+
       </div>
 
+        {/* ── Bus picker (admins only) ───────────────────────────
+            Students and staff land directly on the complaints for the
+            route they are allocated to. Only an administrator manages
+            the whole fleet, so only they get the picker. */}
+        {isAdmin && busList.length > 0 && (
+          <div
+            style={{
+              paddingLeft: '1rem',
+              paddingRight: '1rem',
+              paddingBottom: '1rem',
+              maxWidth: '1100px',
+              margin: '0 auto',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.6rem',
+              borderTop: '1px solid rgba(255,255,255,0.12)',
+              paddingTop: '0.85rem',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '0.75rem',
+                flexWrap: 'wrap',
+              }}
+            >
+              <span
+                style={{
+                  fontSize: '0.72rem',
+                  fontWeight: '800',
+                  color: 'rgba(255,255,255,0.75)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                }}
+              >
+                Manage by bus
+              </span>
+              {selectedBus !== 'all' && (
+                <button
+                  onClick={() => setSelectedBus('all')}
+                  style={{
+                    background: 'rgba(255,255,255,0.15)',
+                    border: '1px solid rgba(255,255,255,0.3)',
+                    color: 'white',
+                    borderRadius: '20px',
+                    padding: '0.3rem 0.85rem',
+                    fontSize: '0.75rem',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Show all buses
+                </button>
+              )}
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(215px, 1fr))',
+                gap: '0.6rem',
+              }}
+            >
+              {busList.map((b) => {
+                const counts = busCounts[b.busNumber] || {
+                  unresolved: 0,
+                  awaiting: 0,
+                  total: 0,
+                };
+                const active = selectedBus === b.busNumber;
+                return (
+                  <button
+                    key={b.busNumber}
+                    onClick={() =>
+                      setSelectedBus(active ? 'all' : b.busNumber)
+                    }
+                    aria-pressed={active}
+                    style={{
+                      textAlign: 'left',
+                      padding: '0.7rem 0.85rem',
+                      borderRadius: '12px',
+                      cursor: 'pointer',
+                      color: 'white',
+                      background: active
+                        ? 'rgba(255,255,255,0.22)'
+                        : 'rgba(255,255,255,0.10)',
+                      border: active
+                        ? '2px solid rgba(255,255,255,0.7)'
+                        : '1px solid rgba(255,255,255,0.18)',
+                      boxShadow: active
+                        ? '0 6px 18px rgba(0,0,0,0.25)'
+                        : 'none',
+                      transition: 'all 0.15s',
+                      minWidth: 0,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.45rem',
+                        marginBottom: '0.25rem',
+                      }}
+                    >
+                      <Bus size={15} />
+                      <span
+                        style={{
+                          fontWeight: '800',
+                          fontSize: '0.88rem',
+                          letterSpacing: '-0.2px',
+                        }}
+                      >
+                        {b.busNumber}
+                      </span>
+                    </div>
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: '0.72rem',
+                        color: 'rgba(255,255,255,0.8)',
+                        lineHeight: 1.35,
+                        overflowWrap: 'anywhere',
+                      }}
+                    >
+                      {b.routeName}
+                    </p>
+                    <div
+                      style={{
+                        display: 'flex',
+                        gap: '0.35rem',
+                        marginTop: '0.5rem',
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <span
+                        title="Not yet resolved — new, in progress, or reopened"
+                        style={{
+                          fontSize: '0.65rem',
+                          fontWeight: '800',
+                          padding: '0.15rem 0.45rem',
+                          borderRadius: '6px',
+                          background:
+                            counts.unresolved > 0
+                              ? 'rgba(207,19,34,0.85)'
+                              : 'rgba(255,255,255,0.15)',
+                          color: 'white',
+                        }}
+                      >
+                        {counts.unresolved} unresolved
+                      </span>
+                      {counts.awaiting > 0 && (
+                        <span
+                          title="Marked as fixed — waiting for the complainant to confirm"
+                          style={{
+                            fontSize: '0.65rem',
+                            fontWeight: '800',
+                            padding: '0.15rem 0.45rem',
+                            borderRadius: '6px',
+                            background: 'rgba(9,88,217,0.85)',
+                            color: 'white',
+                          }}
+                        >
+                          {counts.awaiting} awaiting
+                        </span>
+                      )}
+                      <span
+                        title="Every complaint ever raised against this bus"
+                        style={{
+                          fontSize: '0.65rem',
+                          fontWeight: '700',
+                          padding: '0.15rem 0.45rem',
+                          borderRadius: '6px',
+                          background: 'rgba(255,255,255,0.15)',
+                          color: 'rgba(255,255,255,0.9)',
+                        }}
+                      >
+                        {counts.total} all time
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {selectedBus !== 'all' &&
+              (() => {
+                const b = busList.find((x) => x.busNumber === selectedBus);
+                if (!b) return null;
+                return (
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: '0.4rem 1.25rem',
+                      fontSize: '0.75rem',
+                      color: 'rgba(255,255,255,0.85)',
+                      padding: '0.6rem 0.85rem',
+                      background: 'rgba(0,0,0,0.18)',
+                      borderRadius: '10px',
+                    }}
+                  >
+                    <span>
+                      <strong style={{ color: 'white' }}>Route:</strong>{' '}
+                      {b.routeName} ({b.routeId})
+                    </span>
+                    <span>
+                      <strong style={{ color: 'white' }}>Registration:</strong>{' '}
+                      {b.registrationNumber}
+                    </span>
+                    <span>
+                      <strong style={{ color: 'white' }}>Model:</strong>{' '}
+                      {b.vehicleModel}
+                    </span>
+                    <span>
+                      <strong style={{ color: 'white' }}>Capacity:</strong>{' '}
+                      {b.capacity}
+                    </span>
+                    <span>
+                      <strong style={{ color: 'white' }}>City:</strong>{' '}
+                      {b.city}
+                    </span>
+                    <span>
+                      <strong style={{ color: 'white' }}>Driver:</strong>{' '}
+                      {b.driverId}
+                    </span>
+                  </div>
+                );
+              })()}
+          </div>
+        )}
+      {/* ── Page heading ─────────────────────────────────────────
+          The list needs a clear heading and a short line explaining
+          what the page is, so it does not read as a wall of cards. */}
+      <div
+        style={{
+          maxWidth: '850px',
+          margin: '0 auto',
+          width: '100%',
+          padding: '1.25rem 1rem 0.5rem',
+        }}
+      >
+        <h1
+          style={{
+            margin: 0,
+            fontSize: '1.45rem',
+            fontWeight: '800',
+            color: 'var(--text-dark)',
+            letterSpacing: '-0.4px',
+          }}
+        >
+          {isAdmin ? 'Complaints by bus' : 'Bus complaints'}
+        </h1>
+        <p
+          style={{
+            margin: '0.35rem 0 0',
+            fontSize: '0.9rem',
+            color: 'var(--text-light)',
+            maxWidth: '62ch',
+            lineHeight: 1.5,
+          }}
+        >
+          {isAdmin
+            ? 'Every complaint raised against the campus buses. Pick a bus to focus on its complaints, and open one to see the full details.'
+            : 'Complaints raised by passengers on your bus route. Open one to see its status and the transport team’s response.'}
+        </p>
+      </div>
+
+      {/* ── My complaints ───────────────────────────────────────
+          The signed-in user's own complaints, with their status. */}
+      {showMyComplaints && !isAdmin && (
+        <div
+          style={{
+            maxWidth: '850px',
+            margin: '0 auto',
+            width: '100%',
+            padding: '0 1rem 0.5rem',
+          }}
+        >
+          <div
+            className="glass"
+            style={{
+              borderRadius: '16px',
+              padding: '1.1rem 1.25rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.9rem',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '0.75rem',
+                flexWrap: 'wrap',
+              }}
+            >
+              <h2
+                style={{
+                  margin: 0,
+                  fontSize: '1.05rem',
+                  fontWeight: '700',
+                  color: 'var(--text-dark)',
+                }}
+              >
+                My complaints
+              </h2>
+              <button
+                onClick={() => setShowMyComplaints(false)}
+                aria-label="Close my complaints"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--text-light)',
+                  display: 'flex',
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {myComplaints.length === 0 ? (
+              <p
+                style={{
+                  margin: 0,
+                  color: 'var(--text-light)',
+                  fontSize: '0.88rem',
+                }}
+              >
+                You have not raised any complaints yet.
+              </p>
+            ) : (
+              myComplaints.map((c) => {
+                const meta = STATUS_META[c.status] || STATUS_META.pending;
+                const { Icon } = meta;
+                return (
+                  <div
+                    key={c.id}
+                    onClick={() => setDetailId(c.id)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setDetailId(c.id);
+                      }
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '0.75rem',
+                      padding: '0.75rem 0.85rem',
+                      borderRadius: '12px',
+                      border: '1px solid var(--border-color)',
+                      background: 'var(--bg-color)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: '30px',
+                        height: '30px',
+                        borderRadius: '9px',
+                        background: meta.bg,
+                        color: meta.color,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Icon size={15} />
+                    </span>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <p
+                        style={{
+                          margin: 0,
+                          fontSize: '0.88rem',
+                          color: 'var(--text-dark)',
+                          fontWeight: '600',
+                          lineHeight: 1.45,
+                          overflowWrap: 'anywhere',
+                        }}
+                      >
+                        {c.text}
+                      </p>
+                      <p
+                        style={{
+                          margin: '0.3rem 0 0',
+                          fontSize: '0.74rem',
+                          color: 'var(--text-light)',
+                          display: 'flex',
+                          gap: '0.3rem',
+                          flexWrap: 'wrap',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Bus size={11} />
+                        {formatRoute(c.route, c.busNumber)}
+                        <span>•</span>
+                        {formatTime(c.createdAt)}
+                        {c.category ? (
+                          <>
+                            <span>•</span>
+                            {c.category}
+                          </>
+                        ) : null}
+                      </p>
+                    </div>
+                    <span
+                      style={{
+                        fontSize: '0.68rem',
+                        fontWeight: '800',
+                        padding: '0.2rem 0.5rem',
+                        borderRadius: '7px',
+                        background: meta.bg,
+                        color: meta.color,
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {meta.label}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Feed Area */}
-      <main className="p-main pb-24" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '850px', margin: '0 auto', width: '100%' }}>
+      <main
+        className="p-main pb-24"
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '1.25rem',
+          maxWidth: '850px',
+          margin: '0 auto',
+          width: '100%',
+        }}
+      >
         {isLoading ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-            {[1, 2, 3].map(i => (
-              <div key={i} className="glass p-glass" style={{ borderRadius: '16px', display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1.5rem', opacity: 1 - (i * 0.2) }}>
+            {[1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="glass p-glass"
+                style={{
+                  borderRadius: '16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '1rem',
+                  padding: '1.5rem',
+                  opacity: 1 - i * 0.2,
+                }}
+              >
                 <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                  <div className="animate-pulse" style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: '#e9ecef' }}></div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    <div className="animate-pulse" style={{ width: '120px', height: '14px', borderRadius: '4px', backgroundColor: '#e9ecef' }}></div>
-                    <div className="animate-pulse" style={{ width: '80px', height: '10px', borderRadius: '4px', backgroundColor: '#e9ecef' }}></div>
+                  <div
+                    className="animate-pulse"
+                    style={{
+                      width: '40px',
+                      height: '40px',
+                      borderRadius: '50%',
+                      backgroundColor: '#e9ecef',
+                    }}
+                  ></div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.5rem',
+                    }}
+                  >
+                    <div
+                      className="animate-pulse"
+                      style={{
+                        width: '120px',
+                        height: '14px',
+                        borderRadius: '4px',
+                        backgroundColor: '#e9ecef',
+                      }}
+                    ></div>
+                    <div
+                      className="animate-pulse"
+                      style={{
+                        width: '80px',
+                        height: '10px',
+                        borderRadius: '4px',
+                        backgroundColor: '#e9ecef',
+                      }}
+                    ></div>
                   </div>
                 </div>
-                <div className="animate-pulse" style={{ width: '100%', height: '14px', borderRadius: '4px', backgroundColor: '#e9ecef', marginTop: '0.5rem' }}></div>
-                <div className="animate-pulse" style={{ width: '80%', height: '14px', borderRadius: '4px', backgroundColor: '#e9ecef' }}></div>
+                <div
+                  className="animate-pulse"
+                  style={{
+                    width: '100%',
+                    height: '14px',
+                    borderRadius: '4px',
+                    backgroundColor: '#e9ecef',
+                    marginTop: '0.5rem',
+                  }}
+                ></div>
               </div>
             ))}
           </div>
         ) : filteredComplaints.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-light)' }}>
+          <div
+            style={{
+              textAlign: 'center',
+              padding: '3rem 1rem',
+              color: 'var(--text-light)',
+            }}
+          >
             <ShieldAlert size={40} style={{ marginBottom: '1rem', opacity: 0.4 }} />
             <p style={{ fontWeight: '600' }}>No complaints found</p>
             <p style={{ fontSize: '0.85rem' }}>Try adjusting your filters</p>
           </div>
-        ) : filteredComplaints.map((comp) => (
-          <div key={comp.id || comp._id} className="glass animate-slide-up p-glass" style={{
-            borderRadius: '16px', display: 'flex', flexDirection: 'column', gap: '1rem'
-          }}>
-            {/* Header of Post */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <div style={{ backgroundColor: '#e9ecef', padding: '0.5rem', borderRadius: '50%' }}>
-                  <UserCircle2 size={24} color="var(--text-light)" />
+        ) : (
+          filteredComplaints.map((comp) => {
+            const isMine = comp.isMine || comp.loginId === user?.login_id;
+            const busy = busyIds.has(comp.id);
+            return (
+              <div
+                key={comp.id}
+                className="glass animate-slide-up p-glass"
+                onClick={() => setDetailId(comp.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setDetailId(comp.id);
+                  }
+                }}
+                style={{
+                  borderRadius: '16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '1rem',
+                  cursor: 'pointer',
+                  borderLeft: `4px solid ${
+                    comp.status === 'closed'
+                      ? '#28a745'
+                      : comp.status === 'resolved'
+                        ? '#0958d9'
+                        : comp.status === 'in_progress'
+                          ? '#d46b08'
+                          : '#cf1322'
+                  }`,
+                }}
+              >
+                {/* Header */}
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-start',
+                    gap: '0.75rem',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      minWidth: 0,
+                    }}
+                  >
+                    <div
+                      style={{
+                        backgroundColor: '#e9ecef',
+                        padding: '0.5rem',
+                        borderRadius: '50%',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <UserCircle2 size={24} color="var(--text-light)" />
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <h3
+                        style={{
+                          margin: 0,
+                          fontSize: '0.95rem',
+                          fontWeight: 'bold',
+                          color: 'var(--text-dark)',
+                        }}
+                      >
+                        {/* The reporter's identity is not on the card.
+                            Staff open the complaint to see the details. */}
+                        {isMine ? 'Your complaint' : t('anonymousPassenger')}
+                      </h3>
+                      <p
+                        style={{
+                          margin: 0,
+                          fontSize: '0.75rem',
+                          color: 'var(--text-light)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.3rem',
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        <Bus size={12} />
+                        {formatRoute(comp.route, comp.busNumber)}
+                        <span>•</span>
+                        {formatTime(comp.createdAt)}
+                      </p>
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      flexWrap: 'wrap',
+                      justifyContent: 'flex-end',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: '0.65rem',
+                        fontWeight: '800',
+                        color: 'var(--text-light)',
+                        backgroundColor: '#f1f3f5',
+                        padding: '0.25rem 0.4rem',
+                        borderRadius: '6px',
+                        fontFamily: 'monospace',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      #{String(comp.id).substring(0, 6).toUpperCase()}
+                    </span>
+                    {renderStatusBadge(comp.status)}
+                    {comp.category && (
+                      <span
+                        style={{
+                          fontSize: '0.65rem',
+                          fontWeight: '700',
+                          padding: '0.2rem 0.5rem',
+                          borderRadius: '6px',
+                          backgroundColor: 'rgba(24,119,242,0.1)',
+                          color: 'var(--primary-blue)',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {comp.category}
+                      </span>
+                    )}
+                    {comp.reopenCount > 0 && comp.status !== 'closed' && (
+                      <span
+                        style={{
+                          fontSize: '0.62rem',
+                          fontWeight: '700',
+                          padding: '0.15rem 0.4rem',
+                          borderRadius: '6px',
+                          backgroundColor: '#fff1f0',
+                          color: '#cf1322',
+                          whiteSpace: 'nowrap',
+                        }}
+                        title={`The complainant rejected the fix ${comp.reopenCount} time(s)`}
+                      >
+                        ×{comp.reopenCount}
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 'bold', color: 'var(--text-dark)' }}>
-                    {isAdmin ? <span style={{ color: 'var(--primary-blue)' }}>{comp.realName} ({t('realName')})</span> : t('anonymousPassenger')}
-                  </h3>
-                  <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-light)' }}>
-                    {formatRoute(comp.route)} • {formatTime(comp.created_at || comp.createdAt || comp.time)}
-                  </p>
+
+                {/* Content */}
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: '0.95rem',
+                    color: 'var(--text-dark)',
+                    lineHeight: 1.5,
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  {comp.text}
+                </p>
+
+                {/* Media Attachment */}
+                {comp.type === 'photo' && comp.mediaUrl && (
+                  <div
+                    style={{
+                      borderRadius: '12px',
+                      overflow: 'hidden',
+                      marginTop: '0.5rem',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: '#f8f9fa',
+                      display: 'flex',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <img
+                      src={comp.mediaUrl}
+                      alt="Complaint attachment"
+                      loading="lazy"
+                      style={{
+                        width: '100%',
+                        height: 'auto',
+                        display: 'block',
+                        maxHeight: '400px',
+                        objectFit: 'contain',
+                      }}
+                    />
+                  </div>
+                )}
+                {comp.type === 'video' && comp.mediaUrl && (
+                  <div
+                    style={{
+                      position: 'relative',
+                      borderRadius: '12px',
+                      overflow: 'hidden',
+                      marginTop: '0.5rem',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'black',
+                    }}
+                  >
+                    <video
+                      src={comp.mediaUrl}
+                      controls
+                      preload="metadata"
+                      style={{ width: '100%', height: 'auto', maxHeight: '400px' }}
+                    />
+                  </div>
+                )}
+                {comp.type === 'audio' && comp.mediaUrl && (
+                  <div
+                    style={{
+                      marginTop: '0.5rem',
+                      padding: '1rem',
+                      backgroundColor: 'var(--bg-color)',
+                      borderRadius: '30px',
+                      border: '1px solid var(--border-color)',
+                    }}
+                  >
+                    <audio src={comp.mediaUrl} controls style={{ width: '100%' }} />
+                  </div>
+                )}
+
+                {/* The transport team's reply — only to the person who
+                    raised the complaint. */}
+                {comp.adminResponse && isMine && (
+                  <div
+                    style={{
+                      padding: '0.75rem 1rem',
+                      backgroundColor: 'rgba(0,86,179,0.06)',
+                      borderLeft: '3px solid var(--primary-blue)',
+                      borderRadius: '8px',
+                    }}
+                  >
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: '0.7rem',
+                        fontWeight: '700',
+                        color: 'var(--primary-blue)',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.03em',
+                      }}
+                    >
+                      Response from the transport team
+                    </p>
+                    <p
+                      style={{
+                        margin: '0.3rem 0 0',
+                        fontSize: '0.88rem',
+                        color: 'var(--text-dark)',
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {comp.adminResponse}
+                    </p>
+                  </div>
+                )}
+
+                {/* Action Bar */}
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    borderTop: '1px solid #f0f0f0',
+                    paddingTop: '1rem',
+                    marginTop: '0.5rem',
+                    gap: '0.75rem',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <button
+                    onClick={() => handleUpvote(comp.id)}
+                    disabled={processingUpvotes.has(comp.id) || isMine}
+                    title={
+                      isMine ? 'You cannot agree with your own complaint' : ''
+                    }
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      border: 'none',
+                      backgroundColor: comp.hasUpvotedLocally
+                        ? 'var(--primary-blue)'
+                        : 'transparent',
+                      color: comp.hasUpvotedLocally ? 'white' : 'var(--primary-blue)',
+                      fontWeight: '600',
+                      cursor:
+                        processingUpvotes.has(comp.id) || isMine
+                          ? 'default'
+                          : 'pointer',
+                      padding: '0.5rem 1rem',
+                      borderRadius: '30px',
+                      transition: 'all 0.2s ease',
+                      opacity: isMine ? 0.5 : 1,
+                    }}
+                  >
+                    <ThumbsUp
+                      size={20}
+                      strokeWidth={2.5}
+                      fill={comp.hasUpvotedLocally ? 'white' : 'none'}
+                    />{' '}
+                    {comp.upvotes || 0}{' '}
+                    {comp.hasUpvotedLocally ? 'Agreed' : t('agree')}
+                  </button>
+
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: '0.5rem',
+                      flexWrap: 'wrap',
+                      justifyContent: 'flex-end',
+                    }}
+                  >
+                    {/* Staff actions */}
+                    {isAdmin && comp.status === 'pending' && (
+                      <button
+                        onClick={() => handleStart(comp.id)}
+                        disabled={busy}
+                        style={{
+                          backgroundColor: '#d46b08',
+                          color: 'white',
+                          border: 'none',
+                          padding: '0.4rem 1rem',
+                          borderRadius: '8px',
+                          fontWeight: 'bold',
+                          fontSize: '0.8rem',
+                          cursor: busy ? 'default' : 'pointer',
+                        }}
+                      >
+                        Start Work
+                      </button>
+                    )}
+
+                    {isAdmin &&
+                      (comp.status === 'pending' ||
+                        comp.status === 'in_progress' ||
+                        comp.status === 'reopened') && (
+                        <button
+                          onClick={() => handleResolve(comp.id)}
+                          disabled={busy}
+                          style={{
+                            backgroundColor: 'var(--secondary-orange)',
+                            color: 'white',
+                            border: 'none',
+                            padding: '0.4rem 1rem',
+                            borderRadius: '8px',
+                            fontWeight: 'bold',
+                            fontSize: '0.8rem',
+                            cursor: busy ? 'default' : 'pointer',
+                          }}
+                        >
+                          Mark as Fixed
+                        </button>
+                      )}
+
+                    {isAdmin && comp.status === 'resolved' && (
+                      <button
+                        onClick={() => handleExtend(comp.id)}
+                        disabled={busy}
+                        title="Give the complainant 24 more hours to respond"
+                        style={{
+                          backgroundColor: 'transparent',
+                          color: 'var(--primary-blue)',
+                          border: '1px solid var(--primary-blue)',
+                          padding: '0.35rem 0.9rem',
+                          borderRadius: '8px',
+                          fontWeight: 'bold',
+                          fontSize: '0.8rem',
+                          cursor: busy ? 'default' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.3rem',
+                        }}
+                      >
+                        <Timer size={13} /> Extend 24h
+                      </button>
+                    )}
+
+                    {/* Complainant actions */}
+                    {isMine && comp.status === 'resolved' && (
+                      <>
+                        <button
+                          onClick={() => handleConfirm(comp.id)}
+                          disabled={busy}
+                          style={{
+                            backgroundColor: '#28a745',
+                            color: 'white',
+                            border: 'none',
+                            padding: '0.4rem 1rem',
+                            borderRadius: '8px',
+                            fontWeight: 'bold',
+                            fontSize: '0.8rem',
+                            cursor: busy ? 'default' : 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.3rem',
+                          }}
+                        >
+                          <Check size={14} /> Yes, Fixed
+                        </button>
+                        <button
+                          onClick={() => {
+                            setRejectingId(
+                              rejectingId === comp.id ? null : comp.id,
+                            );
+                            setRejectReason('');
+                          }}
+                          disabled={busy}
+                          style={{
+                            backgroundColor: '#cf1322',
+                            color: 'white',
+                            border: 'none',
+                            padding: '0.4rem 1rem',
+                            borderRadius: '8px',
+                            fontWeight: 'bold',
+                            fontSize: '0.8rem',
+                            cursor: busy ? 'default' : 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.3rem',
+                          }}
+                        >
+                          <AlertTriangle size={14} /> Not Fixed Yet
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.4rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <span style={{ fontSize: '0.65rem', fontWeight: '800', color: 'var(--text-light)', backgroundColor: '#f1f3f5', padding: '0.25rem 0.4rem', borderRadius: '6px', fontFamily: 'monospace' }}>
-                    #{ (comp.id || comp._id).substring(0, 6).toUpperCase() }
-                  </span>
-                  <span style={{
-                    fontSize: '0.7rem', fontWeight: 'bold', padding: '0.25rem 0.5rem', borderRadius: '8px',
-                    backgroundColor: comp.status === 'resolved' ? '#e6fae6' : '#fff1f0',
-                    color: comp.status === 'resolved' ? '#28a745' : '#cf1322',
-                    display: 'flex', alignItems: 'center', gap: '0.25rem'
-                  }}>
-                    {comp.status === 'resolved' ? <CheckCircle2 size={12} /> : <ShieldAlert size={12} />}
-                    {comp.status === 'resolved' ? t('resolved') : t('pending')}
-                  </span>
-                </div>
-                {comp.category && (
-                  <span style={{ fontSize: '0.65rem', fontWeight: '700', padding: '0.2rem 0.5rem', borderRadius: '6px', backgroundColor: 'rgba(24,119,242,0.1)', color: 'var(--primary-blue)' }}>
-                    {comp.category}
-                  </span>
+
+                {/* Reject reason */}
+                {rejectingId === comp.id && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.6rem',
+                      padding: '0.9rem',
+                      backgroundColor: 'rgba(207,19,34,0.05)',
+                      borderRadius: '10px',
+                      border: '1px solid rgba(207,19,34,0.2)',
+                    }}
+                  >
+                    <label
+                      style={{
+                        fontSize: '0.85rem',
+                        fontWeight: '600',
+                        color: 'var(--text-dark)',
+                      }}
+                    >
+                      What is still not fixed?
+                    </label>
+                    <textarea
+                      value={rejectReason}
+                      onChange={(e) => setRejectReason(e.target.value)}
+                      rows={3}
+                      placeholder="e.g. The bus was on time today but the AC was still not working."
+                      style={{
+                        width: '100%',
+                        padding: '0.7rem',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-color)',
+                        fontSize: '0.9rem',
+                        outline: 'none',
+                        resize: 'vertical',
+                        fontFamily: 'inherit',
+                        boxSizing: 'border-box',
+                        backgroundColor: 'var(--card-bg)',
+                        color: 'var(--text-dark)',
+                      }}
+                    />
+                    <div
+                      style={{
+                        display: 'flex',
+                        gap: '0.5rem',
+                        justifyContent: 'flex-end',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRejectingId(null);
+                          setRejectReason('');
+                        }}
+                        style={{
+                          padding: '0.45rem 1rem',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-color)',
+                          background: 'transparent',
+                          cursor: 'pointer',
+                          fontWeight: '600',
+                          fontSize: '0.82rem',
+                          color: 'var(--text-dark)',
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleReject(comp.id)}
+                        disabled={busy}
+                        style={{
+                          padding: '0.45rem 1rem',
+                          borderRadius: '8px',
+                          border: 'none',
+                          background: '#cf1322',
+                          color: 'white',
+                          cursor: busy ? 'default' : 'pointer',
+                          fontWeight: '600',
+                          fontSize: '0.82rem',
+                        }}
+                      >
+                        Reopen Complaint
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
-            </div>
+            );
+          })
+        )}
+      </main>
 
-            {/* Content */}
-            <p style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text-dark)', lineHeight: 1.5 }}>
-              {comp.text}
-            </p>
 
-            {/* Media Attachment */}
-            {comp.type === 'photo' && (comp.media_url || comp.mediaUrl) && (
-              <div style={{ borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: '#f8f9fa', display: 'flex', justifyContent: 'center' }}>
-                <img src={comp.media_url || comp.mediaUrl} alt="Complaint Attachment" style={{ width: '100%', height: 'auto', display: 'block', maxHeight: '400px', objectFit: 'contain' }} />
-              </div>
-            )}
-            {comp.type === 'video' && (comp.media_url || comp.mediaUrl) && (
-              <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: 'black', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <video src={comp.media_url || comp.mediaUrl} controls style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'contain' }} />
-              </div>
-            )}
-            {comp.type === 'audio' && (comp.media_url || comp.mediaUrl) && (
-              <div style={{ marginTop: '0.5rem', padding: '1rem', backgroundColor: 'var(--bg-color)', borderRadius: '30px', border: '1px solid var(--border-color)' }}>
-                <audio src={comp.media_url || comp.mediaUrl} controls style={{ width: '100%' }} />
-              </div>
-            )}
+      {/* ── Complaint detail sheet ──────────────────────────────
+          The list is the student-facing view. This sheet is what a
+          staff member sees when they open a complaint: the bus it was
+          raised against, the exact timeline, and who handled it. */}
+      {detailId && (() => {
+        const comp = complaints.find((c) => c.id === detailId);
+        if (!comp) return null;
+        const meta = STATUS_META[comp.status] || STATUS_META.pending;
+        const { Icon } = meta;
+        const bus = comp.busNumber || routeMap[comp.route]?.busNumber;
+        const busInfo = busList.find((b) => b.busNumber === bus);
+        const isMine = comp.isMine || comp.loginId === user?.login_id;
+        const busy = busyIds.has(comp.id);
 
-            {/* Upvote & Action Bar */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #f0f0f0', paddingTop: '1rem', marginTop: '0.5rem' }}>
-              <button onClick={() => handleUpvote(comp.id || comp._id)} disabled={processingUpvotes.has(comp.id || comp._id)} style={{
-                display: 'flex', alignItems: 'center', gap: '0.5rem', border: 'none',
-                backgroundColor: comp.hasUpvotedLocally ? 'var(--primary-blue)' : 'transparent',
-                color: comp.hasUpvotedLocally ? 'white' : 'var(--primary-blue)',
-                fontWeight: '600', cursor: processingUpvotes.has(comp.id || comp._id) ? 'default' : 'pointer',
-                padding: '0.5rem 1rem', borderRadius: '30px', transition: 'all 0.2s ease',
+        return (
+          <div
+            className="modal-overlay"
+            onClick={() => setDetailId(null)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(0,0,0,0.6)',
+              backdropFilter: 'blur(4px)',
+              zIndex: 100,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <div
+              className="modal-sheet"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                backgroundColor: 'var(--card-bg)',
+                width: '100%',
+                maxWidth: '640px',
+                borderRadius: '20px',
+                boxShadow: '0 20px 60px rgba(0,0,0,0.35)',
+                display: 'flex',
+                flexDirection: 'column',
+                maxHeight: '90vh',
+                overflowY: 'auto',
+                border: '1px solid var(--border-color)',
               }}
-                onMouseEnter={e => !processingUpvotes.has(comp.id || comp._id) && !comp.hasUpvotedLocally && (e.currentTarget.style.backgroundColor = '#e6f0fa')}
-                onMouseLeave={e => !processingUpvotes.has(comp.id || comp._id) && !comp.hasUpvotedLocally && (e.currentTarget.style.backgroundColor = 'transparent')}>
-                <ThumbsUp size={20} strokeWidth={2.5} fill={comp.hasUpvotedLocally ? 'white' : 'none'} /> {comp.upvotes || 0} {comp.hasUpvotedLocally ? 'Agreed' : t('agree')}
-              </button>
-
-              {isAdmin && comp.status === 'pending' && (
-                <button onClick={() => handleResolve(comp.id || comp._id)} style={{
-                  backgroundColor: 'var(--secondary-orange)', color: 'white', border: 'none',
-                  padding: '0.4rem 1rem', borderRadius: '8px', fontWeight: 'bold', fontSize: '0.8rem', cursor: 'pointer'
-                }}>
-                  {t('markResolved')}
+            >
+              {/* Header */}
+              <div
+                style={{
+                  padding: '1.25rem 1.5rem',
+                  borderBottom: '1px solid var(--border-color)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'flex-start',
+                  gap: '1rem',
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      marginBottom: '0.35rem',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: 'monospace',
+                        fontSize: '0.72rem',
+                        fontWeight: '800',
+                        color: 'var(--text-light)',
+                        background: '#f1f3f5',
+                        padding: '0.2rem 0.45rem',
+                        borderRadius: '6px',
+                      }}
+                    >
+                      #{String(comp.id).substring(0, 6).toUpperCase()}
+                    </span>
+                    {renderStatusBadge(comp.status)}
+                    {comp.category && (
+                      <span
+                        style={{
+                          fontSize: '0.68rem',
+                          fontWeight: '700',
+                          padding: '0.2rem 0.5rem',
+                          borderRadius: '6px',
+                          background: 'rgba(24,119,242,0.1)',
+                          color: 'var(--primary-blue)',
+                        }}
+                      >
+                        {comp.category}
+                      </span>
+                    )}
+                  </div>
+                  <h2
+                    style={{
+                      margin: 0,
+                      fontSize: '1.05rem',
+                      fontWeight: '700',
+                      color: 'var(--text-dark)',
+                    }}
+                  >
+                    {isMine
+                      ? 'Your complaint'
+                      : comp.realName && comp.realName !== 'Anonymous Passenger'
+                        ? 'Complaint from a passenger'
+                        : 'Anonymous complaint'}
+                  </h2>
+                </div>
+                <button
+                  onClick={() => setDetailId(null)}
+                  aria-label="Close"
+                  style={{
+                    background: '#f1f3f5',
+                    border: 'none',
+                    borderRadius: '50%',
+                    padding: '0.5rem',
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                  }}
+                >
+                  <X size={20} color="var(--text-dark)" />
                 </button>
-              )}
+              </div>
+
+              {/* Body */}
+              <div
+                style={{
+                  padding: '1.25rem 1.5rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '1.1rem',
+                }}
+              >
+                {/* Bus identity */}
+                <div
+                  style={{
+                    padding: '0.85rem 1rem',
+                    background: 'var(--bg-color)',
+                    borderRadius: '12px',
+                    border: '1px solid var(--border-color)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.55rem',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.45rem',
+                      fontWeight: '800',
+                      fontSize: '0.78rem',
+                      color: 'var(--primary-blue)',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                    }}
+                  >
+                    <Bus size={14} /> Bus
+                  </div>
+                  <div
+                    style={{
+                      fontSize: '1.1rem',
+                      fontWeight: '800',
+                      color: 'var(--text-dark)',
+                      letterSpacing: '-0.3px',
+                    }}
+                  >
+                    {bus || 'Unknown bus'}
+                  </div>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns:
+                        'repeat(auto-fit, minmax(150px, 1fr))',
+                      gap: '0.4rem 1rem',
+                      fontSize: '0.78rem',
+                      color: 'var(--text-light)',
+                    }}
+                  >
+                    <span>
+                      <strong style={{ color: 'var(--text-dark)' }}>Route:</strong>{' '}
+                      {busInfo?.routeName || `Route ${comp.route}`}
+                      {busInfo ? ` (${busInfo.routeId})` : ''}
+                    </span>
+                    {busInfo && (
+                      <>
+                        <span>
+                          <strong style={{ color: 'var(--text-dark)' }}>
+                            Registration:
+                          </strong>{' '}
+                          {busInfo.registrationNumber}
+                        </span>
+                        <span>
+                          <strong style={{ color: 'var(--text-dark)' }}>
+                            Model:
+                          </strong>{' '}
+                          {busInfo.vehicleModel}
+                        </span>
+                        <span>
+                          <strong style={{ color: 'var(--text-dark)' }}>
+                            Capacity:
+                          </strong>{' '}
+                          {busInfo.capacity}
+                        </span>
+                        <span>
+                          <strong style={{ color: 'var(--text-dark)' }}>City:</strong>{' '}
+                          {busInfo.city}
+                        </span>
+                        <span>
+                          <strong style={{ color: 'var(--text-dark)' }}>
+                            Driver:
+                          </strong>{' '}
+                          {busInfo.driverId}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Complaint text */}
+                <div>
+                  <p
+                    style={{
+                      margin: '0 0 0.4rem',
+                      fontSize: '0.72rem',
+                      fontWeight: '800',
+                      color: 'var(--text-light)',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                    }}
+                  >
+                    What was reported
+                  </p>
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: '0.95rem',
+                      color: 'var(--text-dark)',
+                      lineHeight: 1.55,
+                      whiteSpace: 'pre-wrap',
+                      overflowWrap: 'anywhere',
+                    }}
+                  >
+                    {comp.text}
+                  </p>
+                </div>
+
+                {/* Media */}
+                {comp.type === 'photo' && comp.mediaUrl && (
+                  <img
+                    src={comp.mediaUrl}
+                    alt="Complaint attachment"
+                    style={{
+                      width: '100%',
+                      borderRadius: '12px',
+                      border: '1px solid var(--border-color)',
+                      maxHeight: '320px',
+                      objectFit: 'contain',
+                    }}
+                  />
+                )}
+                {comp.type === 'video' && comp.mediaUrl && (
+                  <video
+                    src={comp.mediaUrl}
+                    controls
+                    preload="metadata"
+                    style={{
+                      width: '100%',
+                      borderRadius: '12px',
+                      border: '1px solid var(--border-color)',
+                      maxHeight: '320px',
+                    }}
+                  />
+                )}
+                {comp.type === 'audio' && comp.mediaUrl && (
+                  <audio src={comp.mediaUrl} controls style={{ width: '100%' }} />
+                )}
+
+                {/* Timeline */}
+                <div>
+                  <p
+                    style={{
+                      margin: '0 0 0.55rem',
+                      fontSize: '0.72rem',
+                      fontWeight: '800',
+                      color: 'var(--text-light)',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                    }}
+                  >
+                    Timeline
+                  </p>
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.55rem',
+                      borderLeft: '2px solid var(--border-color)',
+                      paddingLeft: '0.9rem',
+                    }}
+                  >
+                    <TimelineRow
+                      icon={ShieldAlert}
+                      tone="#cf1322"
+                      label="Raised"
+                      value={new Date(comp.createdAt).toLocaleString('en-IN', {
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    />
+                    {comp.resolvedAt && (
+                      <TimelineRow
+                        icon={Wrench}
+                        tone="#d46b08"
+                        label="Marked as fixed"
+                        value={new Date(comp.resolvedAt).toLocaleString('en-IN', {
+                          day: '2-digit',
+                          month: 'short',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      />
+                    )}
+                    {comp.reopenCount > 0 && (
+                      <TimelineRow
+                        icon={RotateCcw}
+                        tone="#cf1322"
+                        label="Reopened"
+                        value={`${comp.reopenCount} time(s)`}
+                        note="the complainant said it was not fixed"
+                      />
+                    )}
+                    {comp.confirmedAt && (
+                      <TimelineRow
+                        icon={Check}
+                        tone="#28a745"
+                        label="Confirmed and closed"
+                        value={new Date(comp.confirmedAt).toLocaleString('en-IN', {
+                          day: '2-digit',
+                          month: 'short',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                        note="the complainant confirmed the fix"
+                      />
+                    )}
+                    {comp.dueAt && comp.status === 'resolved' && (
+                      <TimelineRow
+                        icon={Timer}
+                        tone="#0958d9"
+                        label="Awaiting confirmation"
+                        value={`due ${new Date(comp.dueAt).toLocaleString('en-IN', {
+                          day: '2-digit',
+                          month: 'short',
+                          hour: '2-digit',
+                        })}`}
+                        note="stays open until the complainant confirms"
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {/* Staff-only: who raised it and who handled it */}
+                {isAdmin && (
+                  <div
+                    style={{
+                      padding: '0.85rem 1rem',
+                      background: 'var(--bg-color)',
+                      borderRadius: '12px',
+                      border: '1px solid var(--border-color)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.4rem',
+                      fontSize: '0.8rem',
+                      color: 'var(--text-light)',
+                    }}
+                  >
+                    <p
+                      style={{
+                        margin: '0 0 0.2rem',
+                        fontSize: '0.72rem',
+                        fontWeight: '800',
+                        color: 'var(--text-light)',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em',
+                      }}
+                    >
+                      Staff view
+                    </p>
+                    <span>
+                      <strong style={{ color: 'var(--text-dark)' }}>
+                        Raised by:
+                      </strong>{' '}
+                      {comp.realName || 'Anonymous Passenger'}{' '}
+                      {comp.loginId ? `(${comp.loginId})` : ''}
+                    </span>
+                    {comp.resolvedBy && (
+                      <span>
+                        <strong style={{ color: 'var(--text-dark)' }}>
+                          Handled by:
+                        </strong>{' '}
+                        {comp.resolvedBy}
+                      </span>
+                    )}
+                    {comp.resolutionNote && (
+                      <span>
+                        <strong style={{ color: 'var(--text-dark)' }}>
+                          Internal note:
+                        </strong>{' '}
+                        {comp.resolutionNote}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* The response the complainant was shown */}
+                {comp.adminResponse && (
+                  <div
+                    style={{
+                      padding: '0.85rem 1rem',
+                      background: 'rgba(0,86,179,0.06)',
+                      borderLeft: '3px solid var(--primary-blue)',
+                      borderRadius: '8px',
+                    }}
+                  >
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: '0.7rem',
+                        fontWeight: '800',
+                        color: 'var(--primary-blue)',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em',
+                      }}
+                    >
+                      Response from the transport team
+                    </p>
+                    <p
+                      style={{
+                        margin: '0.35rem 0 0',
+                        fontSize: '0.9rem',
+                        color: 'var(--text-dark)',
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {comp.adminResponse}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div
+                style={{
+                  padding: '1rem 1.5rem',
+                  borderTop: '1px solid var(--border-color)',
+                  display: 'flex',
+                  gap: '0.6rem',
+                  flexWrap: 'wrap',
+                  justifyContent: 'flex-end',
+                }}
+              >
+                {isAdmin &&
+                  (comp.status === 'pending' || comp.status === 'reopened') && (
+                    <button
+                      onClick={() => handleStart(comp.id)}
+                      disabled={busy}
+                      style={{
+                        background: '#d46b08',
+                        color: 'white',
+                        border: 'none',
+                        padding: '0.55rem 1.1rem',
+                        borderRadius: '9px',
+                        fontWeight: 'bold',
+                        fontSize: '0.85rem',
+                        cursor: busy ? 'default' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.4rem',
+                      }}
+                    >
+                      <Wrench size={15} /> Start Work
+                    </button>
+                  )}
+
+                {isAdmin &&
+                  (comp.status === 'pending' ||
+                    comp.status === 'in_progress' ||
+                    comp.status === 'reopened') && (
+                    <button
+                      onClick={() => handleResolve(comp.id)}
+                      disabled={busy}
+                      style={{
+                        background: 'var(--secondary-orange)',
+                        color: 'white',
+                        border: 'none',
+                        padding: '0.55rem 1.1rem',
+                        borderRadius: '9px',
+                        fontWeight: 'bold',
+                        fontSize: '0.85rem',
+                        cursor: busy ? 'default' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.4rem',
+                      }}
+                    >
+                      <CheckCircle2 size={15} /> Mark as Fixed
+                    </button>
+                  )}
+
+                {isAdmin && comp.status === 'resolved' && (
+                  <button
+                    onClick={() => handleExtend(comp.id)}
+                    disabled={busy}
+                    style={{
+                      background: 'transparent',
+                      color: 'var(--primary-blue)',
+                      border: '1px solid var(--primary-blue)',
+                      padding: '0.5rem 1rem',
+                      borderRadius: '9px',
+                      fontWeight: 'bold',
+                      fontSize: '0.85rem',
+                      cursor: busy ? 'default' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                    }}
+                  >
+                    <Timer size={15} /> Extend 24h
+                  </button>
+                )}
+
+                {isMine && comp.status === 'resolved' && (
+                  <>
+                    <button
+                      onClick={() => handleConfirm(comp.id)}
+                      disabled={busy}
+                      style={{
+                        background: '#28a745',
+                        color: 'white',
+                        border: 'none',
+                        padding: '0.55rem 1.1rem',
+                        borderRadius: '9px',
+                        fontWeight: 'bold',
+                        fontSize: '0.85rem',
+                        cursor: busy ? 'default' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.4rem',
+                      }}
+                    >
+                      <Check size={15} /> Yes, Fixed
+                    </button>
+                    <button
+                      onClick={() => {
+                        setRejectingId(comp.id);
+                        setRejectReason('');
+                        setDetailId(null);
+                      }}
+                      disabled={busy}
+                      style={{
+                        background: '#cf1322',
+                        color: 'white',
+                        border: 'none',
+                        padding: '0.55rem 1.1rem',
+                        borderRadius: '9px',
+                        fontWeight: 'bold',
+                        fontSize: '0.85rem',
+                        cursor: busy ? 'default' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.4rem',
+                      }}
+                    >
+                      <AlertTriangle size={15} /> Not Fixed Yet
+                    </button>
+                  </>
+                )}
+
+                <button
+                  onClick={() => setDetailId(null)}
+                  style={{
+                    background: 'transparent',
+                    color: 'var(--text-dark)',
+                    border: '1px solid var(--border-color)',
+                    padding: '0.5rem 1.1rem',
+                    borderRadius: '9px',
+                    fontWeight: '600',
+                    fontSize: '0.85rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
-        ))}
-      </main>
+        );
+      })()}
 
       {/* Floating Action Button */}
       {!isAdmin && (
         <button
           onClick={() => setShowModal(true)}
+          aria-label="Raise a complaint"
           style={{
-            position: 'fixed', bottom: '2rem', right: '2rem', width: '60px', height: '60px',
-            borderRadius: '50%', backgroundColor: 'var(--secondary-orange)', color: 'white',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 8px 24px rgba(255, 102, 0, 0.4)', border: 'none', cursor: 'pointer',
-            zIndex: 20, transition: 'transform 0.2s'
+            position: 'fixed',
+            bottom: '2rem',
+            right: '2rem',
+            width: '60px',
+            height: '60px',
+            borderRadius: '50%',
+            backgroundColor: 'var(--secondary-orange)',
+            color: 'white',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 8px 24px rgba(255, 102, 0, 0.4)',
+            border: 'none',
+            cursor: 'pointer',
+            zIndex: 20,
+            transition: 'transform 0.2s',
           }}
-          onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.1)'}
-          onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+          onMouseEnter={(e) =>
+            (e.currentTarget.style.transform = 'scale(1.1)')
+          }
+          onMouseLeave={(e) =>
+            (e.currentTarget.style.transform = 'scale(1)')
+          }
         >
           <Plus size={32} />
         </button>
@@ -463,42 +2691,209 @@ const Community = () => {
 
       {/* Raise Complaint Modal */}
       {showModal && (
-        <div style={{
-          position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
-          zIndex: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center'
-        }}>
-          <div className="animate-slide-up p-glass" style={{
-            backgroundColor: 'var(--card-bg)', width: '100%', maxWidth: '600px', borderTopLeftRadius: '24px', borderTopRightRadius: '24px',
-            display: 'flex', flexDirection: 'column', gap: '1.5rem',
-            boxShadow: '0 -10px 40px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.6)',
+            backdropFilter: 'blur(4px)',
+            zIndex: 100,
+            display: 'flex',
+            alignItems: 'flex-end',
+            justifyContent: 'center',
+          }}
+        >
+          <div
+            className="animate-slide-up p-glass"
+            style={{
+              backgroundColor: 'var(--card-bg)',
+              width: '100%',
+              maxWidth: '600px',
+              borderTopLeftRadius: '24px',
+              borderTopRightRadius: '24px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '1.5rem',
+              boxShadow: '0 -10px 40px rgba(0,0,0,0.2)',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
               <div>
-                <h2 style={{ margin: 0, fontSize: '1.25rem', color: 'var(--primary-blue)' }}>Raise a Grievance</h2>
-                <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-light)' }}>Your name will be hidden from other passengers.</p>
+                <h2
+                  style={{
+                    margin: 0,
+                    fontSize: '1.25rem',
+                    color: 'var(--primary-blue)',
+                  }}
+                >
+                  Raise a Grievance
+                </h2>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: '0.8rem',
+                    color: 'var(--text-light)',
+                  }}
+                >
+                  {showMyName
+                    ? 'The transport team will see your name on this complaint.'
+                    : 'Your name is hidden from other passengers and the transport team.'}
+                </p>
+                {user?.route_id && (
+                  <p
+                    style={{
+                      margin: '0.35rem 0 0',
+                      fontSize: '0.78rem',
+                      color: 'var(--primary-blue)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.3rem',
+                    }}
+                  >
+                    <Bus size={13} />
+                    Filed against your route: {formatRoute(user.route_id)}
+                  </p>
+                )}
               </div>
-              <button onClick={() => setShowModal(false)} style={{ background: '#f8f9fa', border: 'none', borderRadius: '50%', padding: '0.5rem', cursor: 'pointer' }}>
+              <button
+                onClick={() => setShowModal(false)}
+                aria-label="Close"
+                style={{
+                  background: '#f8f9fa',
+                  border: 'none',
+                  borderRadius: '50%',
+                  padding: '0.5rem',
+                  cursor: 'pointer',
+                }}
+              >
                 <X size={24} color="var(--text-dark)" />
               </button>
             </div>
 
-            <form onSubmit={handlePostComplaint} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {/* Category Selection */}
+            <form
+              onSubmit={handlePostComplaint}
+              style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}
+            >
               <div>
-                <p style={{ margin: '0 0 0.5rem', fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-dark)' }}>Category (optional)</p>
+                <p
+                  style={{
+                    margin: '0 0 0.5rem',
+                    fontSize: '0.85rem',
+                    fontWeight: '700',
+                    color: 'var(--text-dark)',
+                  }}
+                >
+                  Category (optional)
+                </p>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-                  {CATEGORIES.map(cat => (
-                    <button key={cat} type="button" onClick={() => setSelectedCategory(selectedCategory === cat ? '' : cat)} style={{
-                      padding: '0.3rem 0.65rem', borderRadius: '20px', fontSize: '0.75rem', fontWeight: '600', cursor: 'pointer',
-                      border: '1px solid var(--border-color)',
-                      backgroundColor: selectedCategory === cat ? 'var(--primary-blue)' : 'var(--bg-color)',
-                      color: selectedCategory === cat ? 'white' : 'var(--text-dark)',
-                      transition: 'all 0.15s'
-                    }}>
+                  {CATEGORIES.map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() =>
+                        setSelectedCategory(selectedCategory === cat ? '' : cat)
+                      }
+                      style={{
+                        padding: '0.3rem 0.65rem',
+                        borderRadius: '20px',
+                        fontSize: '0.75rem',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        border: '1px solid var(--border-color)',
+                        backgroundColor:
+                          selectedCategory === cat
+                            ? 'var(--primary-blue)'
+                            : 'var(--bg-color)',
+                        color:
+                          selectedCategory === cat
+                            ? 'white'
+                            : 'var(--text-dark)',
+                        transition: 'all 0.15s',
+                      }}
+                    >
                       {cat}
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Who should the transport team see? Complaints are anonymous
+                  by default; the reporter can opt in to being named. */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '0.75rem',
+                  flexWrap: 'wrap',
+                  padding: '0.7rem 0.85rem',
+                  background: 'var(--bg-color)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '10px',
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: '0.85rem',
+                      fontWeight: '700',
+                      color: 'var(--text-dark)',
+                    }}
+                  >
+                    Post anonymously
+                  </p>
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: '0.75rem',
+                      color: 'var(--text-light)',
+                    }}
+                  >
+                    {showMyName
+                      ? 'The transport team will see your name.'
+                      : 'Your name is not shared with anyone.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={!showMyName}
+                  aria-label="Post anonymously"
+                  onClick={() => setShowMyName((v) => !v)}
+                  style={{
+                    width: '46px',
+                    height: '26px',
+                    borderRadius: '20px',
+                    border: 'none',
+                    padding: '3px',
+                    display: 'flex',
+                    justifyContent: showMyName ? 'flex-end' : 'flex-start',
+                    background: showMyName ? '#28a745' : 'var(--primary-blue)',
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                    transition: 'background 0.2s ease',
+                  }}
+                >
+                  <span
+                    style={{
+                      width: '20px',
+                      height: '20px',
+                      borderRadius: '50%',
+                      background: 'white',
+                      display: 'block',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
+                    }}
+                  />
+                </button>
               </div>
 
               <textarea
@@ -507,34 +2902,130 @@ const Community = () => {
                 placeholder="What's the issue? (e.g. Bus is overcrowded, Rash driving...)"
                 rows={4}
                 style={{
-                  width: '100%', padding: '1rem', borderRadius: '12px', border: '1px solid var(--border-color)',
-                  fontSize: '1rem', outline: 'none', resize: 'none', fontFamily: 'inherit', boxSizing: 'border-box'
+                  width: '100%',
+                  padding: '1rem',
+                  borderRadius: '12px',
+                  border: '1px solid var(--border-color)',
+                  fontSize: '1rem',
+                  outline: 'none',
+                  resize: 'none',
+                  fontFamily: 'inherit',
+                  boxSizing: 'border-box',
+                  backgroundColor: 'var(--card-bg)',
+                  color: 'var(--text-dark)',
                 }}
                 required
               />
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', gap: '0.75rem' }}>
-                  <button type="button" onClick={() => triggerFileInput('photo')} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: mediaType === 'photo' ? '#e6f0fa' : 'transparent', cursor: 'pointer', color: 'var(--text-dark)' }}>
-                    <ImageIcon size={18} color="var(--primary-blue)" /> <span style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Photo</span>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => triggerFileInput('photo')}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      padding: '0.5rem 0.75rem',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor:
+                        mediaType === 'photo' ? '#e6f0fa' : 'transparent',
+                      cursor: 'pointer',
+                      color: 'var(--text-dark)',
+                    }}
+                  >
+                    <ImageIcon size={18} color="var(--primary-blue)" />{' '}
+                    <span style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>
+                      Photo
+                    </span>
                   </button>
-                  <button type="button" onClick={() => triggerFileInput('video')} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: mediaType === 'video' ? '#fdeced' : 'transparent', cursor: 'pointer', color: 'var(--text-dark)' }}>
-                    <Video size={18} color="#cf1322" /> <span style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Video</span>
+                  <button
+                    type="button"
+                    onClick={() => triggerFileInput('video')}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      padding: '0.5rem 0.75rem',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor:
+                        mediaType === 'video' ? '#fdeced' : 'transparent',
+                      cursor: 'pointer',
+                      color: 'var(--text-dark)',
+                    }}
+                  >
+                    <Video size={18} color="#cf1322" />{' '}
+                    <span style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>
+                      Video
+                    </span>
                   </button>
-                  <button type="button" onClick={() => triggerFileInput('audio')} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: mediaType === 'audio' ? '#fff0e6' : 'transparent', cursor: 'pointer', color: 'var(--text-dark)' }}>
-                    <Mic size={18} color="var(--secondary-orange)" /> <span style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Audio</span>
+                  <button
+                    type="button"
+                    onClick={() => triggerFileInput('audio')}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      padding: '0.5rem 0.75rem',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor:
+                        mediaType === 'audio' ? '#fff0e6' : 'transparent',
+                      cursor: 'pointer',
+                      color: 'var(--text-dark)',
+                    }}
+                  >
+                    <Mic size={18} color="var(--secondary-orange)" />{' '}
+                    <span style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>
+                      Audio
+                    </span>
                   </button>
                 </div>
                 {mediaFile && (
-                  <span style={{ fontSize: '0.8rem', color: 'var(--primary-blue)', fontWeight: 'bold' }}>
-                    {mediaFile.name.length > 15 ? mediaFile.name.substring(0, 15) + '...' : mediaFile.name}
+                  <span
+                    style={{
+                      fontSize: '0.8rem',
+                      color: 'var(--primary-blue)',
+                      fontWeight: 'bold',
+                      wordBreak: 'break-all',
+                    }}
+                  >
+                    {mediaFile.name.length > 15
+                      ? mediaFile.name.substring(0, 15) + '...'
+                      : mediaFile.name}
                   </span>
                 )}
               </div>
-              <input type="file" style={{ display: 'none' }} ref={fileInputRef} onChange={handleFileChange} />
+              <input
+                type="file"
+                style={{ display: 'none' }}
+                ref={fileInputRef}
+                onChange={handleFileChange}
+              />
 
-              <button type="submit" disabled={isUploading} className="btn btn-primary" style={{ padding: '1rem', borderRadius: '12px', fontSize: '1.1rem', marginTop: '0.5rem', opacity: isUploading ? 0.7 : 1 }}>
-                {isUploading ? 'Uploading...' : 'Post Complaint Anonymously'}
+              <button
+                type="submit"
+                disabled={isUploading}
+                className="btn btn-primary"
+                style={{
+                  padding: '1rem',
+                  borderRadius: '12px',
+                  fontSize: '1.1rem',
+                  marginTop: '0.5rem',
+                  opacity: isUploading ? 0.7 : 1,
+                }}
+              >
+                {isUploading ? 'Posting...' : 'Post Complaint'}
               </button>
             </form>
           </div>

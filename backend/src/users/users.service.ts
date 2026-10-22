@@ -3,27 +3,45 @@ import {
   NotFoundException,
   ConflictException,
   UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 import { UserRole, FeeStatus } from '@prisma/client';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { CacheService } from '../cache/cache.service';
+import { canAssignRole } from '../common/roles';
+
+const DEFAULT_PASSWORD = 'Invertis@123';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cache: CacheService,
+  ) {}
+
+  /**
+   * Strip the password hash and the sensitive JSON blobs from a user record
+   * before it leaves the server.
+   */
+  private sanitize<T extends Record<string, any>>(user: T): Omit<T, 'password'> {
+    const { password, wakeAlarm, ...rest } = user as any;
+    return rest;
+  }
 
   async findByLoginId(loginId: string) {
     const user = await this.prisma.user.findUnique({ where: { loginId } });
     if (!user) {
       throw new NotFoundException(`User with login ID ${loginId} not found`);
     }
-    return user;
+    // Never leak the bcrypt hash.
+    return this.sanitize(user);
   }
 
   async findAll() {
-    return this.prisma.user.findMany({
+    const users = await this.prisma.user.findMany({
       select: {
         id: true,
         loginId: true,
@@ -35,6 +53,8 @@ export class UsersService {
         email: true,
         profilePic: true,
         designation: true,
+        subject: true,
+        gradeClass: true,
         lastLogin: true,
         createdAt: true,
         licenseNumber: true,
@@ -45,22 +65,44 @@ export class UsersService {
         parentPhone: true,
         dob: true,
         address: true,
-        gradeClass: true,
         awsFaceId: true,
         faceEnrolledAt: true,
       },
     });
+    return users;
   }
 
-  async create(body: CreateUserDto) {
+  async create(body: CreateUserDto, actorRole: UserRole) {
+    const role = (body.role as UserRole) || UserRole.passenger;
+
+    if (!canAssignRole(actorRole, role)) {
+      throw new ForbiddenException(
+        `You are not allowed to create an account with the role "${role}"`,
+      );
+    }
+
     const existing = await this.prisma.user.findUnique({
       where: { loginId: body.login_id },
     });
     if (existing)
       throw new ConflictException(`User ${body.login_id} already exists`);
 
+    // A phone number must stay unique per account so the phone login fallback
+    // can never resolve to the wrong person.
+    if (body.phone) {
+      const phoneTaken = await this.prisma.user.findFirst({
+        where: { phone: body.phone },
+        select: { loginId: true },
+      });
+      if (phoneTaken) {
+        throw new ConflictException(
+          `Phone number ${body.phone} is already registered to ${phoneTaken.loginId}`,
+        );
+      }
+    }
+
     const hashedPassword = await bcrypt.hash(
-      body.password || 'Invertis@123',
+      body.password || DEFAULT_PASSWORD,
       10,
     );
 
@@ -69,12 +111,13 @@ export class UsersService {
         loginId: body.login_id,
         name: body.name,
         password: hashedPassword,
-        role: (body.role as UserRole) || UserRole.passenger,
+        role,
         routeId: body.route_id,
         feeStatus: (body.fee_status as FeeStatus) || FeeStatus.unpaid,
         phone: body.phone,
         email: body.email,
         designation: body.designation,
+        subject: body.subject,
         licenseNumber: body.licenseNumber,
         licenseExpiry: body.licenseExpiry
           ? new Date(body.licenseExpiry)
@@ -91,13 +134,21 @@ export class UsersService {
       },
     });
 
-    const { password: _, ...result } = user as any;
-    return { status: 'success', message: 'User created', user: result };
+    await this.cache.del(`auth:user:${user.loginId}`);
+    return { status: 'success', message: 'User created', user: this.sanitize(user) };
   }
 
-  async update(loginId: string, body: UpdateUserDto) {
+  async update(loginId: string, body: UpdateUserDto, actorRole: UserRole) {
     const user = await this.prisma.user.findUnique({ where: { loginId } });
     if (!user) throw new NotFoundException(`User ${loginId} not found`);
+
+    if (body.role && body.role !== user.role) {
+      if (!canAssignRole(actorRole, body.role as UserRole)) {
+        throw new ForbiddenException(
+          `You are not allowed to change this account to the role "${body.role}"`,
+        );
+      }
+    }
 
     let password = user.password;
     if (body.password) {
@@ -114,6 +165,7 @@ export class UsersService {
         phone: body.phone,
         email: body.email,
         designation: body.designation,
+        subject: body.subject,
         profilePic: body.profile_pic,
         wakeAlarm: body.wake_alarm,
         locationLat: body.location_lat,
@@ -135,20 +187,42 @@ export class UsersService {
       },
     });
 
-    const { password: _, ...result } = updatedUser as any;
-    return { status: 'success', message: 'User updated', user: result };
+    // The role may have changed — drop the cached identity.
+    await this.cache.del(`auth:user:${loginId}`);
+
+    return {
+      status: 'success',
+      message: 'User updated',
+      user: this.sanitize(updatedUser),
+    };
   }
 
-  async remove(loginId: string) {
-    const user = await this.prisma.user.findUnique({ where: { loginId } });
+  async remove(loginId: string, actorRole: UserRole) {
+    const user = await this.prisma.user.findUnique({
+      where: { loginId },
+      select: { role: true },
+    });
     if (!user) throw new NotFoundException(`User ${loginId} not found`);
+
+    // Only a full admin may delete an admin or tech_admin account.
+    if (
+      (user.role === UserRole.admin || user.role === UserRole.tech_admin) &&
+      actorRole !== UserRole.admin &&
+      actorRole !== UserRole.tech_admin
+    ) {
+      throw new ForbiddenException(
+        'Only an admin can delete an administrator account',
+      );
+    }
+
     await this.prisma.user.delete({ where: { loginId } });
+    await this.cache.del(`auth:user:${loginId}`);
     return { status: 'success', message: 'User deleted' };
   }
 
-  async bulkCreate(users: any[]) {
+  async bulkCreate(users: any[], actorRole: UserRole) {
     const results = { successful: 0, failed: 0, errors: [] as string[] };
-    const defaultPassword = await bcrypt.hash('Invertis@123', 10);
+    const defaultPassword = await bcrypt.hash(DEFAULT_PASSWORD, 10);
 
     for (const data of users) {
       try {
@@ -161,6 +235,18 @@ export class UsersService {
           continue;
         }
 
+        // The role from the CSV is honoured, but only if the actor is allowed
+        // to assign it. Otherwise the row is created as a passenger.
+        const requestedRole = (data.role as UserRole) || UserRole.passenger;
+        const role = canAssignRole(actorRole, requestedRole)
+          ? requestedRole
+          : UserRole.passenger;
+        if (role !== requestedRole) {
+          results.errors.push(
+            `User ${data.login_id}: role "${requestedRole}" downgraded to passenger — not permitted for your role`,
+          );
+        }
+
         await this.prisma.user.create({
           data: {
             loginId: data.login_id,
@@ -168,11 +254,13 @@ export class UsersService {
             password: data.password
               ? await bcrypt.hash(data.password, 10)
               : defaultPassword,
-            role: (data.role as UserRole) || UserRole.passenger,
+            role,
             routeId: data.route_id,
             feeStatus: (data.fee_status as FeeStatus) || FeeStatus.unpaid,
             phone: data.phone,
             email: data.email,
+            designation: data.designation,
+            subject: data.subject,
             parentName: data.parentName,
             parentPhone: data.parentPhone,
             dob: data.dob ? new Date(data.dob) : undefined,
@@ -196,16 +284,28 @@ export class UsersService {
     loginId: string,
     currentPassword: string,
     newPassword: string,
+    requestingLoginId: string,
+    actorRole: UserRole,
   ) {
+    // A user may only change their own password. Staff changing someone
+    // else's password must go through the admin update endpoint.
+    if (requestingLoginId !== loginId && actorRole !== UserRole.admin) {
+      throw new ForbiddenException(
+        'You can only change your own password',
+      );
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { loginId },
       select: { id: true, loginId: true, password: true },
     });
     if (!user) throw new NotFoundException(`User ${loginId} not found`);
 
-    const isMatch = await bcrypt.compare(currentPassword, user.password!);
-    if (!isMatch)
-      throw new UnauthorizedException('Current password is incorrect');
+    if (requestingLoginId === loginId) {
+      const isMatch = await bcrypt.compare(currentPassword, user.password!);
+      if (!isMatch)
+        throw new UnauthorizedException('Current password is incorrect');
+    }
 
     await this.prisma.user.update({
       where: { loginId },
@@ -216,7 +316,13 @@ export class UsersService {
 
   async setWakeAlarm(
     loginId: string,
-    dto: { lat: number; lng: number; thresholdKm: number; subscription: any; firedAt?: string | null },
+    dto: {
+      lat: number;
+      lng: number;
+      thresholdKm: number;
+      subscription?: any;
+      firedAt?: string | null;
+    },
   ) {
     const user = await this.prisma.user.findUnique({ where: { loginId } });
     if (!user) throw new NotFoundException(`User ${loginId} not found`);
@@ -266,15 +372,25 @@ export class UsersService {
     return { status: 'success', message: 'Wake alarm cancelled' };
   }
 
+  /**
+   * Active wake alarms, cached for a short window.
+   *
+   * This is called on EVERY telemetry update (roughly once per second per
+   * bus). Previously it did a full `SELECT` over every user in the database
+   * each time — including all their JSON columns — which is one of the main
+   * reasons live tracking felt slow and hammered the database.
+   */
   async getActiveWakeAlarms() {
-    // Fetch all users who have any wakeAlarm JSON set (enabled or disabled)
-    const allUsers = await this.prisma.user.findMany({
-      select: { loginId: true, wakeAlarm: true, routeId: true },
-    });
+    return this.cache.remember('wake:alarms:active', 30, async () => {
+      const allUsers = await this.prisma.user.findMany({
+        select: { loginId: true, wakeAlarm: true, routeId: true },
+        where: { wakeAlarm: { not: undefined } },
+      });
 
-    return allUsers.filter((u) => {
-      const alarm = u.wakeAlarm as any;
-      return alarm?.enabled === true;
+      return allUsers.filter((u) => {
+        const alarm = u.wakeAlarm as any;
+        return alarm?.enabled === true && alarm?.lat && alarm?.lng;
+      });
     });
   }
 
@@ -296,5 +412,8 @@ export class UsersService {
         },
       },
     });
+
+    // The cached alarm list now holds a stale "fired" flag.
+    await this.cache.del('wake:alarms:active');
   }
 }

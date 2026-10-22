@@ -12,6 +12,7 @@ async function main() {
   const parentPass = await bcrypt.hash('Parent@123', 10);
   const transportPass = await bcrypt.hash('Transport@123', 10);
   const driverPass = await bcrypt.hash('Driver@123', 10);
+  const teacherPass = await bcrypt.hash('Teacher@123', 10);
 
   // 1. Routes and Buses
   const routesData = [
@@ -77,6 +78,22 @@ async function main() {
         seatingCapacity: r.capacity,
         speedLimit: 60,
       },
+    });
+
+    // A Bus entity per bus number, linked to the route that serves it.
+    // The route is the stable identity; the bus can be swapped out.
+    const bus = await prisma.bus.upsert({
+      where: { busNumber: r.bus },
+      update: { seatingCapacity: r.capacity },
+      create: {
+        busNumber: r.bus,
+        seatingCapacity: r.capacity,
+        status: 'active',
+      },
+    });
+    await prisma.route.update({
+      where: { routeId: r.id },
+      data: { busId: bus.id },
     });
   }
   console.log('✔ 5 Routes and Buses seeded.');
@@ -180,6 +197,30 @@ async function main() {
     });
   }
   console.log('✔ 3 Transport Incharges seeded.');
+
+  // 5b. Teachers (staff accounts that can file and track grievances)
+  const teachersData = [
+    { id: 'T001', name: 'Dr. S. K. Verma', phone: '9450011331', subject: 'Computer Science' },
+    { id: 'T002', name: 'Prof. Anita Rao', phone: '9450011332', subject: 'Electronics' },
+    { id: 'T003', name: 'Dr. Mohit Jain', phone: '9450011333', subject: 'Mechanical' },
+  ];
+
+  for (const t of teachersData) {
+    await prisma.user.upsert({
+      where: { loginId: t.id },
+      update: { password: teacherPass, role: UserRole.teacher, name: t.name, phone: t.phone, subject: t.subject },
+      create: {
+        loginId: t.id,
+        name: t.name,
+        password: teacherPass,
+        role: UserRole.teacher,
+        phone: t.phone,
+        subject: t.subject,
+        designation: 'Faculty',
+      },
+    });
+  }
+  console.log('✔ 3 Teachers seeded.');
 
   // 6. 10 Students (Passengers) and 10 Parents
   const students = [
@@ -321,6 +362,10 @@ async function main() {
   await prisma.grievanceUpvote.deleteMany({});
   await prisma.grievance.deleteMany({});
 
+  // Route id -> the bus number serving it (for the grievance snapshot).
+  const routeBusById: Record<string, string> = {};
+  for (const r of routesData) routeBusById[r.id] = r.bus;
+
   const createdGrievanceIds: string[] = [];
 
   for (let i = 0; i < complaints.length; i++) {
@@ -335,9 +380,25 @@ async function main() {
         type: c.type,
         mediaUrl: c.media,
         category: c.category,
-        status: i % 4 === 0 ? 'resolved' : 'pending',
+        busNumber: routeBusById[s.route] ?? null,
+        status:
+          i % 5 === 0
+            ? 'closed'
+            : i % 4 === 0
+              ? 'resolved'
+              : i % 4 === 1
+                ? 'reopened'
+                : 'pending',
         upvotes: Math.floor(Math.random() * 15) + 3,
         createdAt: new Date(Date.now() - (20 - i) * 3600 * 1000),
+        ...(i % 4 === 0
+          ? {
+              resolvedAt: new Date(),
+              resolvedBy: 'AD001',
+              dueAt: new Date(Date.now() + 48 * 3600 * 1000),
+            }
+          : {}),
+        ...(i % 4 === 1 ? { reopenCount: 1, priority: 10 } : {}),
       },
     });
     createdGrievanceIds.push(g.id);

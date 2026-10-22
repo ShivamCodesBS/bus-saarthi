@@ -7,6 +7,7 @@ import { useLang } from '../context/LanguageContext';
 import axios from 'axios';
 import { BACKEND_URL } from '../config';
 import '../index.css';
+import { friendlyError, reportError } from '../lib/errors';
 
 // --- Toggle Switch Component ---
 const Toggle = ({ value, onChange, color = 'var(--secondary-orange)' }) => (
@@ -144,7 +145,10 @@ const Settings = () => {
     try {
       const loginIdToUse = user?.loginId || user?.login_id || user?.id;
       await axios.put(`${BACKEND_URL}/api/users/${loginIdToUse}/password`, {
-        old_password: oldPass,
+        // The backend reads `current_password`. Sending `old_password` left
+        // it undefined, so the bcrypt comparison always failed and the
+        // password could never be changed.
+        current_password: oldPass,
         new_password: newPass,
       }, {
         headers: { Authorization: `Bearer ${user?.token}` }
@@ -153,7 +157,7 @@ const Settings = () => {
       setShowPasswordModal(false);
       setOldPass(''); setNewPass(''); setConfirmPass('');
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to change password. Check old password.');
+      toast.error(friendlyError(err, 'We could not change the password. Please check your current password.'));
     } finally {
       setPassLoading(false);
     }

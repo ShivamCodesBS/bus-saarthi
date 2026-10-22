@@ -1,4 +1,6 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+/* Geist Variable is bundled locally (no external font request, so there is
+   no FOUT and no blocked-request failure). Inter stays as the fallback for
+   the few glyphs Geist does not cover. */
 @import "@fontsource-variable/geist";
 
 @tailwind base;
@@ -19,6 +21,36 @@
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
   --card-bg: #ffffff;
   --border-color: #e0e0e0;
+
+  /* ==========================================================
+     shadcn/ui design tokens
+     ------------------------------------------------------------
+     The Tailwind theme maps `bg-card`, `text-card-foreground`,
+     `bg-primary`, `text-muted-foreground` and `border-border` to
+     these HSL triplets. They were never defined, so every Card
+     rendered with a transparent background and every muted label
+     rendered in an invisible colour.
+     ========================================================== */
+  --background: 210 40% 98%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --primary: 211 100% 35%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 210 40% 96%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 16% 47%;
+  --accent: 210 40% 96%;
+  --accent-foreground: 222 47% 11%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 214 32% 91%;
+  --input: 214 32% 91%;
+  --ring: 211 100% 35%;
+  --radius: 0.75rem;
 }
 
 body.dark-mode {
@@ -30,22 +62,39 @@ body.dark-mode {
   --card-bg: #1a1d2e;
   --border-color: #2a2d3e;
   --shadow: 0 4px 6px -1px rgba(0,0,0,0.4);
+
+  --background: 224 33% 8%;
+  --foreground: 220 20% 92%;
+  --card: 226 28% 13%;
+  --card-foreground: 220 20% 92%;
+  --popover: 226 28% 13%;
+  --popover-foreground: 220 20% 92%;
+  --primary: 211 100% 55%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 225 20% 18%;
+  --secondary-foreground: 220 20% 92%;
+  --muted: 225 20% 18%;
+  --muted-foreground: 218 11% 65%;
+  --accent: 225 20% 18%;
+  --accent-foreground: 220 20% 92%;
+  --destructive: 0 63% 45%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 225 18% 22%;
+  --input: 225 18% 22%;
+  --ring: 211 100% 55%;
   background-color: #0f1117;
   color: #e8eaf0;
 }
 
 /* ---- GLOBAL DARK MODE OVERRIDES ---- */
-/* Force all white/light backgrounds to dark */
-body.dark-mode div,
-body.dark-mode main,
-body.dark-mode section,
-body.dark-mode aside {
-  border-color: #2a2d3e;
-}
+/* NOTE: borders are deliberately NOT overridden here. A blanket
+   `body.dark-mode div { border-color: ... }` outranks every Tailwind
+   `border-*` utility, which flattened all border colour coding in dark
+   mode. Individual components set their own borders instead. */
 
 body.dark-mode .glass {
-  background: rgba(26, 29, 46, 0.97) !important;
-  border-color: #2a2d3e !important;
+  background: var(--card-bg) !important;
+  border-color: var(--border-color) !important;
 }
 
 /* Cards with hardcoded white */
@@ -155,7 +204,10 @@ body.dark-mode ::-webkit-scrollbar-thumb {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
-  font-family: 'Inter', sans-serif;
+  font-family: 'Geist Variable', 'Geist', system-ui, -apple-system,
+    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-feature-settings: 'cv11', 'ss01';
+  font-variant-numeric: tabular-nums;
 }
 
 body {
@@ -308,10 +360,12 @@ html, body, #root {
 
 /* Glassmorphism */
 .glass {
-  background: var(--glass-bg);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow: var(--shadow-lg);
+  background: var(--card-bg);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-color);
+  box-shadow:
+    0 1px 2px rgba(16, 24, 40, 0.04),
+    0 4px 16px rgba(16, 24, 40, 0.06);
 }
 
 /* Animations */
@@ -460,6 +514,123 @@ html, body, #root {
   }
 }
 
+/* ============================================================
+   MOBILE OPTIMISATION
+   ------------------------------------------------------------
+   A single set of rules that makes every page usable on a phone.
+   The dashboards are built with inline styles, so the fixes that
+   apply across all of them live here rather than in each file.
+   ============================================================ */
+
+/* Nothing should ever cause a sideways scroll on a phone. */
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+/* Tap targets: anything clickable should be at least 40px tall. */
+@media (max-width: 768px) {
+  button,
+  a,
+  input,
+  select,
+  textarea {
+    /* Keep the inherited font size — iOS otherwise zooms the page on focus. */
+    font-size: max(16px, 1em);
+  }
+
+  button {
+    min-height: 40px;
+  }
+
+  /* Tables scroll inside their own container instead of blowing out the
+     page width. Any table inside a scrolling wrapper is handled below. */
+  table {
+    min-width: 100%;
+  }
+
+  /* Long route names, bus numbers and complaint text must wrap rather than
+     push the layout sideways. */
+  .glass p,
+  .glass h3,
+  .glass h4 {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+}
+
+/* Inline-styled tables (the Admin / TI user lists) need a scroll container.
+   The wrappers are added in the components, but this makes any table that
+   is not wrapped still behave. */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 12px;
+}
+
+.table-scroll table {
+  min-width: 640px;
+}
+
+/* Modals: every overlay in the app is `position: fixed` with inset 0 and
+   flex-centred. On a phone they need a gutter and to scroll rather than
+   being flush against the edges. */
+@media (max-width: 768px) {
+  .modal-overlay {
+    padding: 1rem !important;
+    align-items: flex-start !important;
+    overflow-y: auto !important;
+  }
+
+  .modal-sheet {
+    margin: auto 0 !important;
+    max-height: none !important;
+    border-radius: 20px 20px 0 0 !important;
+    width: 100% !important;
+  }
+}
+
+/* The mobile drawer menu must sit above the sticky page header, otherwise
+   the header stays lit and clickable above the open menu. */
+@media (max-width: 768px) {
+  .mobile-menu-overlay {
+    z-index: 60 !important;
+  }
+
+  .mobile-menu-panel {
+    z-index: 61 !important;
+  }
+}
+
+/* Respect users who ask for less motion. The floating icons, the
+   smooth-scroll library and the pulsing badges are all decorative. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Sticky headers must not eat the whole screen on a short phone. */
+@media (max-width: 480px) {
+  .p-header {
+    padding: 0.75rem 0.85rem;
+  }
+
+  .p-main {
+    padding: 0.85rem;
+  }
+
+  .p-glass {
+    padding: 1rem;
+  }
+}
+
 @keyframes bell-ring {
   0% { transform: rotate(0); }
   5% { transform: rotate(25deg) scale(1.1); }
@@ -478,11 +649,23 @@ html, body, #root {
   display: inline-block;
 }
 
-/* Fix autofill background in dark mode */
+/* Autofill
+   The old rule forced `-webkit-text-fill-color: white` unconditionally, so
+   in LIGHT mode the browser's pale autofill background swallowed the text
+   entirely. The fill colour now follows the theme. */
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,
 input:-webkit-autofill:active {
-    transition: background-color 5000s ease-in-out 0s !important;
-    -webkit-text-fill-color: white !important;
+  transition: background-color 5000s ease-in-out 0s !important;
+  -webkit-text-fill-color: var(--text-dark) !important;
+  caret-color: var(--text-dark);
+}
+
+body.dark-mode input:-webkit-autofill,
+body.dark-mode input:-webkit-autofill:hover,
+body.dark-mode input:-webkit-autofill:focus,
+body.dark-mode input:-webkit-autofill:active {
+  -webkit-text-fill-color: var(--text-dark) !important;
+  caret-color: var(--text-dark);
 }

@@ -3,12 +3,14 @@ import { PassportStrategy } from '@nestjs/passport';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { CacheService } from '../cache/cache.service';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
-    private configService: ConfigService,
+    configService: ConfigService,
     private prisma: PrismaService,
+    private cache: CacheService,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -17,16 +19,62 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
+  /**
+   * The token is signed with the account's role, so the role does not need to
+   * be re-read on every request. We only need to know the account still
+   * exists and has not been deleted or had its role changed.
+   *
+   * The previous implementation ran a `SELECT * FROM users` on EVERY
+   * authenticated request. That is the single biggest source of latency in
+   * the app: every page load, every polling tick and every socket handshake
+   * paid for a full user row read (including the bcrypt hash).
+   */
   async validate(payload: any) {
+    const loginId = payload.login_id;
+    if (!loginId) {
+      throw new UnauthorizedException();
+    }
+
+    const cached = await this.cache.get<{
+      role: string;
+      routeId: string | null;
+      name: string;
+    }>(`auth:user:${loginId}`);
+
+    if (cached) {
+      return {
+        id: payload.id,
+        loginId,
+        login_id: loginId,
+        name: cached.name,
+        role: cached.role,
+        routeId: cached.routeId,
+        route_id: cached.routeId,
+      };
+    }
+
     const user = await this.prisma.user.findUnique({
-      where: { loginId: payload.login_id },
+      where: { loginId },
+      select: { id: true, loginId: true, name: true, role: true, routeId: true },
     });
     if (!user) {
       throw new UnauthorizedException();
     }
+
+    await this.cache.set(
+      `auth:user:${loginId}`,
+      { role: user.role, routeId: user.routeId, name: user.name },
+      300,
+    );
+
     return {
-      ...user,
+      id: user.id,
+      loginId: user.loginId,
       login_id: user.loginId,
+      name: user.name,
+      role: user.role,
+      routeId: user.routeId,
+      route_id: user.routeId,
     };
   }
 }

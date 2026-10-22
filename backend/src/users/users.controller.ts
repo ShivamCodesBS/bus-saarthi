@@ -8,6 +8,7 @@ import {
   Body,
   Request,
   UseGuards,
+  ForbiddenException,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { UserRole } from '@prisma/client';
@@ -22,6 +23,16 @@ import { UpdateUserDto } from './dto/update-user.dto';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
+  /**
+   * The signed-in user's own record. This MUST be declared before
+   * `:loginId`, otherwise Nest matches "me" as a login id.
+   */
+  @Get('me')
+  findMe(@Request() req: any) {
+    const loginId = req.user?.loginId || req.user?.login_id;
+    return this.usersService.findByLoginId(loginId);
+  }
+
   @Get()
   @UseGuards(RolesGuard)
   @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
@@ -30,6 +41,8 @@ export class UsersController {
   }
 
   @Get(':loginId')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
   findOne(@Param('loginId') loginId: string) {
     return this.usersService.findByLoginId(loginId);
   }
@@ -37,53 +50,74 @@ export class UsersController {
   @Post()
   @UseGuards(RolesGuard)
   @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
-  create(@Body() body: CreateUserDto) {
-    return this.usersService.create(body);
+  create(@Body() body: CreateUserDto, @Request() req: any) {
+    return this.usersService.create(body, req.user.role);
   }
 
   @Post('bulk')
   @UseGuards(RolesGuard)
   @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
-  bulkCreate(@Body() body: { users: any[] }) {
+  bulkCreate(@Body() body: { users: any[] }, @Request() req: any) {
     if (!body.users || !Array.isArray(body.users)) {
-      throw new Error('Invalid payload: expected an array of users');
+      throw new ForbiddenException('Invalid payload: expected an array of users');
     }
-    return this.usersService.bulkCreate(body.users);
+    return this.usersService.bulkCreate(body.users, req.user.role);
   }
 
   @Put(':loginId')
   @UseGuards(RolesGuard)
   @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
-  update(@Param('loginId') loginId: string, @Body() body: UpdateUserDto) {
-    return this.usersService.update(loginId, body);
+  update(
+    @Param('loginId') loginId: string,
+    @Body() body: UpdateUserDto,
+    @Request() req: any,
+  ) {
+    return this.usersService.update(loginId, body, req.user.role);
   }
 
   @Delete(':loginId')
   @UseGuards(RolesGuard)
   @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
-  remove(@Param('loginId') loginId: string) {
-    return this.usersService.remove(loginId);
+  remove(@Param('loginId') loginId: string, @Request() req: any) {
+    return this.usersService.remove(loginId, req.user.role);
   }
 
-  // Password change — any authenticated user can change their own password
+  /**
+   * Password change. A user may change their own password; a full admin may
+   * reset someone else's.
+   */
   @Put(':loginId/password')
   changePassword(
     @Param('loginId') loginId: string,
     @Body() body: { current_password: string; new_password: string },
     @Request() req: any,
   ) {
+    const requester = req.user?.loginId || req.user?.login_id;
     return this.usersService.changePassword(
       loginId,
       body.current_password,
       body.new_password,
+      requester,
+      req.user?.role,
     );
   }
 
-  // Wake Alarm — passenger sets their alarm location & threshold
+  /**
+   * Wake Alarm — passenger sets their alarm location & threshold.
+   *
+   * Declared before `:loginId` routes so "me" is not parsed as a login id.
+   */
   @Put('me/wake-alarm')
   setWakeAlarm(
     @Request() req: any,
-    @Body() body: { lat: number; lng: number; thresholdKm: number; subscription?: any },
+    @Body()
+    body: {
+      lat: number;
+      lng: number;
+      thresholdKm: number;
+      subscription?: any;
+      firedAt?: string | null;
+    },
   ) {
     const loginId = req.user?.loginId || req.user?.login_id;
     return this.usersService.setWakeAlarm(loginId, {
@@ -91,6 +125,7 @@ export class UsersController {
       lng: body.lng,
       thresholdKm: body.thresholdKm,
       subscription: body.subscription ?? null,
+      firedAt: body.firedAt,
     });
   }
 

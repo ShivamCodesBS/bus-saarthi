@@ -38,14 +38,40 @@ model User {
   createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
   wakeAlarm         Json?              @map("wake_alarm") @db.Json
+  /// Subject taught — only meaningful for the `teacher` role.
+  subject           String?            @db.VarChar(100)
   attendanceRecords Attendance[]
   grievanceUpvotes  GrievanceUpvote[]
   grievances        Grievance[]
   leaves            Leave[]
   pushSubscriptions PushSubscription[]
+  notifications     Notification[]
   route             Route?             @relation(fields: [routeId], references: [routeId])
+  childLinks        ParentChildLink[]  @relation("ChildLinks")
+  parentLinks       ParentChildLink[]  @relation("ParentLinks")
 
+  @@index([role])
+  @@index([routeId])
+  @@index([phone])
   @@map("users")
+}
+
+/// A physical bus. A Route points at the Bus currently serving it, so a bus can
+/// be swapped onto a different route (or a route can be merged into another
+/// route's bus) without the route identity ever changing.
+model Bus {
+  id                 String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  busNumber          String     @unique @map("bus_number") @db.VarChar(30)
+  registrationNumber String?    @map("registration_number") @db.VarChar(50)
+  vehicleModel       String?    @map("vehicle_model") @db.VarChar(100)
+  seatingCapacity    Int?       @map("seating_capacity")
+  status             BusStatus  @default(active)
+  notes              String?
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  routes             Route[]
+
+  @@map("buses")
 }
 
 model Route {
@@ -53,6 +79,7 @@ model Route {
   routeId            String    @unique @map("route_id") @db.VarChar(50)
   routeName          String    @map("route_name") @db.VarChar(100)
   busNumber          String    @map("bus_number") @db.VarChar(30)
+  busId              String?   @map("bus_id") @db.Uuid
   driverId           String?   @map("driver_id") @db.VarChar(50)
   stops              String
   city               String    @default("Bareilly") @db.VarChar(50)
@@ -62,8 +89,11 @@ model Route {
   insuranceExpiry    DateTime? @map("insurance_expiry") @db.Timestamptz(6)
   speedLimit         Int       @default(60) @map("speed_limit")
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   users              User[]
+  bus                Bus?      @relation(fields: [busId], references: [id], onDelete: SetNull)
 
+  @@index([busId])
   @@map("routes")
 }
 
@@ -79,13 +109,23 @@ model Attendance {
   mergeEventId    String?    @map("merge_event_id") @db.Uuid
   passenger       User       @relation(fields: [passengerId], references: [loginId], onDelete: Cascade)
 
+  @@index([timestamp])
+  @@index([passengerId, timestamp])
+  @@index([routeId, timestamp])
   @@map("attendance")
 }
 
+/// A bus-service grievance. It is anchored to a *route* (stable identity) and
+/// not to a bus number, because the bus serving a route can change (merges,
+/// fleet swaps) while the route itself stays the same.
 model Grievance {
   id            String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   loginId       String            @map("login_id") @db.VarChar(50)
+  /// Route id the grievance was raised against — stable across bus changes.
   route         String            @db.VarChar(20)
+  /// Bus number serving the route at the moment the grievance was raised.
+  /// Kept only as a historical snapshot; the live bus is resolved dynamically.
+  busNumber     String?           @map("bus_number") @db.VarChar(30)
   text          String
   realName      String?           @map("real_name") @db.VarChar(100)
   type          String?           @db.VarChar(50)
@@ -94,9 +134,29 @@ model Grievance {
   upvotes       Int               @default(0)
   createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   category      String?           @db.VarChar(100)
+  /// Admin's reply to the complainant.
+  adminResponse String?           @map("admin_response")
+  /// Internal note attached while resolving.
+  resolutionNote String?          @map("resolution_note")
+  resolvedAt    DateTime?         @map("resolved_at") @db.Timestamptz(6)
+  resolvedBy    String?           @map("resolved_by") @db.VarChar(50)
+  /// When the complainant confirmed the fix (the only way a grievance closes).
+  confirmedAt   DateTime?         @map("confirmed_at") @db.Timestamptz(6)
+  /// How many times the complainant rejected the resolution and reopened it.
+  reopenCount   Int               @default(0) @map("reopen_count")
+  /// Deadline by which the complainant must confirm the resolution.
+  dueAt         DateTime?         @map("due_at") @db.Timestamptz(6)
+  /// Bumped every time the grievance is reopened, so unsatisfied complaints
+  /// sort to the top of the admin triage queue.
+  priority      Int               @default(0)
   upvoteRecords GrievanceUpvote[]
   user          User              @relation(fields: [loginId], references: [loginId], onDelete: Cascade)
+  notifications Notification[]
 
+  @@index([status])
+  @@index([route])
+  @@index([loginId])
+  @@index([createdAt])
   @@map("grievances")
 }
 
@@ -128,6 +188,7 @@ model SystemLog {
   meta      Json?
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
+  @@index([createdAt])
   @@map("system_logs")
 }
 
@@ -135,7 +196,7 @@ model Broadcast {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   message   String
   title     String?  @db.VarChar(200)
-  timestamp DateTime @default(now()) @db.Timestamptz(6)
+  timestamp DateTime @default(now()) @map("timestamp") @db.Timestamptz(6)
 
   @@map("broadcasts")
 }
@@ -145,9 +206,30 @@ model PushSubscription {
   loginId      String @map("login_id") @db.VarChar(50)
   subscription Json
   deviceType   String @default("web") @map("device_type") @db.VarChar(20)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   user         User   @relation(fields: [loginId], references: [loginId], onDelete: Cascade)
 
+  @@index([loginId])
   @@map("push_subscriptions")
+}
+
+/// In-app notification. Persisted so a user sees the grievance state change
+/// even if the browser was closed when the push arrived.
+model Notification {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  loginId     String   @map("login_id") @db.VarChar(50)
+  title       String   @db.VarChar(200)
+  body        String
+  type        String   @default("info") @db.VarChar(50)
+  grievanceId String?  @map("grievance_id") @db.Uuid
+  read        Boolean  @default(false)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user        User     @relation(fields: [loginId], references: [loginId], onDelete: Cascade)
+  grievance   Grievance? @relation(fields: [grievanceId], references: [id], onDelete: Cascade)
+
+  @@index([loginId, read])
+  @@index([createdAt])
+  @@map("notifications")
 }
 
 model SosAlert {
@@ -155,8 +237,9 @@ model SosAlert {
   loginId   String   @map("login_id") @db.VarChar(50)
   passenger String?  @db.VarChar(100)
   route     String   @db.VarChar(20)
-  time      DateTime @default(now()) @db.Timestamptz(6)
+  time      DateTime @default(now()) @map("time") @db.Timestamptz(6)
 
+  @@index([time])
   @@map("sos_alerts")
 }
 
@@ -168,8 +251,9 @@ model Telemetry {
   gpsSpeedKnots Float?   @map("gps_speed_knots") @db.Real
   mpuSpeedKmh   Float?   @map("mpu_speed_kmh") @db.Real
   headingDeg    Float?   @map("heading_deg") @db.Real
-  timestamp     DateTime @default(now()) @db.Timestamptz(6)
+  timestamp     DateTime @default(now()) @map("timestamp") @db.Timestamptz(6)
 
+  @@index([routeId, timestamp])
   @@map("telemetry")
 }
 
@@ -179,8 +263,11 @@ model ParentChildLink {
   childLoginId  String   @map("child_login_id") @db.VarChar(50)
   nickname      String?  @db.VarChar(100)
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  parent        User     @relation("ParentLinks", fields: [parentLoginId], references: [loginId], onDelete: Cascade)
+  child         User     @relation("ChildLinks", fields: [childLoginId], references: [loginId], onDelete: Cascade)
 
   @@unique([parentLoginId, childLoginId])
+  @@index([childLoginId])
   @@map("parent_child_links")
 }
 
@@ -202,11 +289,14 @@ model MergeEvent {
   expiresAt          DateTime    @map("expires_at") @db.Timestamptz(6)
   createdAt          DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
 
+  @@index([cancelledRouteId, status])
+  @@index([targetRouteId, status])
   @@map("merge_events")
 }
 
 enum UserRole {
   passenger
+  teacher
   admin
   driver
   transport_incharge
@@ -220,9 +310,24 @@ enum FeeStatus {
   partial
 }
 
+/// Lifecycle of a grievance:
+///  pending      -> freshly raised, waiting for triage
+///  in_progress  -> an admin has acknowledged and is working on it
+///  resolved     -> admin marked it fixed, waiting for the complainant to confirm
+///  reopened     -> complainant rejected the fix, back in the queue with a higher priority
+///  closed       -> complainant confirmed the fix; terminal state
 enum GrievanceStatus {
   pending
+  in_progress
   resolved
+  reopened
+  closed
+}
+
+enum BusStatus {
+  active
+  maintenance
+  retired
 }
 
 enum LogLevel {

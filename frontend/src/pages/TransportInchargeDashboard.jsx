@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Users, MapPin, Shield, LogOut, Settings, Bell, AlertOctagon, CheckCircle2, MessageSquare, Trash2, UserPlus, Navigation, Plus, Car, X, User, Menu, Eye, Download, Upload, GitMerge, Undo2, Sparkles, AlertTriangle, ArrowRight, History, Layers } from 'lucide-react';
+import { Users, MapPin, Shield, LogOut, Settings, Bell, AlertOctagon, CheckCircle2, MessageSquare, Trash2, UserPlus, Navigation, Plus, Car, X, User, Menu, Eye, Download, Upload, GitMerge, Undo2, Sparkles, AlertTriangle, ArrowRight, History, Layers, Wrench, Timer, RotateCcw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
@@ -13,7 +13,8 @@ import { BACKEND_URL } from '../config';
 import '../index.css';
 import HamburgerMenu from '../components/HamburgerMenu';
 import Papa from 'papaparse';
-import { parseApiError } from '../lib/utils';
+import { sanitizePayload, normalizeFeeStatus, USER_PAYLOAD_KEYS } from '../lib/utils';
+import { friendlyError } from '../lib/errors';
 
 
 // Fix for default marker icon in react-leaflet
@@ -29,6 +30,15 @@ const busIcon = new L.Icon({
   iconSize: [35, 35],
   iconAnchor: [17, 17],
 });
+
+// Grievance lifecycle states, mirroring the backend enum.
+const GRIEVANCE_STATUS = {
+  pending:      { label: 'Pending',                   bg: '#fff1f0', color: '#cf1322', Icon: AlertTriangle },
+  in_progress:  { label: 'In Progress',               bg: '#fff7e6', color: '#d46b08', Icon: Wrench },
+  resolved:     { label: 'Awaiting Confirmation',     bg: '#e6f4ff', color: '#0958d9', Icon: Timer },
+  reopened:     { label: 'Not Resolved (Reopened)',   bg: '#fff1f0', color: '#cf1322', Icon: RotateCcw },
+  closed:       { label: 'Closed - Confirmed',        bg: '#e6fae6', color: '#28a745', Icon: CheckCircle2 },
+};
 
 // Component to handle map container resizing
 const MapResizer = () => {
@@ -76,6 +86,9 @@ const TransportInchargeDashboard = () => {
   const [liveAttendance, setLiveAttendance] = useState([]);
   const [usersList, setUsersList] = useState([]);
   const [grievances, setGrievances] = useState([]);
+  // Grievance triage state
+  const [grievanceFilter, setGrievanceFilter] = useState('all');
+  const [grievanceBusy, setGrievanceBusy] = useState(new Set());
   const [attendanceLogs, setAttendanceLogs] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -83,7 +96,7 @@ const TransportInchargeDashboard = () => {
   const [userFilter, setUserFilter] = useState('driver'); // 'driver' or 'passenger'
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
-  const [userFormData, setUserFormData] = useState({ name: '', login_id: '', password: '', role: 'driver', phone: '', route_id: '', fee_status: 'paid', licenseNumber: '', licenseExpiry: '', experienceYears: '', bloodGroup: '', parentName: '', parentPhone: '', dob: '', address: '', gradeClass: '' });
+  const [userFormData, setUserFormData] = useState({ name: '', login_id: '', password: '', role: 'driver', subject: '', phone: '', route_id: '', fee_status: 'paid', licenseNumber: '', licenseExpiry: '', experienceYears: '', bloodGroup: '', parentName: '', parentPhone: '', dob: '', address: '', gradeClass: '' });
   const [viewingUser, setViewingUser] = useState(null);
 
   // Route Management
@@ -100,6 +113,10 @@ const TransportInchargeDashboard = () => {
   const [isBusActive, setIsBusActive] = useState(false);
   const telemetryTimeoutRef = useRef(null);
   const selectedRouteRef = useRef(selectedRoute);
+  // The socket effect closes over the token; a ref keeps it in sync without
+  // tearing down and re-creating the socket on every token change.
+  const tokenRef = useRef(user?.token);
+  useEffect(() => { tokenRef.current = user?.token; }, [user?.token]);
   const [socketInstance, setSocketInstance] = useState(null);
 
   useEffect(() => {
@@ -142,7 +159,7 @@ const TransportInchargeDashboard = () => {
     const socket = io(BACKEND_URL, { transports: ['websocket', 'polling'] });
     socket.on('connect', () => {
       console.log('Transport Incharge connected to socket server');
-      socket.emit('join_admin', { token: user?.token });
+      socket.emit('join_admin', { token: tokenRef.current });
     });
 
     socket.on('connect_error', (err) => {
@@ -201,6 +218,8 @@ const TransportInchargeDashboard = () => {
   }, [selectedRoute, socketInstance]);
 
   useEffect(() => {
+    let cancelled = false;
+
     const fetchData = async () => {
       setIsLoading(true);
       const authHeaders = { headers: { Authorization: `Bearer ${user?.token}` } };
@@ -216,6 +235,8 @@ const TransportInchargeDashboard = () => {
           axios.get(`${BACKEND_URL}/api/sos/active`, authHeaders).catch(e => ({ data: { data: [] } })),
         ]);
 
+        if (cancelled) return;
+
         const routes = Array.isArray(rRes.data) ? rRes.data : (rRes.data?.data || []);
         const grievancesData = Array.isArray(gRes.data) ? gRes.data : (gRes.data?.data || []);
         const usersData = Array.isArray(usersRes.data) ? usersRes.data : (usersRes.data?.data || []);
@@ -223,29 +244,36 @@ const TransportInchargeDashboard = () => {
         const sosData = Array.isArray(sosRes.data) ? sosRes.data : (sosRes.data?.data || []);
 
         setRoutesList(routes);
-        if (routes.length > 0 && selectedRoute === '1') setSelectedRoute(routes[0].routeId || routes[0].route_id);
+        setSelectedRoute((prev) => {
+          if (prev === '1' && routes.length > 0) {
+            return String(routes[0].routeId || routes[0].route_id);
+          }
+          return prev;
+        });
 
         setGrievances(grievancesData);
-        setUsersList(usersData.filter(u => ['driver', 'passenger'].includes(u.role)));
+        // Keep every role — the Users tab filters by role itself.
+        setUsersList(usersData);
         setAttendanceLogs(attendanceData);
         setActiveMerges(mRes.data?.data || []);
         setMergeSuggestions(sRes.data?.data || []);
         setMergeHistory(hRes.data?.data || []);
         if (sosData.length > 0) setSosAlerts(sosData);
 
-        if (routes.length === 0 || usersData.length === 0) {
-          console.warn("Some data lists are empty. This might be normal or a fetch issue.");
-        }
-
       } catch (err) {
+        if (cancelled) return;
         console.error("Error fetching data", err);
         toast.error("Network error: Unable to reach the server.", { id: 'ti_network_err' });
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
     fetchData();
-  }, [activeTab]);
+    return () => { cancelled = true; };
+    // `activeTab` is deliberately NOT a dependency: switching tabs re-ran all
+    // eight requests for no reason. `user?.token` is included so a new token
+    // triggers a reload.
+  }, [user?.token]);
 
   const handleLogout = () => {
     logout();
@@ -287,7 +315,7 @@ const TransportInchargeDashboard = () => {
         setMergeHistory(hRes.data?.data || []);
       }
     } catch (err) {
-      toast.error(parseApiError(err, 'Failed to merge buses'));
+      toast.error(friendlyError(err, 'Failed to merge buses'));
     } finally {
       setIsMerging(false);
     }
@@ -310,7 +338,7 @@ const TransportInchargeDashboard = () => {
         setMergeHistory(hRes.data?.data || []);
       }
     } catch (err) {
-      toast.error(parseApiError(err, 'Failed to undo merge'));
+      toast.error(friendlyError(err, 'Failed to undo merge'));
     }
   };
 
@@ -326,12 +354,76 @@ const TransportInchargeDashboard = () => {
   };
 
   const handleResolveGrievance = async (id) => {
+    setGrievanceBusy((prev) => new Set([...prev, id]));
     try {
-      await axios.put(`${BACKEND_URL}/api/grievance/${id}/resolve`, {}, { headers: { Authorization: `Bearer ${user?.token}` } });
-      setGrievances(grievances.map(g => g._id === id ? { ...g, status: 'resolved' } : g));
-      toast.success("Complaint marked as resolved!");
+      const res = await axios.patch(
+        `${BACKEND_URL}/api/grievance/${id}/resolve`,
+        { note: 'Marked as fixed by the transport team.' },
+        { headers: { Authorization: `Bearer ${user?.token}` } },
+      );
+      setGrievances((prev) =>
+        prev.map((g) =>
+          g.id === id
+            ? { ...g, status: 'resolved', dueAt: res.data?.data?.dueAt }
+            : g,
+        ),
+      );
+      toast.success(
+        'Marked as fixed. The complaint stays open until the complainant confirms it.',
+      );
     } catch (err) {
-      toast.error(parseApiError(err, "Failed to resolve complaint"));
+      toast.error(friendlyError(err, 'Failed to resolve complaint'));
+    } finally {
+      setGrievanceBusy((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
+  /** Acknowledge the complaint and start work on it. */
+  const handleStartGrievance = async (id) => {
+    setGrievanceBusy((prev) => new Set([...prev, id]));
+    try {
+      await axios.patch(
+        `${BACKEND_URL}/api/grievance/${id}/start`,
+        {},
+        { headers: { Authorization: `Bearer ${user?.token}` } },
+      );
+      setGrievances((prev) =>
+        prev.map((g) => (g.id === id ? { ...g, status: 'in_progress' } : g)),
+      );
+      toast.success('Marked as in progress. The complainant has been notified.');
+    } catch (err) {
+      toast.error(friendlyError(err, 'Failed to update complaint'));
+    } finally {
+      setGrievanceBusy((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
+  /** Give the complainant 24 more hours to confirm the fix. */
+  const handleExtendGrievance = async (id) => {
+    setGrievanceBusy((prev) => new Set([...prev, id]));
+    try {
+      await axios.patch(
+        `${BACKEND_URL}/api/grievance/${id}/extend`,
+        { hours: 24 },
+        { headers: { Authorization: `Bearer ${user?.token}` } },
+      );
+      toast.success('Confirmation window extended by 24 hours.');
+    } catch (err) {
+      toast.error(friendlyError(err, 'Failed to extend deadline'));
+    } finally {
+      setGrievanceBusy((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
   };
 
@@ -339,10 +431,10 @@ const TransportInchargeDashboard = () => {
     if (!window.confirm("Are you sure you want to delete this user?")) return;
     try {
       await axios.delete(`${BACKEND_URL}/api/users/${login_id}`, { headers: { Authorization: `Bearer ${user?.token}` } });
-      setUsersList(usersList.filter(u => u.loginId !== login_id && u.login_id !== login_id));
+      setUsersList((prev) => prev.filter((u) => u.loginId !== login_id));
       toast.success("User deleted successfully!");
     } catch (err) {
-      toast.error(parseApiError(err, "Failed to delete user"));
+      toast.error(friendlyError(err, "Failed to delete user"));
     }
   };
 
@@ -363,20 +455,28 @@ const TransportInchargeDashboard = () => {
 
     try {
       const authHeaders = { headers: { Authorization: `Bearer ${user?.token}` } };
+      // The API rejects unknown properties and empty date/number fields, so
+      // only send the keys the endpoint accepts.
+      const payload = sanitizePayload(
+        { ...userFormData, fee_status: normalizeFeeStatus(userFormData.fee_status) },
+        USER_PAYLOAD_KEYS,
+      );
       if (editingUser) {
-        const payload = { ...userFormData };
         if (!payload.password) delete payload.password;
         await axios.put(`${BACKEND_URL}/api/users/${editingUser.loginId || editingUser.login_id}`, payload, authHeaders);
         toast.success("User updated successfully!");
       } else {
-        await axios.post(`${BACKEND_URL}/api/users`, userFormData, authHeaders);
+        await axios.post(`${BACKEND_URL}/api/users`, payload, authHeaders);
         toast.success("User created successfully!");
       }
       setShowUserModal(false);
       const res = await axios.get(`${BACKEND_URL}/api/users`, authHeaders);
-      if (res.data.status === 'success') setUsersList(res.data.data.filter(u => ['driver', 'passenger'].includes(u.role)));
+      // GET /api/users returns a bare array — the old `res.data.status ===
+      // 'success'` check was never true, so the list never refreshed.
+      const users = Array.isArray(res.data) ? res.data : (res.data?.data || []);
+      setUsersList(users);
     } catch (err) {
-      toast.error(parseApiError(err, "Failed to save user"));
+      toast.error(friendlyError(err, "Failed to save user"));
     }
   };
 
@@ -409,7 +509,7 @@ const TransportInchargeDashboard = () => {
               password: row.password?.trim() || 'Invertis@123',
               role: row.role?.trim() || 'passenger',
               route_id: row.route_id.trim(),
-              fee_status: row.fee_status?.trim() || 'paid',
+              fee_status: normalizeFeeStatus(row.fee_status),
               phone: row.phone?.trim() || '',
               parentName: row.parentName?.trim() || '',
               parentPhone: row.parentPhone?.trim() || '',
@@ -453,19 +553,19 @@ const TransportInchargeDashboard = () => {
       const fetchRes = await axios.get(`${BACKEND_URL}/api/users`, authHeaders);
       if (fetchRes.data.status === 'success') setUsersList(fetchRes.data.data.filter(u => ['driver', 'passenger'].includes(u.role)));
     } catch (err) {
-      toast.error(parseApiError(err, "Failed to process bulk upload"));
+      toast.error(friendlyError(err, "Failed to process bulk upload"));
     }
   };
 
   const openAddUser = () => {
     setEditingUser(null);
-    setUserFormData({ name: '', login_id: '', password: '', role: userFilter, phone: '', route_id: '', fee_status: 'paid', licenseNumber: '', licenseExpiry: '', experienceYears: '', bloodGroup: '', parentName: '', parentPhone: '', dob: '', address: '', gradeClass: '' });
+    setUserFormData({ name: '', login_id: '', password: '', role: userFilter, subject: '', phone: '', route_id: '', fee_status: 'paid', licenseNumber: '', licenseExpiry: '', experienceYears: '', bloodGroup: '', parentName: '', parentPhone: '', dob: '', address: '', gradeClass: '' });
     setShowUserModal(true);
   };
 
   const openEditUser = (u) => {
     setEditingUser(u);
-    setUserFormData({ name: u.name, login_id: u.loginId || u.login_id, password: '', role: u.role, phone: u.phone || '', route_id: u.routeId || u.route_id || '', fee_status: u.feeStatus || u.fee_status || 'paid', licenseNumber: u.licenseNumber || '', licenseExpiry: u.licenseExpiry ? new Date(u.licenseExpiry).toISOString().split('T')[0] : '', experienceYears: u.experienceYears || '', bloodGroup: u.bloodGroup || '', parentName: u.parentName || '', parentPhone: u.parentPhone || '', dob: u.dob ? new Date(u.dob).toISOString().split('T')[0] : '', address: u.address || '', gradeClass: u.gradeClass || '' });
+    setUserFormData({ name: u.name, login_id: u.loginId || u.login_id, password: '', role: u.role, subject: u.subject || '', phone: u.phone || '', route_id: u.routeId || u.route_id || '', fee_status: u.feeStatus || u.fee_status || 'paid', licenseNumber: u.licenseNumber || '', licenseExpiry: u.licenseExpiry ? new Date(u.licenseExpiry).toISOString().split('T')[0] : '', experienceYears: u.experienceYears || '', bloodGroup: u.bloodGroup || '', parentName: u.parentName || '', parentPhone: u.parentPhone || '', dob: u.dob ? new Date(u.dob).toISOString().split('T')[0] : '', address: u.address || '', gradeClass: u.gradeClass || '' });
     setShowUserModal(true);
   };
 
@@ -488,7 +588,7 @@ const TransportInchargeDashboard = () => {
       const res = await axios.get(`${BACKEND_URL}/api/routes`, authHeaders);
       if (res.data.status === 'success') setRoutesList(res.data.data);
     } catch (err) {
-      toast.error(parseApiError(err, "Failed to save route"));
+      toast.error(friendlyError(err, "Failed to save route"));
     }
   };
 
@@ -519,9 +619,9 @@ const TransportInchargeDashboard = () => {
     if (!window.confirm("Delete this route?")) return;
     try {
       await axios.delete(`${BACKEND_URL}/api/routes/${route_id}`, { headers: { Authorization: `Bearer ${user?.token}` } });
-      setRoutesList(routesList.filter(r => r.routeId !== route_id && r.route_id !== route_id));
+      setRoutesList((prev) => prev.filter((r) => String(r.routeId || r.route_id) !== String(route_id)));
     } catch (err) {
-      toast.error(parseApiError(err, "Failed to delete route"));
+      toast.error(friendlyError(err, "Failed to delete route"));
     }
   };
 
@@ -538,7 +638,7 @@ const TransportInchargeDashboard = () => {
       toast.success('Broadcast sent!');
       setBroadcastMessage('');
     } catch (err) {
-      toast.error(parseApiError(err, "Failed to send broadcast"));
+      toast.error(friendlyError(err, "Failed to send broadcast"));
     } finally {
       setIsBroadcasting(false);
     }
@@ -571,11 +671,11 @@ const TransportInchargeDashboard = () => {
                   bg: '#fff1f0', borderColor: '#cf1322', textTitle: '#cf1322', textDesc: '#a8071a'
                 })),
                 ...grievances.filter(g => g.status === 'pending').map(g => ({
-                  id: `grievance-${g._id}`,
+                  id: `grievance-${g.id}`,
                   type: 'grievance',
                   title: `New Complaint (Route ${g.route} - Bus ${routesList.find(r => String(r.routeId || r.route_id) === String(g.route))?.busNumber || routesList.find(r => String(r.routeId || r.route_id) === String(g.route))?.bus_number || 'Unknown'})`,
                   message: g.text.substring(0, 60) + (g.text.length > 60 ? '...' : ''),
-                  time: formatTime(g.created_at || g.time),
+                  time: formatTime(g.createdAt),
                   icon: <MessageSquare size={20} color="#d97706" className="shrink-0 mt-0.5" />,
                   bg: '#fffbeb', borderColor: '#f59e0b', textTitle: '#d97706', textDesc: '#b45309'
                 }))
@@ -718,7 +818,7 @@ const TransportInchargeDashboard = () => {
             { id: 'overview', icon: <MapPin size={16} />, label: 'Fleet & Tracking', color: '#0066cc', bg: '#e6f0fa' },
             { id: 'merge', icon: <GitMerge size={16} />, label: 'Merge & Cancel', color: '#e67e22', bg: '#fef3e2' },
             { id: 'routes', icon: <Navigation size={16} />, label: 'Manage Routes', color: '#28a745', bg: '#e6fae6' },
-            { id: 'users', icon: <Users size={16} />, label: 'Directory', color: '#7c3aed', bg: '#f3e8ff' },
+            { id: 'users', icon: <Users size={16} />, label: 'Users', color: '#7c3aed', bg: '#f3e8ff' },
             { id: 'grievances', icon: <MessageSquare size={16} />, label: 'Complaints', color: '#cf1322', bg: '#fff1f0' }
           ].map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', whiteSpace: 'nowrap', padding: activeTab === tab.id ? '0.55rem 1.1rem' : '0.55rem 1rem', borderRadius: '50px', border: activeTab === tab.id ? `2px solid ${tab.color}` : '2px solid var(--border-color)', backgroundColor: activeTab === tab.id ? tab.bg : 'var(--white)', color: activeTab === tab.id ? tab.color : 'var(--text-light)', fontWeight: activeTab === tab.id ? '700' : '600', cursor: 'pointer', transition: 'all 0.2s', boxShadow: activeTab === tab.id ? `0 2px 10px ${tab.color}33` : 'var(--shadow)' }}>
@@ -1212,7 +1312,7 @@ const TransportInchargeDashboard = () => {
         {activeTab === 'users' && (
           <div className="animate-fade-in glass p-glass" style={{ borderRadius: '20px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: '700' }}>User Directory</h2>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: '700' }}>User Management</h2>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
                 {userFilter === 'passenger' && (
                   <button onClick={() => setShowBulkUploadModal(true)} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', backgroundColor: '#28a745', color: 'white', padding: '0.5rem 1rem', borderRadius: '8px', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>
@@ -1285,35 +1385,96 @@ const TransportInchargeDashboard = () => {
         {/* GRIEVANCES (ANONYMOUS) */}
         {activeTab === 'grievances' && (
           <div className="animate-fade-in">
-            <h2 style={{ fontSize: '1.25rem', fontWeight: '700', marginBottom: '1rem' }}>Passenger Grievances</h2>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: '700', marginBottom: '0.5rem' }}>Grievance Triage</h2>
+            <p style={{ color: 'var(--text-light)', marginTop: 0, marginBottom: '1rem' }}>
+              You can see real names of anonymous posters. A complaint only closes when the
+              complainant confirms the fix.
+            </p>
+
+            {/* Triage filters */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem' }}>
+              {[
+                { key: 'all', label: 'All', count: grievances.length },
+                { key: 'reopened', label: 'Not Resolved', count: grievances.filter(g => g.status === 'reopened').length },
+                { key: 'pending', label: 'Pending', count: grievances.filter(g => g.status === 'pending').length },
+                { key: 'in_progress', label: 'In Progress', count: grievances.filter(g => g.status === 'in_progress').length },
+                { key: 'resolved', label: 'Awaiting Confirmation', count: grievances.filter(g => g.status === 'resolved').length },
+                { key: 'closed', label: 'Closed', count: grievances.filter(g => g.status === 'closed').length },
+              ].map(f => (
+                <button
+                  key={f.key}
+                  onClick={() => setGrievanceFilter(f.key)}
+                  style={{
+                    padding: '0.35rem 0.8rem', borderRadius: '20px', cursor: 'pointer',
+                    fontSize: '0.78rem', fontWeight: '700',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: grievanceFilter === f.key ? 'var(--primary-blue)' : 'transparent',
+                    color: grievanceFilter === f.key ? 'white' : 'var(--text-dark)',
+                    display: 'flex', alignItems: 'center', gap: '0.35rem',
+                  }}
+                >
+                  {f.label}
+                  <span style={{ opacity: 0.75 }}>({f.count})</span>
+                </button>
+              ))}
+            </div>
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {grievances.map(comp => (
-                <div key={comp.id || comp._id} className="glass" style={{ padding: '1.5rem', borderRadius: '16px', borderLeft: comp.status === 'resolved' ? '4px solid #28a745' : '4px solid #cf1322' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <div>
+              {(grievanceFilter === 'all'
+                ? grievances
+                : grievances.filter(g => g.status === grievanceFilter)
+              ).map(comp => {
+                const meta = GRIEVANCE_STATUS[comp.status] || GRIEVANCE_STATUS.pending;
+                const { Icon } = meta;
+                return (
+                <div key={comp.id} className="glass" style={{ padding: '1.5rem', borderRadius: '16px', borderLeft: `4px solid ${meta.color}` }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <div style={{ minWidth: 0 }}>
                       {/* Show real name to Transport Incharge (approved by user) */}
                       <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 'bold' }}>
                         {comp.realName || 'Anonymous Passenger'}
-                        {(comp.loginId || comp.login_id) && <span style={{ fontSize: '0.8rem', color: 'var(--text-light)', fontWeight: 'normal', marginLeft: '0.4rem' }}>(ID: {comp.loginId || comp.login_id})</span>}
+                        {comp.loginId && <span style={{ fontSize: '0.8rem', color: 'var(--text-light)', fontWeight: 'normal', marginLeft: '0.4rem' }}>(ID: {comp.loginId})</span>}
                       </h3>
-                      <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-light)' }}>Route {comp.routeId || comp.route} (Bus {routesList.find(r => String(r.routeId || r.route_id) === String(comp.routeId || comp.route))?.busNumber || routesList.find(r => String(r.routeId || r.route_id) === String(comp.routeId || comp.route))?.bus_number || 'Unknown'}) • {formatTime(comp.createdAt || comp.created_at || comp.time)}</p>
+                      <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-light)' }}>
+                        {(() => {
+                          const r = routesList.find(x => String(x.routeId || x.route_id) === String(comp.route));
+                          const bus = r?.bus?.busNumber || r?.busNumber || comp.busNumber;
+                          return `${r?.routeName || `Route ${comp.route}`}${bus ? ` · Bus ${bus}` : ''} • ${formatTime(comp.createdAt)}`;
+                        })()}
+                      </p>
                     </div>
-                    <span style={{ fontSize: '0.75rem', fontWeight: 'bold', padding: '0.25rem 0.5rem', borderRadius: '8px', backgroundColor: comp.status === 'resolved' ? '#e6fae6' : '#fff1f0', color: comp.status === 'resolved' ? '#28a745' : '#cf1322' }}>{comp.status.toUpperCase()}</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.3rem' }}>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 'bold', padding: '0.25rem 0.5rem', borderRadius: '8px', backgroundColor: meta.bg, color: meta.color, display: 'flex', alignItems: 'center', gap: '0.25rem', whiteSpace: 'nowrap' }}>
+                        <Icon size={12} /> {meta.label}
+                      </span>
+                      {comp.reopenCount > 0 && (
+                        <span style={{ fontSize: '0.65rem', fontWeight: '700', padding: '0.2rem 0.5rem', borderRadius: '6px', backgroundColor: '#fff1f0', color: '#cf1322' }}>
+                          Reopened {comp.reopenCount}x
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <p style={{ margin: '1rem 0 0 0', fontSize: '1rem' }}>{comp.text}</p>
+                  <p style={{ margin: '1rem 0 0 0', fontSize: '1rem', overflowWrap: 'anywhere' }}>{comp.text}</p>
 
-                  {/* Media Attachment */}
-                  {comp.type === 'photo' && (comp.media_url || comp.mediaUrl) && (
-                    <div 
-                      onClick={() => setFullScreenMedia({ type: 'photo', url: comp.media_url || comp.mediaUrl })}
-                      style={{ borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: '#f8f9fa', display: 'flex', justifyContent: 'center', cursor: 'zoom-in' }}
-                    >
-                      <img src={comp.media_url || comp.mediaUrl} alt="Complaint Attachment" style={{ width: '100%', height: 'auto', display: 'block', maxHeight: '400px', objectFit: 'contain', transition: 'transform 0.2s' }} />
+                  {comp.adminResponse && (
+                    <div style={{ marginTop: '0.75rem', padding: '0.75rem 1rem', backgroundColor: 'rgba(0,86,179,0.06)', borderLeft: '3px solid var(--primary-blue)', borderRadius: '8px' }}>
+                      <p style={{ margin: 0, fontSize: '0.7rem', fontWeight: '700', color: 'var(--primary-blue)', textTransform: 'uppercase' }}>Response sent to complainant</p>
+                      <p style={{ margin: '0.3rem 0 0', fontSize: '0.88rem' }}>{comp.adminResponse}</p>
                     </div>
                   )}
-                  {comp.type === 'video' && (comp.media_url || comp.mediaUrl) && (
-                    <div 
-                      onClick={() => setFullScreenMedia({ type: 'video', url: comp.media_url || comp.mediaUrl })}
+
+                  {/* Media Attachment */}
+                  {comp.type === 'photo' && comp.mediaUrl && (
+                    <div
+                      onClick={() => setFullScreenMedia({ type: 'photo', url: comp.mediaUrl })}
+                      style={{ borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: '#f8f9fa', display: 'flex', justifyContent: 'center', cursor: 'zoom-in' }}
+                    >
+                      <img src={comp.mediaUrl} alt="Complaint Attachment" style={{ width: '100%', height: 'auto', display: 'block', maxHeight: '400px', objectFit: 'contain', transition: 'transform 0.2s' }} />
+                    </div>
+                  )}
+                  {comp.type === 'video' && comp.mediaUrl && (
+                    <div
+                      onClick={() => setFullScreenMedia({ type: 'video', url: comp.mediaUrl })}
                       style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: 'black', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
                     >
                       <div style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)' }}>
@@ -1321,20 +1482,42 @@ const TransportInchargeDashboard = () => {
                           ▶
                         </div>
                       </div>
-                      <video src={comp.media_url || comp.mediaUrl} style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'contain', opacity: 0.8 }} />
+                      <video src={comp.mediaUrl} style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'contain', opacity: 0.8 }} />
                     </div>
                   )}
-                  {comp.type === 'audio' && (comp.media_url || comp.mediaUrl) && (
+                  {comp.type === 'audio' && comp.mediaUrl && (
                     <div style={{ marginTop: '0.5rem', padding: '1rem', backgroundColor: 'var(--bg-color)', borderRadius: '30px', border: '1px solid var(--border-color)' }}>
-                      <audio src={comp.media_url || comp.mediaUrl} controls style={{ width: '100%' }} />
+                      <audio src={comp.mediaUrl} controls style={{ width: '100%' }} />
                     </div>
                   )}
 
-                  {comp.status === 'pending' && (
-                    <button onClick={() => handleResolveGrievance(comp.id || comp._id)} style={{ marginTop: '1rem', backgroundColor: '#28a745', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: '8px', cursor: 'pointer' }}>Mark Resolved</button>
-                  )}
+                  <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '1rem' }}>
+                    {(comp.status === 'pending' || comp.status === 'reopened') && (
+                      <button onClick={() => handleStartGrievance(comp.id)} disabled={grievanceBusy.has(comp.id)} style={{ backgroundColor: '#d46b08', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: '8px', fontWeight: 'bold', cursor: grievanceBusy.has(comp.id) ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <Wrench size={16} /> Start Work
+                      </button>
+                    )}
+
+                    {(comp.status === 'pending' || comp.status === 'in_progress' || comp.status === 'reopened') && (
+                      <button onClick={() => handleResolveGrievance(comp.id)} disabled={grievanceBusy.has(comp.id)} style={{ backgroundColor: 'var(--secondary-orange)', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: '8px', fontWeight: 'bold', cursor: grievanceBusy.has(comp.id) ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <CheckCircle2 size={16} /> Mark as Fixed
+                      </button>
+                    )}
+
+                    {comp.status === 'resolved' && (
+                      <>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', color: 'var(--text-light)' }}>
+                          <Timer size={14} /> Waiting for the complainant to confirm
+                        </span>
+                        <button onClick={() => handleExtendGrievance(comp.id)} disabled={grievanceBusy.has(comp.id)} style={{ backgroundColor: 'transparent', color: 'var(--primary-blue)', border: '1px solid var(--primary-blue)', padding: '0.45rem 0.9rem', borderRadius: '8px', fontWeight: 'bold', cursor: grievanceBusy.has(comp.id) ? 'default' : 'pointer' }}>
+                          Extend 24h
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -1600,8 +1783,9 @@ const TransportInchargeDashboard = () => {
                 <div style={{ flex: 1 }}>
                   <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Role</label>
                   <select value={userFormData.role} onChange={e => setUserFormData({ ...userFormData, role: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }}>
-                    <option value="passenger">Passenger</option>
-                    <option value="driver">Driver (Flutter App)</option>
+                    <option value="passenger">Student / Passenger</option>
+                    <option value="teacher">Teacher / Staff</option>
+                    <option value="driver">Driver (Bus Sensor App)</option>
                   </select>
                 </div>
                 <div style={{ flex: 1 }}>
@@ -1614,6 +1798,12 @@ const TransportInchargeDashboard = () => {
                   </select>
                 </div>
               </div>
+              {userFormData.role === 'teacher' && (
+                <div>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Subject / Department</label>
+                  <input type="text" placeholder="e.g. Computer Science" value={userFormData.subject || ''} onChange={e => setUserFormData({ ...userFormData, subject: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
+                </div>
+              )}
               {userFormData.role === 'passenger' && (
                 <>
                   <div className="flex flex-col sm:flex-row gap-4">
@@ -1621,7 +1811,8 @@ const TransportInchargeDashboard = () => {
                       <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Fee Status</label>
                       <select value={userFormData.fee_status} onChange={e => setUserFormData({ ...userFormData, fee_status: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }}>
                         <option value="paid">Paid</option>
-                        <option value="pending">Pending / Unpaid</option>
+                        <option value="unpaid">Unpaid</option>
+                        <option value="partial">Partially Paid</option>
                       </select>
                     </div>
                     <div style={{ flex: 1 }}>

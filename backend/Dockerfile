@@ -33,4 +33,8 @@ USER nestjs
 
 EXPOSE 5000
 
-CMD ["sh", "-c", "npx prisma db push --skip-generate && node dist/src/main.js"]
+# `prisma migrate deploy` applies the checked-in migrations and never tries to
+# DROP anything. `prisma db push` compared the schema with the live database
+# and aborted the deploy whenever the two differed, which took the service
+# down. The migrate command only ever moves forward.
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main.js"]

@@ -5,6 +5,7 @@ import {
   Body,
   UseGuards,
   Request,
+  Query,
 } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -22,7 +23,7 @@ export class NotificationsController {
     // Accept both device_type (snake_case from frontend) and deviceType (camelCase)
     const deviceType = body.device_type || body.deviceType || 'web';
     return this.notificationsService.subscribe(
-      req.user.loginId,
+      req.user.loginId || req.user.login_id,
       body.subscription,
       deviceType,
     );
@@ -32,6 +33,32 @@ export class NotificationsController {
   @Get('notifications')
   getNotifications(@Request() req: any) {
     return this.notificationsService.getRecentBroadcasts();
+  }
+
+  /**
+   * The signed-in user's own in-app notification feed.
+   */
+  @Get('notifications/inbox')
+  getInbox(@Request() req: any, @Query('limit') limit?: string) {
+    return this.notificationsService.getMyNotifications(
+      req.user.loginId || req.user.login_id,
+      limit ? parseInt(limit, 10) : 30,
+    );
+  }
+
+  @Get('notifications/unread-count')
+  getUnreadCount(@Request() req: any) {
+    return this.notificationsService.getUnreadCount(
+      req.user.loginId || req.user.login_id,
+    );
+  }
+
+  @Post('notifications/read')
+  markRead(@Request() req: any, @Body() body: { ids?: string[] }) {
+    return this.notificationsService.markNotificationsRead(
+      req.user.loginId || req.user.login_id,
+      body.ids,
+    );
   }
 
   @Post('broadcast')

@@ -21,14 +21,38 @@ export class UploadService {
     folder: string = 'bus_saarthi_media',
   ) {
     if (!file) throw new BadRequestException('No file provided');
+    if (!file.buffer?.length) {
+      throw new BadRequestException('The uploaded file was empty');
+    }
 
     return new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
-        { folder },
+        { folder, resource_type: 'auto' },
         (error, result) => {
-          if (error) return reject(error);
-          if (!result) return reject(new Error('Upload failed'));
-          resolve({ status: 'success', url: result.secure_url });
+          if (error) {
+            // Cloudinary rejects the file (wrong format, too large, …).
+            // Surface a readable message instead of a 500.
+            const message =
+              error?.message || 'The file could not be uploaded';
+            return reject(
+              new BadRequestException(
+                /Invalid image file|File size|unsupported/i.test(message)
+                  ? 'That file type or size is not supported. Please upload an image, video or audio file.'
+                  : 'The file could not be uploaded. Please try again.',
+              ),
+            );
+          }
+          if (!result) {
+            return reject(
+              new BadRequestException('The file could not be uploaded'),
+            );
+          }
+          resolve({
+            status: 'success',
+            url: result.secure_url,
+            publicId: result.public_id,
+            resourceType: result.resource_type,
+          });
         },
       );
       uploadStream.end(file.buffer);

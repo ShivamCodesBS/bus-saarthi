@@ -3,15 +3,18 @@ import { PrismaService } from '../prisma/prisma.service';
 import * as webpush from 'web-push';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { CacheService } from '../cache/cache.service';
 
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
+  private pushEnabled = false;
 
   constructor(
     private prisma: PrismaService,
     private configService: ConfigService,
     private eventEmitter: EventEmitter2,
+    private cache: CacheService,
   ) {
     const vapidPublicKey = this.configService.get<string>('VAPID_PUBLIC_KEY');
     const vapidPrivateKey = this.configService.get<string>('VAPID_PRIVATE_KEY');
@@ -22,8 +25,11 @@ export class NotificationsService {
         vapidPublicKey,
         vapidPrivateKey,
       );
+      this.pushEnabled = true;
     } else {
-      this.logger.warn('VAPID keys missing. Push notifications disabled.');
+      this.logger.warn(
+        'VAPID keys missing. Web push disabled — in-app notifications still work.',
+      );
     }
   }
 
@@ -50,7 +56,52 @@ export class NotificationsService {
     return { status: 'success' };
   }
 
+  /**
+   * Persist an in-app notification and push it to the user's devices.
+   *
+   * The in-app record is the source of truth: the user can read the message
+   * later even if the browser was closed when the push arrived.
+   */
+  async notifyUser(
+    loginId: string,
+    grievanceId: string | null,
+    payload: { title: string; body: string; type: string },
+  ) {
+    try {
+      await this.prisma.notification.create({
+        data: {
+          loginId,
+          title: payload.title,
+          body: payload.body,
+          type: payload.type,
+          grievanceId: grievanceId ?? null,
+        },
+      });
+    } catch (err: any) {
+      this.logger.warn(`Failed to store notification: ${err?.message}`);
+    }
+
+    // Real-time delivery to an open browser tab.
+    this.eventEmitter.emit('notification.created', {
+      login_id: loginId,
+      ...payload,
+    });
+
+    await this.sendPushNotification(loginId, {
+      title: payload.title,
+      body: payload.body,
+      icon: '/icons/bus-192x192.png',
+      badge: '/icons/bus-72x72.png',
+      tag: payload.type,
+      data: { grievanceId, type: payload.type },
+    });
+
+    return { status: 'success' };
+  }
+
   async sendPushNotification(loginId: string, payload: any) {
+    if (!this.pushEnabled) return;
+
     const subs = await this.prisma.pushSubscription.findMany({
       where: { loginId },
     });
@@ -62,8 +113,8 @@ export class NotificationsService {
           JSON.stringify(payload),
         );
       } catch (err: any) {
-        if (err.statusCode === 410) {
-          // Unsubscribed
+        if (err.statusCode === 410 || err.statusCode === 404) {
+          // The browser unsubscribed — drop the dead record.
           await this.prisma.pushSubscription.delete({ where: { id: sub.id } });
         } else {
           this.logger.error(`Failed to send push to ${loginId}:`, err);
@@ -85,7 +136,6 @@ export class NotificationsService {
       timestamp: broadcast.timestamp,
     };
 
-    // Emit event so WebSocket Gateway can push it in real-time to all connected users
     this.eventEmitter.emit('broadcast.created', broadcastPayload);
 
     const payload = {
@@ -97,13 +147,14 @@ export class NotificationsService {
     const allSubs = await this.prisma.pushSubscription.findMany();
 
     for (const sub of allSubs) {
+      if (!this.pushEnabled) break;
       try {
         await webpush.sendNotification(
           sub.subscription as any,
           JSON.stringify(payload),
         );
       } catch (err: any) {
-        if (err.statusCode === 410) {
+        if (err.statusCode === 410 || err.statusCode === 404) {
           await this.prisma.pushSubscription.delete({ where: { id: sub.id } });
         }
       }
@@ -117,5 +168,56 @@ export class NotificationsService {
       orderBy: { timestamp: 'desc' },
       take: 20,
     });
+  }
+
+  /**
+   * In-app notification feed for the signed-in user.
+   */
+  async getMyNotifications(loginId: string, limit = 30) {
+    const notifications = await this.prisma.notification.findMany({
+      where: { loginId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+
+    const unreadCount = await this.prisma.notification.count({
+      where: { loginId, read: false },
+    });
+
+    return {
+      status: 'success',
+      unread_count: unreadCount,
+      data: notifications.map((n) => ({
+        id: n.id,
+        title: n.title,
+        body: n.body,
+        type: n.type,
+        grievance_id: n.grievanceId,
+        read: n.read,
+        created_at: n.createdAt,
+      })),
+    };
+  }
+
+  async markNotificationsRead(loginId: string, ids?: string[]) {
+    const result = await this.prisma.notification.updateMany({
+      where: {
+        loginId,
+        read: false,
+        ...(ids?.length ? { id: { in: ids } } : {}),
+      },
+      data: { read: true },
+    });
+    return { status: 'success', updated: result.count };
+  }
+
+  /**
+   * Unread count only — cheap enough to poll.
+   */
+  async getUnreadCount(loginId: string) {
+    const count = await this.prisma.notification.count({
+      where: { loginId, read: false },
+    });
+    return { status: 'success', unread_count: count };
   }
 }

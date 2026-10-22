@@ -9,13 +9,14 @@ import { UserRole } from '@prisma/client';
 export class HealthController {
   constructor(private readonly healthService: HealthService) {}
 
+  /**
+   * A real health check — it queries the database and reports whether the
+   * optional cache is connected. Render uses this to decide if the instance
+   * is serving traffic.
+   */
   @Get()
-  check() {
-    return {
-      status: 'UP',
-      uptime: process.uptime(),
-      timestamp: new Date().toISOString(),
-    };
+  async check() {
+    return this.healthService.check();
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

@@ -36,7 +36,17 @@ export class AttendanceService {
     }
 
     if (!route_id) {
-      route_id = records[0]?.route_id || (records[0] as any)?.routeId || '4';
+      route_id =
+        records[0]?.route_id ||
+        (records[0] as any)?.routeId ||
+        (records[0] as any)?.route ||
+        null;
+    }
+
+    if (!route_id) {
+      throw new BadRequestException(
+        'route_id is required — it identifies the route the bus is serving',
+      );
     }
 
     const todayStart = getISTMidnightUTC();
@@ -203,6 +213,17 @@ export class AttendanceService {
         timestamp: { gte: todayStart },
       },
       orderBy: { timestamp: 'desc' },
+      select: {
+        id: true,
+        passengerId: true,
+        routeId: true,
+        name: true,
+        feeStatus: true,
+        confidence: true,
+        timestamp: true,
+        originalRouteId: true,
+        mergeEventId: true,
+      },
     });
   }
 

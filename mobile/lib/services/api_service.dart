@@ -81,20 +81,33 @@ class ApiService {
   // ── User Lookup ────────────────────────────────────────────────────────────
 
   /// Lookup user information by login ID (name, feeStatus, routeId, etc.)
+  ///
+  /// `GET /api/users/:loginId` is staff-only, so a driver-signed-in bus app
+  /// would get a 403. The attendance endpoint is open to any signed-in
+  /// user and returns the same passenger identity fields, so it is used
+  /// for the driver's student lookups.
   Future<Map<String, dynamic>?> fetchUser(String loginId) async {
     try {
       final storage = const FlutterSecureStorage();
       final token = await storage.read(key: 'jwt_token');
 
       final response = await _dio.get(
-        '/api/users/$loginId',
+        '/api/attendance/user/$loginId',
         options: Options(headers: {
           if (token != null) 'Authorization': 'Bearer $token',
         }),
       );
 
       if (response.statusCode == 200 && response.data != null) {
-        return response.data as Map<String, dynamic>;
+        final records = response.data as List<dynamic>;
+        if (records.isEmpty) return null;
+        final first = records.first as Map<String, dynamic>;
+        return {
+          'login_id': first['passengerId'] ?? loginId,
+          'name': first['name'] ?? loginId,
+          'route_id': first['routeId'],
+          'fee_status': first['feeStatus'],
+        };
       }
       return null;
     } catch (e) {

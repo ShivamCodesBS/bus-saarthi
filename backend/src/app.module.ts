@@ -24,11 +24,14 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
 import { MergeModule } from './merge/merge.module';
+import { CacheModule } from './cache/cache.module';
+import { StatsModule } from './stats/stats.module';
 
 @Module({
   imports: [
     AppConfigModule,
     PrismaModule,
+    CacheModule,
     QueueModule,
     EventEmitterModule.forRoot(),
     ThrottlerModule.forRoot([
@@ -54,6 +57,7 @@ import { MergeModule } from './merge/merge.module';
     ParentsModule,
     ScheduleModule.forRoot(),
     MergeModule,
+    StatsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

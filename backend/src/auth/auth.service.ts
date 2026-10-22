@@ -1,14 +1,31 @@
 import {
   Injectable,
   UnauthorizedException,
-  HttpException,
-  HttpStatus,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UserRole } from '@prisma/client';
 import { LoginDto } from './dto/login.dto';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
+
+const USER_SELECT = {
+  id: true,
+  loginId: true,
+  name: true,
+  password: true,
+  role: true,
+  routeId: true,
+  feeStatus: true,
+  profilePic: true,
+  designation: true,
+  phone: true,
+  email: true,
+  subject: true,
+  gradeClass: true,
+  locationLat: true,
+  locationLng: true,
+  wakeAlarm: true,
+} as const;
 
 @Injectable()
 export class AuthService {
@@ -18,44 +35,18 @@ export class AuthService {
   ) {}
 
   async login(loginDto: LoginDto) {
-    const { login_id, password } = loginDto;
+    const { login_id, password, role } = loginDto;
 
     let user = await this.prisma.user.findUnique({
       where: { loginId: login_id },
-      select: {
-        id: true,
-        loginId: true,
-        name: true,
-        password: true,
-        role: true,
-        routeId: true,
-        feeStatus: true,
-        profilePic: true,
-        designation: true,
-        locationLat: true,
-        locationLng: true,
-        wakeAlarm: true,
-      },
+      select: USER_SELECT,
     });
 
-    // Fallback: Check if login_id matches a phone number
+    // Fallback: allow signing in with a registered phone number.
     if (!user) {
       user = await this.prisma.user.findFirst({
         where: { phone: login_id },
-        select: {
-          id: true,
-          loginId: true,
-          name: true,
-          password: true,
-          role: true,
-          routeId: true,
-          feeStatus: true,
-          profilePic: true,
-          designation: true,
-          locationLat: true,
-          locationLng: true,
-          wakeAlarm: true,
-        },
+        select: USER_SELECT,
       });
     }
 
@@ -63,12 +54,27 @@ export class AuthService {
       throw new UnauthorizedException('Invalid login ID or password');
     }
 
-    const isMatch = await bcrypt.compare(password, user.password!);
+    // A user account with no password hash can never authenticate.
+    if (!user.password) {
+      throw new UnauthorizedException(
+        'This account has no password set. Please contact the transport office.',
+      );
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       throw new UnauthorizedException('Invalid login ID or password');
     }
 
-    // Update last login
+    // The login screen lets the user pick a role. If they picked one, it must
+    // match the role actually stored on the account — otherwise a passenger
+    // could tick "Admin" and land in the admin dashboard.
+    if (role && role !== user.role) {
+      throw new UnauthorizedException(
+        `This account is registered as "${this.humanRole(user.role)}", not "${this.humanRole(role as UserRole)}".`,
+      );
+    }
+
     await this.prisma.user.update({
       where: { id: user.id },
       data: { lastLogin: new Date() },
@@ -95,7 +101,22 @@ export class AuthService {
         fee_status: user.feeStatus,
         profile_pic: user.profilePic,
         designation: user.designation,
+        email: user.email,
+        phone: user.phone,
+        subject: user.subject,
+        grade_class: user.gradeClass,
       },
     };
+  }
+
+  private humanRole(role: UserRole): string {
+    switch (role) {
+      case UserRole.transport_incharge:
+        return 'Transport Incharge';
+      case UserRole.tech_admin:
+        return 'Tech Admin';
+      default:
+        return role.charAt(0).toUpperCase() + role.slice(1);
+    }
   }
 }

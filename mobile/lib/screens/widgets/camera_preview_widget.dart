@@ -126,10 +126,9 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget> {
       final XFile file = await _controller!.takePicture();
       final bytes = await file.readAsBytes();
 
-      // Detect face and extract embedding via ML Kit + ArcFace
-      final inputImage = InputImage.fromFilePath(file.path);
-      // Use the detection service's captureAndEmbed for high quality
-      // But for streaming, we use a simpler approach with takePicture
+      // Detect face and extract embedding via ML Kit + ArcFace.
+      // The detection service does its own capture, so no InputImage is
+      // needed here.
       
       // Detect faces in the captured image
       final img_lib = await _loadImageFromBytes(bytes);

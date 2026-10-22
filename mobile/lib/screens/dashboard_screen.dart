@@ -7,13 +7,19 @@ import '../providers/auth_provider.dart';
 import '../providers/sensor_provider.dart';
 import '../providers/connection_provider.dart';
 import '../core/theme.dart';
+import '../core/constants.dart';
 import 'widgets/camera_preview_widget.dart';
 import 'widgets/sensor_dashboard_widget.dart';
 import 'widgets/loading_overlay.dart';
 import 'settings_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({Key? key}) : super(key: key);
+  const DashboardScreen({Key? key, this.mode}) : super(key: key);
+
+  /// How this phone is being used:
+  ///   driver     the driver's own phone — dashboard and navigation aid
+  ///   busDevice  a device fixed inside the bus — sensors + face scanner
+  final String? mode;
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -32,8 +38,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _requestPermissionsAndStart();
   }
 
+  /// True when this build runs as the device fixed inside the bus
+  /// (sensors + face scanner) rather than as the driver's own phone.
+  bool get _isBusDevice =>
+      (widget.mode ?? AppConstants.appMode) == AppConstants.modeBusDevice;
+
   Future<void> _requestPermissionsAndStart() async {
-    await Permission.camera.request();
+    // The camera is only needed by the in-bus device, which runs the face
+    // scanner. A driver's phone does not.
+    if (_isBusDevice) {
+      await Permission.camera.request();
+    }
 
     LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
@@ -41,19 +56,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     await Permission.notification.request();
-    await Permission.sensors.request();
+
+    if (_isBusDevice) {
+      await Permission.sensors.request();
+    }
 
     if (mounted) {
       setState(() { _permissionsGranted = true; });
 
       final auth = Provider.of<AuthProvider>(context, listen: false);
       final sensors = Provider.of<SensorProvider>(context, listen: false);
-      final routeId = auth.user?.routeId ?? '4';
+      final routeId = auth.user?.routeId ?? AppConstants.defaultRouteId;
       // NOTE: Do NOT call sensors.socketService.connect() here.
       // The background isolate owns and manages the socket exclusively.
       // startSensors() sends a signal to the background service which
       // calls socketService.connect() inside the background isolate.
-      sensors.startSensors(routeId);
+      if (_isBusDevice) {
+        sensors.startSensors(routeId);
+      }
     }
   }
 
@@ -61,6 +81,53 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     final screenH = MediaQuery.of(context).size.height;
 
+    // ── Driver phone ──────────────────────────────────────────────
+    // The driver's own phone does not scan faces or run the bus
+    // sensors — it is a dashboard and a navigation aid. Showing the
+    // camera there would just drain the battery for nothing.
+    if (!_isBusDevice) {
+      return Scaffold(
+        backgroundColor: AppTheme.background,
+        appBar: AppBar(
+          backgroundColor: AppTheme.background,
+          elevation: 0,
+          centerTitle: true,
+          title: const Text(
+            'Driver Panel',
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.black,
+            ),
+          ),
+        ),
+        body: SafeArea(
+          child: Consumer2<AuthProvider, ConnectionProvider>(
+            builder: (context, auth, connection, _) {
+              final user = auth.user;
+              return ListView(
+                padding: const EdgeInsets.all(20),
+                children: [
+                  _DriverInfoCard(
+                    name: user?.name ?? 'Driver',
+                    loginId: user?.loginId ?? '',
+                    routeId: user?.routeId ?? AppConstants.defaultRouteId,
+                  ),
+                  const SizedBox(height: 16),
+                  _DriverStatusRow(
+                    connected: connection.isConnected,
+                  ),
+                  const SizedBox(height: 16),
+                  const _DriverModeNote(),
+                ],
+              );
+            },
+          ),
+        ),
+      );
+    }
+
+    // ── In-bus device ─────────────────────────────────────────────
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: Stack(
@@ -320,6 +387,189 @@ class _PulsingDotState extends State<_PulsingDot> with SingleTickerProviderState
             BoxShadow(color: widget.color.withOpacity(_anim.value * 0.5), blurRadius: 4, spreadRadius: 1),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ── Driver-mode widgets ─────────────────────────────────────────────
+// These appear on the driver's own phone. The in-bus device uses the
+// camera + telemetry layout instead.
+
+class _DriverInfoCard extends StatelessWidget {
+  const _DriverInfoCard({
+    required this.name,
+    required this.loginId,
+    required this.routeId,
+  });
+
+  final String name;
+  final String loginId;
+  final String routeId;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: AppTheme.accentColor.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(
+                  Icons.person,
+                  color: AppTheme.accentColor,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.black,
+                      ),
+                    ),
+                    Text(
+                      loginId,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.blackSoft,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Divider(height: 1),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              const Icon(
+                Icons.directions_bus,
+                size: 18,
+                color: AppTheme.blackSoft,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Assigned route',
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: AppTheme.blackSoft,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                'Route $routeId',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.black,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DriverStatusRow extends StatelessWidget {
+  const _DriverStatusRow({required this.connected});
+
+  final bool connected;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = connected ? Colors.green : Colors.orange;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              connected
+                  ? 'Connected to the transport server'
+                  : 'Waiting for the transport server',
+              style: const TextStyle(
+                fontSize: 13,
+                color: AppTheme.black,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DriverModeNote extends StatelessWidget {
+  const _DriverModeNote();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.accentColor.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.accentColor.withOpacity(0.25)),
+      ),
+      child: const Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.info_outline, size: 18, color: AppTheme.blackSoft),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Running in driver mode. The sensors and the face scanner run on '
+              'the device fitted inside the bus.',
+              style: TextStyle(
+                fontSize: 12.5,
+                color: AppTheme.blackSoft,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

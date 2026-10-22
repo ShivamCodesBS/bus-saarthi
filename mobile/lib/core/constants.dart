@@ -24,10 +24,32 @@ class AppConstants {
     defaultValue: 'dev_only_token_DO_NOT_USE_IN_PROD',
   );
 
-  // Route ID this device is assigned to
+  // Route ID this device is assigned to.
+  // The route is the stable identity — the bus serving it can change.
   static const String defaultRouteId = String.fromEnvironment(
     'ROUTE_ID',
     defaultValue: '4',
+  );
+
+  // ── App mode ──────────────────────────────────────────────────────────
+  // The app has two distinct roles:
+  //
+  //  driver      The phone belongs to the bus driver. It is a dashboard
+  //              and navigation aid — it does NOT run the sensors or the
+  //              face scanner.
+  //
+  //  busDevice   A device fixed inside the bus. It runs continuously:
+  //              sensor telemetry for live tracking AND the ArcFace
+  //              scanner for attendance. It identifies itself with the
+  //              hardware token rather than a user account.
+  static const String modeDriver = 'driver';
+  static const String modeBusDevice = 'busDevice';
+
+  // Which mode this build starts in. A bus device build sets
+  // --dart-define=APP_MODE=busDevice.
+  static const String appMode = String.fromEnvironment(
+    'APP_MODE',
+    defaultValue: modeDriver,
   );
 
   // Sensor intervals
