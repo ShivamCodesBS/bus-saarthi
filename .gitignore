@@ -70,3 +70,4 @@ mobile/.flutter-plugins-dependencies
 AGENT.md
 CLAUDE.md
 .agent-mem/
+.env.redis
