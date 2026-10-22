@@ -1,19 +1,35 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { v2 as cloudinary } from 'cloudinary';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class UploadService {
+  private readonly configured: boolean;
+
   constructor(
     private configService: ConfigService,
     private prisma: PrismaService,
   ) {
-    cloudinary.config({
-      cloud_name: this.configService.get<string>('CLOUDINARY_CLOUD_NAME'),
-      api_key: this.configService.get<string>('CLOUDINARY_API_KEY'),
-      api_secret: this.configService.get<string>('CLOUDINARY_API_SECRET'),
-    });
+    const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
+    const apiKey = this.configService.get<string>('CLOUDINARY_API_KEY');
+    const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
+
+    this.configured = Boolean(cloudName && apiKey && apiSecret);
+
+    if (this.configured) {
+      cloudinary.config({
+        cloud_name: cloudName,
+        api_key: apiKey,
+        api_secret: apiSecret,
+      });
+    }
+    // A missing Cloudinary configuration must not stop the service from
+    // booting — only the upload endpoint reports that it is unavailable.
   }
 
   async uploadFile(
@@ -23,6 +39,11 @@ export class UploadService {
     if (!file) throw new BadRequestException('No file provided');
     if (!file.buffer?.length) {
       throw new BadRequestException('The uploaded file was empty');
+    }
+    if (!this.configured) {
+      throw new ServiceUnavailableException(
+        'File uploads are not available right now. Please describe the issue in text.',
+      );
     }
 
     return new Promise((resolve, reject) => {

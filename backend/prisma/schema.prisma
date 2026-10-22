@@ -4,9 +4,13 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  // NOTE: no `directUrl` here on purpose. Prisma 5.22 hard-requires it, and
+  // a missing DIRECT_URL aborted the entire deploy with
+  // "Environment variable not found: DIRECT_URL". It is only used for
+  // Prisma Migrate's shadow database, which this project does not use, so
+  // DATABASE_URL alone is enough.
 }
 
 model User {

@@ -9,6 +9,8 @@ import { DbLoggerService } from './db-logger.service';
 @Module({
   controllers: [HealthController],
   providers: [HealthService, DbLoggerService],
-  exports: [DbLoggerService],
+  // HealthService is exported so the root controller can report the service
+  // status instead of the Nest scaffold's "Hello World!".
+  exports: [DbLoggerService, HealthService],
 })
 export class HealthModule {}
