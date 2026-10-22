@@ -15,7 +15,7 @@ export class RoutesService {
   ) {}
 
   async findAll() {
-    const routes = await this.cache.remember('routes:all', 30, () =>
+    const routes = await this.cache.remember('routes:all', 60, () =>
       this.prisma.route.findMany({
         include: { bus: true },
         orderBy: { routeId: 'asc' },

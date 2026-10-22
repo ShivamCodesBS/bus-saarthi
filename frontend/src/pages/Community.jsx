@@ -196,23 +196,37 @@ const Community = () => {
     const fetchData = async () => {
       try {
         const headers = { Authorization: `Bearer ${token}` };
-        const [grievancesRes, routesRes] = await Promise.all([
+        // Each request is independent: one failing or slow call must not
+        // stop the other from rendering.
+        const [grievancesRes, routesRes] = await Promise.allSettled([
           axios.get(`${BACKEND_URL}/api/grievances`, { headers }),
-          axios
-            .get(`${BACKEND_URL}/api/routes`, { headers })
-            .catch(() => ({ data: { data: [] } })),
+          axios.get(`${BACKEND_URL}/api/routes`, { headers }),
         ]);
         if (cancelled) return;
 
+        if (grievancesRes.status === 'rejected') {
+          console.warn('[community] complaints failed', grievancesRes.reason);
+        }
+        if (routesRes.status === 'rejected') {
+          console.warn('[community] routes failed', routesRes.reason);
+        }
+
+        const grievancesBody =
+          grievancesRes.status === 'fulfilled'
+            ? grievancesRes.value.data
+            : [];
+        const routesBody =
+          routesRes.status === 'fulfilled' ? routesRes.value.data : [];
+
         // The endpoint returns a bare array.
-        const data = Array.isArray(grievancesRes.data)
-          ? grievancesRes.data
-          : (grievancesRes.data?.data || []);
+        const data = Array.isArray(grievancesBody)
+          ? grievancesBody
+          : (grievancesBody?.data || []);
         setComplaints(data);
 
-        const routes = Array.isArray(routesRes.data)
-          ? routesRes.data
-          : (routesRes.data?.data || []);
+        const routes = Array.isArray(routesBody)
+          ? routesBody
+          : (routesBody?.data || []);
         const map = {};
         routes.forEach((r) => {
           const liveBus = r.bus?.busNumber || r.busNumber;
@@ -998,69 +1012,137 @@ const Community = () => {
 
       </div>
 
-        {/* ── Bus picker (admins only) ───────────────────────────
-            Students and staff land directly on the complaints for the
-            route they are allocated to. Only an administrator manages
-            the whole fleet, so only they get the picker. */}
-        {isAdmin && busList.length > 0 && (
+      {/* ── Staff pre-screen: pick a bus ─────────────────────────
+          Staff triage bus by bus. This is the first thing they see:
+          a card per bus with its live complaint counts. Only after
+          a bus is chosen do the complaints (and the filters) appear. */}
+      {isAdmin && (
+        <div
+          style={{
+            maxWidth: '1100px',
+            margin: '0 auto',
+            width: '100%',
+            padding: '1.25rem 1rem 0.5rem',
+          }}
+        >
           <div
             style={{
-              paddingLeft: '1rem',
-              paddingRight: '1rem',
-              paddingBottom: '1rem',
-              maxWidth: '1100px',
-              margin: '0 auto',
               display: 'flex',
-              flexDirection: 'column',
-              gap: '0.6rem',
-              borderTop: '1px solid rgba(255,255,255,0.12)',
-              paddingTop: '0.85rem',
+              alignItems: 'flex-end',
+              justifyContent: 'space-between',
+              gap: '1rem',
+              flexWrap: 'wrap',
+              marginBottom: '1rem',
             }}
           >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '0.75rem',
-                flexWrap: 'wrap',
-              }}
-            >
-              <span
+            <div>
+              <h1
                 style={{
-                  fontSize: '0.72rem',
+                  margin: 0,
+                  fontSize: '1.45rem',
                   fontWeight: '800',
-                  color: 'rgba(255,255,255,0.75)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
+                  color: 'var(--text-dark)',
+                  letterSpacing: '-0.4px',
                 }}
               >
-                Manage by bus
-              </span>
-              {selectedBus !== 'all' && (
-                <button
-                  onClick={() => setSelectedBus('all')}
-                  style={{
-                    background: 'rgba(255,255,255,0.15)',
-                    border: '1px solid rgba(255,255,255,0.3)',
-                    color: 'white',
-                    borderRadius: '20px',
-                    padding: '0.3rem 0.85rem',
-                    fontSize: '0.75rem',
-                    fontWeight: '700',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Show all buses
-                </button>
-              )}
+                Complaints by bus
+              </h1>
+              <p
+                style={{
+                  margin: '0.35rem 0 0',
+                  fontSize: '0.9rem',
+                  color: 'var(--text-light)',
+                  maxWidth: '60ch',
+                  lineHeight: 1.5,
+                }}
+              >
+                Every complaint raised against the campus buses. Choose a bus
+                to work through its complaints.
+              </p>
             </div>
+            {selectedBus !== 'all' && (
+              <button
+                onClick={() => setSelectedBus('all')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  background: 'var(--card-bg)',
+                  border: '1px solid var(--border-color)',
+                  color: 'var(--text-dark)',
+                  borderRadius: '20px',
+                  padding: '0.45rem 0.9rem',
+                  fontSize: '0.8rem',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                }}
+              >
+                <ArrowLeft size={14} /> All buses
+              </button>
+            )}
+          </div>
 
+          {/* The bus list */}
+          {isLoading ? (
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(215px, 1fr))',
-                gap: '0.6rem',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                gap: '1rem',
+              }}
+            >
+              {[1, 2, 3, 4, 5].map((i) => (
+                <div
+                  key={i}
+                  className="glass"
+                  style={{
+                    borderRadius: '18px',
+                    padding: '1.25rem',
+                    border: '1px solid var(--border-color)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.9rem',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                    <div
+                      className="animate-pulse"
+                      style={{
+                        width: '48px',
+                        height: '48px',
+                        borderRadius: '14px',
+                        background: 'var(--bg-color)',
+                      }}
+                    />
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                      <div
+                        className="animate-pulse"
+                        style={{ width: '110px', height: '15px', borderRadius: '5px', background: 'var(--bg-color)' }}
+                      />
+                      <div
+                        className="animate-pulse"
+                        style={{ width: '150px', height: '11px', borderRadius: '5px', background: 'var(--bg-color)' }}
+                      />
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.45rem' }}>
+                    {[1, 2, 3].map((k) => (
+                      <div
+                        key={k}
+                        className="animate-pulse"
+                        style={{ width: '78px', height: '22px', borderRadius: '7px', background: 'var(--bg-color)' }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : selectedBus === 'all' ? (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                gap: '1rem',
               }}
             >
               {busList.map((b) => {
@@ -1069,83 +1151,99 @@ const Community = () => {
                   awaiting: 0,
                   total: 0,
                 };
-                const active = selectedBus === b.busNumber;
                 return (
                   <button
                     key={b.busNumber}
-                    onClick={() =>
-                      setSelectedBus(active ? 'all' : b.busNumber)
-                    }
-                    aria-pressed={active}
+                    onClick={() => setSelectedBus(b.busNumber)}
+                    className="glass"
                     style={{
+                      borderRadius: '18px',
+                      padding: '1.25rem',
                       textAlign: 'left',
-                      padding: '0.7rem 0.85rem',
-                      borderRadius: '12px',
                       cursor: 'pointer',
-                      color: 'white',
-                      background: active
-                        ? 'rgba(255,255,255,0.22)'
-                        : 'rgba(255,255,255,0.10)',
-                      border: active
-                        ? '2px solid rgba(255,255,255,0.7)'
-                        : '1px solid rgba(255,255,255,0.18)',
-                      boxShadow: active
-                        ? '0 6px 18px rgba(0,0,0,0.25)'
-                        : 'none',
-                      transition: 'all 0.15s',
-                      minWidth: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.9rem',
+                      border: '1px solid var(--border-color)',
+                      boxShadow: '0 2px 10px rgba(16,24,40,0.05)',
+                      transition: 'transform 0.15s, box-shadow 0.15s',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = 'translateY(-3px)';
+                      e.currentTarget.style.boxShadow =
+                        '0 10px 26px rgba(16,24,40,0.10)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = 'translateY(0)';
+                      e.currentTarget.style.boxShadow =
+                        '0 2px 10px rgba(16,24,40,0.05)';
                     }}
                   >
+                    {/* Bus identity */}
                     <div
                       style={{
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '0.45rem',
-                        marginBottom: '0.25rem',
+                        gap: '0.85rem',
+                        minWidth: 0,
                       }}
                     >
-                      <Bus size={15} />
                       <span
                         style={{
-                          fontWeight: '800',
-                          fontSize: '0.88rem',
-                          letterSpacing: '-0.2px',
+                          width: '48px',
+                          height: '48px',
+                          borderRadius: '14px',
+                          background: 'var(--primary-blue)',
+                          color: 'white',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
                         }}
                       >
-                        {b.busNumber}
+                        <Bus size={24} />
                       </span>
+                      <div style={{ minWidth: 0 }}>
+                        <p
+                          style={{
+                            margin: 0,
+                            fontSize: '1.15rem',
+                            fontWeight: '800',
+                            color: 'var(--text-dark)',
+                            letterSpacing: '-0.3px',
+                          }}
+                        >
+                          {b.busNumber}
+                        </p>
+                        <p
+                          style={{
+                            margin: 0,
+                            fontSize: '0.8rem',
+                            color: 'var(--text-light)',
+                          }}
+                        >
+                          {b.routeName}
+                        </p>
+                      </div>
                     </div>
-                    <p
-                      style={{
-                        margin: 0,
-                        fontSize: '0.72rem',
-                        color: 'rgba(255,255,255,0.8)',
-                        lineHeight: 1.35,
-                        overflowWrap: 'anywhere',
-                      }}
-                    >
-                      {b.routeName}
-                    </p>
+
+                    {/* Live counts */}
                     <div
                       style={{
                         display: 'flex',
-                        gap: '0.35rem',
-                        marginTop: '0.5rem',
+                        gap: '0.45rem',
                         flexWrap: 'wrap',
                       }}
                     >
                       <span
                         title="Not yet resolved — new, in progress, or reopened"
                         style={{
-                          fontSize: '0.65rem',
+                          fontSize: '0.72rem',
                           fontWeight: '800',
-                          padding: '0.15rem 0.45rem',
-                          borderRadius: '6px',
-                          background:
-                            counts.unresolved > 0
-                              ? 'rgba(207,19,34,0.85)'
-                              : 'rgba(255,255,255,0.15)',
-                          color: 'white',
+                          padding: '0.25rem 0.6rem',
+                          borderRadius: '7px',
+                          background: counts.unresolved > 0 ? '#cf1322' : '#e9ecef',
+                          color: counts.unresolved > 0 ? 'white' : '#666',
                         }}
                       >
                         {counts.unresolved} unresolved
@@ -1154,118 +1252,313 @@ const Community = () => {
                         <span
                           title="Marked as fixed — waiting for the complainant to confirm"
                           style={{
-                            fontSize: '0.65rem',
+                            fontSize: '0.72rem',
                             fontWeight: '800',
-                            padding: '0.15rem 0.45rem',
-                            borderRadius: '6px',
-                            background: 'rgba(9,88,217,0.85)',
+                            padding: '0.25rem 0.6rem',
+                            borderRadius: '7px',
+                            background: '#0958d9',
                             color: 'white',
                           }}
                         >
-                          {counts.awaiting} awaiting
+                          {counts.awaiting} awaiting confirmation
                         </span>
                       )}
                       <span
                         title="Every complaint ever raised against this bus"
                         style={{
-                          fontSize: '0.65rem',
+                          fontSize: '0.72rem',
                           fontWeight: '700',
-                          padding: '0.15rem 0.45rem',
-                          borderRadius: '6px',
-                          background: 'rgba(255,255,255,0.15)',
-                          color: 'rgba(255,255,255,0.9)',
+                          padding: '0.25rem 0.6rem',
+                          borderRadius: '7px',
+                          background: '#e9ecef',
+                          color: '#666',
                         }}
                       >
                         {counts.total} all time
                       </span>
                     </div>
+
+                    {/* Bus details */}
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns:
+                          'repeat(2, minmax(0, 1fr))',
+                        gap: '0.45rem 0.85rem',
+                        fontSize: '0.75rem',
+                        color: 'var(--text-light)',
+                        borderTop: '1px solid var(--border-color)',
+                        paddingTop: '0.8rem',
+                      }}
+                    >
+                      <span>
+                        <strong style={{ color: 'var(--text-dark)' }}>
+                          Route ID:
+                        </strong>{' '}
+                        {b.routeId}
+                      </span>
+                      <span>
+                        <strong style={{ color: 'var(--text-dark)' }}>
+                          Capacity:
+                        </strong>{' '}
+                        {b.capacity}
+                      </span>
+                      <span>
+                        <strong style={{ color: 'var(--text-dark)' }}>
+                          Registration:
+                        </strong>{' '}
+                        {b.registrationNumber}
+                      </span>
+                      <span>
+                        <strong style={{ color: 'var(--text-dark)' }}>
+                          City:
+                        </strong>{' '}
+                        {b.city}
+                      </span>
+                      <span>
+                        <strong style={{ color: 'var(--text-dark)' }}>
+                          Model:
+                        </strong>{' '}
+                        {b.vehicleModel}
+                      </span>
+                      <span>
+                        <strong style={{ color: 'var(--text-dark)' }}>
+                          Driver:
+                        </strong>{' '}
+                        {b.driverId}
+                      </span>
+                    </div>
+
+                    <span
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        fontSize: '0.82rem',
+                        fontWeight: '700',
+                        color: 'var(--primary-blue)',
+                      }}
+                    >
+                      <ClipboardList size={15} />
+                      Open this bus
+                    </span>
                   </button>
                 );
               })}
             </div>
-
-            {selectedBus !== 'all' &&
-              (() => {
+          ) : (
+            <>
+              {/* The selected bus */}
+              {(() => {
                 const b = busList.find((x) => x.busNumber === selectedBus);
                 if (!b) return null;
+                const counts = busCounts[b.busNumber] || {
+                  unresolved: 0,
+                  awaiting: 0,
+                  total: 0,
+                };
                 return (
-                  <div
+                  <section
+                    className="glass"
                     style={{
-                      display: 'flex',
-                      flexWrap: 'wrap',
-                      gap: '0.4rem 1.25rem',
-                      fontSize: '0.75rem',
-                      color: 'rgba(255,255,255,0.85)',
-                      padding: '0.6rem 0.85rem',
-                      background: 'rgba(0,0,0,0.18)',
-                      borderRadius: '10px',
+                      borderRadius: '18px',
+                      padding: '1.25rem',
+                      border: '1px solid var(--border-color)',
+                      boxShadow: '0 2px 10px rgba(16,24,40,0.05)',
+                      marginBottom: '1rem',
                     }}
                   >
-                    <span>
-                      <strong style={{ color: 'white' }}>Route:</strong>{' '}
-                      {b.routeName} ({b.routeId})
-                    </span>
-                    <span>
-                      <strong style={{ color: 'white' }}>Registration:</strong>{' '}
-                      {b.registrationNumber}
-                    </span>
-                    <span>
-                      <strong style={{ color: 'white' }}>Model:</strong>{' '}
-                      {b.vehicleModel}
-                    </span>
-                    <span>
-                      <strong style={{ color: 'white' }}>Capacity:</strong>{' '}
-                      {b.capacity}
-                    </span>
-                    <span>
-                      <strong style={{ color: 'white' }}>City:</strong>{' '}
-                      {b.city}
-                    </span>
-                    <span>
-                      <strong style={{ color: 'white' }}>Driver:</strong>{' '}
-                      {b.driverId}
-                    </span>
-                  </div>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.85rem',
+                        flexWrap: 'wrap',
+                        marginBottom: '0.9rem',
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: '44px',
+                          height: '44px',
+                          borderRadius: '13px',
+                          background: 'var(--primary-blue)',
+                          color: 'white',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <Bus size={22} />
+                      </span>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <p
+                          style={{
+                            margin: 0,
+                            fontSize: '1.1rem',
+                            fontWeight: '800',
+                            color: 'var(--text-dark)',
+                            letterSpacing: '-0.3px',
+                          }}
+                        >
+                          {b.busNumber}
+                        </p>
+                        <p
+                          style={{
+                            margin: 0,
+                            fontSize: '0.8rem',
+                            color: 'var(--text-light)',
+                          }}
+                        >
+                          {b.routeName}
+                        </p>
+                      </div>
+                      <div
+                        style={{
+                          display: 'flex',
+                          gap: '0.4rem',
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: '0.72rem',
+                            fontWeight: '800',
+                            padding: '0.25rem 0.6rem',
+                            borderRadius: '7px',
+                            background:
+                              counts.unresolved > 0 ? '#cf1322' : '#e9ecef',
+                            color:
+                              counts.unresolved > 0 ? 'white' : '#666',
+                          }}
+                        >
+                          {counts.unresolved} unresolved
+                        </span>
+                        {counts.awaiting > 0 && (
+                          <span
+                            style={{
+                              fontSize: '0.72rem',
+                              fontWeight: '800',
+                              padding: '0.25rem 0.6rem',
+                              borderRadius: '7px',
+                              background: '#0958d9',
+                              color: 'white',
+                            }}
+                          >
+                            {counts.awaiting} awaiting
+                          </span>
+                        )}
+                        <span
+                          style={{
+                            fontSize: '0.72rem',
+                            fontWeight: '700',
+                            padding: '0.25rem 0.6rem',
+                            borderRadius: '7px',
+                            background: '#e9ecef',
+                            color: '#666',
+                          }}
+                        >
+                          {counts.total} all time
+                        </span>
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns:
+                          'repeat(auto-fit, minmax(140px, 1fr))',
+                        gap: '0.45rem 1rem',
+                        fontSize: '0.76rem',
+                        color: 'var(--text-light)',
+                        borderTop: '1px solid var(--border-color)',
+                        paddingTop: '0.85rem',
+                      }}
+                    >
+                      <span>
+                        <strong style={{ color: 'var(--text-dark)' }}>
+                          Route ID:
+                        </strong>{' '}
+                        {b.routeId}
+                      </span>
+                      <span>
+                        <strong style={{ color: 'var(--text-dark)' }}>
+                          Registration:
+                        </strong>{' '}
+                        {b.registrationNumber}
+                      </span>
+                      <span>
+                        <strong style={{ color: 'var(--text-dark)' }}>
+                          Model:
+                        </strong>{' '}
+                        {b.vehicleModel}
+                      </span>
+                      <span>
+                        <strong style={{ color: 'var(--text-dark)' }}>
+                          Capacity:
+                        </strong>{' '}
+                        {b.capacity}
+                      </span>
+                      <span>
+                        <strong style={{ color: 'var(--text-dark)' }}>
+                          City:
+                        </strong>{' '}
+                        {b.city}
+                      </span>
+                      <span>
+                        <strong style={{ color: 'var(--text-dark)' }}>
+                          Driver:
+                        </strong>{' '}
+                        {b.driverId}
+                      </span>
+                    </div>
+                  </section>
                 );
               })()}
-          </div>
-        )}
+            </>
+          )}
+        </div>
+      )}
+
       {/* ── Page heading ─────────────────────────────────────────
           The list needs a clear heading and a short line explaining
           what the page is, so it does not read as a wall of cards. */}
-      <div
-        style={{
-          maxWidth: '850px',
-          margin: '0 auto',
-          width: '100%',
-          padding: '1.25rem 1rem 0.5rem',
-        }}
-      >
-        <h1
+      {/* Non-staff see the heading here; staff have it on the pre-screen. */}
+      {!isAdmin && (
+        <div
           style={{
-            margin: 0,
-            fontSize: '1.45rem',
-            fontWeight: '800',
-            color: 'var(--text-dark)',
-            letterSpacing: '-0.4px',
+            maxWidth: '850px',
+            margin: '0 auto',
+            width: '100%',
+            padding: '1.25rem 1rem 0.5rem',
           }}
         >
-          {isAdmin ? 'Complaints by bus' : 'Bus complaints'}
-        </h1>
-        <p
-          style={{
-            margin: '0.35rem 0 0',
-            fontSize: '0.9rem',
-            color: 'var(--text-light)',
-            maxWidth: '62ch',
-            lineHeight: 1.5,
-          }}
-        >
-          {isAdmin
-            ? 'Every complaint raised against the campus buses. Pick a bus to focus on its complaints, and open one to see the full details.'
-            : 'Complaints raised by passengers on your bus route. Open one to see its status and the transport team’s response.'}
-        </p>
-      </div>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: '1.45rem',
+              fontWeight: '800',
+              color: 'var(--text-dark)',
+              letterSpacing: '-0.4px',
+            }}
+          >
+            Bus complaints
+          </h1>
+          <p
+            style={{
+              margin: '0.35rem 0 0',
+              fontSize: '0.9rem',
+              color: 'var(--text-light)',
+              maxWidth: '62ch',
+              lineHeight: 1.5,
+            }}
+          >
+            Complaints raised by passengers on your bus route. Open one to see
+            its status and the transport team’s response.
+          </p>
+        </div>
+      )}
 
       {/* ── My complaints ───────────────────────────────────────
           The signed-in user's own complaints, with their status. */}
@@ -1432,7 +1725,8 @@ const Community = () => {
         </div>
       )}
 
-      {/* Feed Area */}
+      {/* Feed Area — for staff this only appears once a bus is chosen. */}
+      {(!isAdmin || selectedBus !== 'all') && (
       <main
         className="p-main pb-24"
         style={{
@@ -2048,6 +2342,7 @@ const Community = () => {
           })
         )}
       </main>
+      )}
 
 
       {/* ── Complaint detail sheet ──────────────────────────────
