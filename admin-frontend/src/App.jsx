@@ -13,6 +13,9 @@ import Login from './pages/Login';
  */
 const ALLOWED_ROLES = ['tech_admin', 'admin'];
 
+/** The token is shared by every tab of this origin. */
+const STORAGE_KEY = 'tech_admin_token';
+
 function ProtectedRoute({ children, session }) {
   const location = useLocation();
 
@@ -39,7 +42,7 @@ function ProtectedRoute({ children, session }) {
 
 export default function App() {
   const [authToken, setAuthToken] = useState(() =>
-    localStorage.getItem('tech_admin_token'),
+    localStorage.getItem(STORAGE_KEY),
   );
   const [session, setSession] = useState({ status: 'loading', user: null });
 
@@ -70,7 +73,7 @@ export default function App() {
         if (cancelled) return;
 
         if (!ALLOWED_ROLES.includes(user.role)) {
-          localStorage.removeItem('tech_admin_token');
+          localStorage.removeItem(STORAGE_KEY);
           setAuthToken(null);
           setSession({ status: 'anonymous', user: null });
           return;
@@ -79,7 +82,7 @@ export default function App() {
         setSession({ status: 'authenticated', user });
       } catch {
         if (cancelled) return;
-        localStorage.removeItem('tech_admin_token');
+        localStorage.removeItem(STORAGE_KEY);
         setAuthToken(null);
         setSession({ status: 'anonymous', user: null });
       }
@@ -91,8 +94,29 @@ export default function App() {
     };
   }, [authToken]);
 
+  /**
+   * Keep every tab in step. Without this, signing out in one tab left the
+   * others holding the old token, so a refresh silently restored the
+   * previous session.
+   */
+  useEffect(() => {
+    const onStorage = (event) => {
+      if (event.key !== STORAGE_KEY) return;
+      if (event.newValue === null) {
+        setAuthToken(null);
+        setSession({ status: 'anonymous', user: null });
+        return;
+      }
+      setAuthToken(event.newValue);
+      setSession({ status: 'loading', user: null });
+    };
+
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
   const handleLogout = () => {
-    localStorage.removeItem('tech_admin_token');
+    localStorage.removeItem(STORAGE_KEY);
     setAuthToken(null);
     setSession({ status: 'anonymous', user: null });
   };

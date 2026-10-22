@@ -4,6 +4,7 @@ import {
   Get,
   Body,
   Param,
+  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -47,5 +48,21 @@ export class AttendanceController {
   @UseGuards(JwtAuthGuard)
   getAttendanceByUser(@Param('loginId') loginId: string) {
     return this.attendanceService.getAttendanceForUser(loginId);
+  }
+
+  /**
+   * GET /api/attendance/user/:loginId/summary
+   * A per-day summary for the last N days — what the profile page shows.
+   */
+  @Get('attendance/user/:loginId/summary')
+  @UseGuards(JwtAuthGuard)
+  getAttendanceSummary(
+    @Param('loginId') loginId: string,
+    @Query('days') days?: string,
+  ) {
+    return this.attendanceService.getAttendanceSummary(
+      loginId,
+      days ? parseInt(days, 10) : 7,
+    );
   }
 }

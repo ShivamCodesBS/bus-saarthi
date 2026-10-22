@@ -7,6 +7,9 @@ const AuthContext = createContext();
 
 export const useAuth = () => useContext(AuthContext);
 
+/** The session is shared by every tab of this origin. */
+const STORAGE_KEY = 'bus_saarthi_user';
+
 const urlBase64ToUint8Array = (base64String) => {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
   const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
@@ -51,7 +54,7 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const storedUser = localStorage.getItem('bus_saarthi_user');
+    const storedUser = localStorage.getItem(STORAGE_KEY);
     if (storedUser) {
       try {
         const parsedUser = JSON.parse(storedUser);
@@ -64,6 +67,40 @@ export const AuthProvider = ({ children }) => {
       }
     }
     setLoading(false);
+  }, []);
+
+  /**
+   * Keep every tab in step.
+   *
+   * The `storage` event fires in the OTHER tabs of the same origin when
+   * localStorage changes. Without this, signing out in one tab left the
+   * others signed in, and signing in as a different user in one tab left
+   * the other tabs still holding the previous user's token — so a refresh
+   * silently switched accounts.
+   */
+  useEffect(() => {
+    const onStorage = (event) => {
+      if (event.key !== STORAGE_KEY) return;
+
+      if (event.newValue === null) {
+        // Signed out in another tab.
+        setUser(null);
+        return;
+      }
+
+      try {
+        const nextUser = JSON.parse(event.newValue);
+        setUser(nextUser);
+        if (nextUser?.token) {
+          subscribeToPushNotifications(nextUser.token);
+        }
+      } catch (e) {
+        setUser(null);
+      }
+    };
+
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   // Listen for real-time profile updates across devices
@@ -80,7 +117,7 @@ export const AuthProvider = ({ children }) => {
         setUser(prev => {
           if (!prev) return prev;
           const updated = { ...prev, profile_pic: data.profile_pic };
-          localStorage.setItem('bus_saarthi_user', JSON.stringify(updated));
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
           return updated;
         });
       }
@@ -89,17 +126,28 @@ export const AuthProvider = ({ children }) => {
     return () => socket.disconnect();
   }, [user?.id, user?.login_id]);
 
+  /**
+   * Sign in.
+   *
+   * The session lives in localStorage, which every tab of the same origin
+   * shares. Writing it here is what lets the other tabs pick the change up
+   * through the `storage` event below.
+   */
   const login = (userData) => {
     setUser(userData);
-    localStorage.setItem('bus_saarthi_user', JSON.stringify(userData));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(userData));
     if (userData.token) {
       subscribeToPushNotifications(userData.token);
     }
   };
 
+  /**
+   * Sign out. The other tabs are told by the `storage` event, so a session
+   * cannot survive in a tab that is still open.
+   */
   const logout = () => {
     setUser(null);
-    localStorage.removeItem('bus_saarthi_user');
+    localStorage.removeItem(STORAGE_KEY);
   };
 
   return (

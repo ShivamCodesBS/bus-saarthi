@@ -1,5 +1,30 @@
-import { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, User, MapPin, Bus, Shield, Camera, QrCode, CheckCircle2, XCircle, Clock, Activity, ShieldCheck, Mail, Briefcase } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import {
+  ArrowLeft,
+  User,
+  Bus,
+  Shield,
+  Camera,
+  QrCode,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Mail,
+  Phone,
+  Briefcase,
+  GraduationCap,
+  Users,
+  IdCard,
+  CalendarDays,
+  MapPin,
+  Droplets,
+  UserRound,
+  IdCard as IdCardIcon,
+  ShieldCheck,
+  Fingerprint,
+  LogOut,
+  AlertTriangle,
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
@@ -7,274 +32,929 @@ import { BACKEND_URL } from '../config';
 import toast from 'react-hot-toast';
 import { useLang } from '../context/LanguageContext';
 import '../index.css';
-import { friendlyError, reportError } from '../lib/errors';
+import { friendlyError } from '../lib/errors';
+import UserAvatar from '../components/UserAvatar';
+
+/** How each role is presented. The fields shown come from the User model. */
+const ROLE_META = {
+  passenger: {
+    label: 'Student',
+    Icon: GraduationCap,
+    color: '#0056b3',
+    tagline: 'Bus pass, attendance and complaints',
+  },
+  teacher: {
+    label: 'Teacher / Staff',
+    Icon: Briefcase,
+    color: '#0f766e',
+    tagline: 'Faculty transport pass and attendance',
+  },
+  parent: {
+    label: 'Parent',
+    Icon: Users,
+    color: '#7c3aed',
+    tagline: 'Track your child’s bus and complaints',
+  },
+  driver: {
+    label: 'Driver',
+    Icon: Bus,
+    color: '#ea580c',
+    tagline: 'Assigned bus and route',
+  },
+  transport_incharge: {
+    label: 'Transport Incharge',
+    Icon: Bus,
+    color: '#28a745',
+    tagline: 'Fleet, routes and driver management',
+  },
+  admin: {
+    label: 'Administrator',
+    Icon: Shield,
+    color: '#dc2626',
+    tagline: 'Full access to users, routes and complaints',
+  },
+  tech_admin: {
+    label: 'System Administrator',
+    Icon: ShieldCheck,
+    color: '#dc2626',
+    tagline: 'Full access to users, routes and complaints',
+  },
+};
+
+const FEE_META = {
+  paid: { label: 'Fee Paid', bg: '#e6fae6', color: '#28a745' },
+  unpaid: { label: 'Fee Unpaid', bg: '#fff1f0', color: '#cf1322' },
+  partial: { label: 'Fee Partially Paid', bg: '#fffbe6', color: '#d46b08' },
+};
 
 const Profile = () => {
   const navigate = useNavigate();
-  const { user, login } = useAuth();
-  const { t, translateName } = useLang();
-  const [profilePic, setProfilePic] = useState(user?.profile_pic || null);
+  const { user, login, logout } = useAuth();
+  const { t } = useLang();
   const fileInputRef = useRef(null);
+
+  const [profile, setProfile] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [attendance, setAttendance] = useState(null);
   const [showIdCard, setShowIdCard] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const loginId = user?.loginId || user?.login_id || user?.id;
+  const role = user?.role || 'passenger';
+  const roleMeta = ROLE_META[role] || ROLE_META.passenger;
+  const RoleIcon = roleMeta.Icon;
+
+  /**
+   * Load the profile from the server.
+   *
+   * The session in localStorage only holds the login-time snapshot, so the
+   * fee status, the picture and the route shown here were stale — a
+   * passenger whose fee was changed to unpaid still saw "Fee Paid" until
+   * they signed in again. `/api/users/me` is the live record.
+   */
+  const loadProfile = useCallback(async () => {
+    if (!loginId) {
+      setIsLoading(false);
+      return;
+    }
+    try {
+      const res = await axios.get(`${BACKEND_URL}/api/users/me`, {
+        headers: { Authorization: `Bearer ${user?.token}` },
+      });
+      setProfile(res.data);
+
+      // Keep the cached session in step with the server copy.
+      if (user) {
+        login({
+          ...user,
+          profile_pic: res.data.profilePic ?? user.profile_pic,
+          fee_status: res.data.feeStatus ?? user.fee_status,
+          route_id: res.data.routeId ?? user.route_id,
+          name: res.data.name ?? user.name,
+        });
+      }
+    } catch (err) {
+      console.error('Failed to load profile', err);
+      toast.error(
+        friendlyError(err, 'We could not load your profile. Please try again.'),
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, [loginId, user?.token]);
+
+  /**
+   * Load the attendance summary. The raw records are one per boarding; the
+   * summary is a per-day present/absent list, which is what this page shows.
+   */
+  const loadAttendance = useCallback(async () => {
+    if (!loginId) return;
+    try {
+      const res = await axios.get(
+        `${BACKEND_URL}/api/attendance/user/${loginId}/summary?days=7`,
+        { headers: { Authorization: `Bearer ${user?.token}` } },
+      );
+      setAttendance(res.data?.data ?? null);
+    } catch (err) {
+      console.error('Failed to load attendance', err);
+    }
+  }, [loginId, user?.token]);
+
+  useEffect(() => {
+    loadProfile();
+    loadAttendance();
+  }, [loadProfile, loadAttendance]);
 
   const handleProfilePicUpload = async (e) => {
-    const file = e.target.files[0];
+    const file = e.target.files?.[0];
     if (!file) return;
 
     const formData = new FormData();
     formData.append('file', file);
 
+    setIsUploading(true);
     const loadingToast = toast.loading('Uploading profile picture...');
     try {
-      const res = await axios.post(`${BACKEND_URL}/api/upload/profile_pic`, formData, {
-        headers: {
-          'Authorization': `Bearer ${user?.token}`
-        }
-      });
+      const res = await axios.post(
+        `${BACKEND_URL}/api/upload/profile_pic`,
+        formData,
+        { headers: { Authorization: `Bearer ${user?.token}` } },
+      );
       if (res.data.status === 'success') {
-        setProfilePic(res.data.url);
-        // Persist the updated profile_pic in local storage via AuthContext
-        if (login && user) {
-          login({ ...user, profile_pic: res.data.url });
-        }
+        setProfile((p) => ({ ...p, profilePic: res.data.url }));
+        login({ ...user, profile_pic: res.data.url });
         toast.success('Profile picture updated!', { id: loadingToast });
       } else {
-        toast.error('The upload did not succeed. Please try a smaller file.', { id: loadingToast });
+        toast.error('The upload did not succeed. Please try a smaller file.', {
+          id: loadingToast,
+        });
       }
     } catch (err) {
-      const msg = err.response?.data?.detail || err.message || 'Network error';
-      toast.error('We could not upload the image. Please try again.', { id: loadingToast });
-      console.error('Profile pic upload error:', err.response?.data || err);
+      toast.error(
+        friendlyError(err, 'We could not upload the image. Please try again.'),
+        { id: loadingToast },
+      );
+    } finally {
+      setIsUploading(false);
+      // Allow the same file to be selected again.
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
-  const [attendanceHistory, setAttendanceHistory] = useState([]);
+  /** The initials shown when the account has no picture. */
+  const initials = (profile?.name || user?.name || '?')
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w.charAt(0).toUpperCase())
+    .join('') || '?';
 
-  useEffect(() => {
-    const fetchAttendance = async () => {
-      try {
-        const loginId = user?.loginId || user?.login_id || user?.id;
-        if (!loginId) return;
-        const res = await axios.get(`${BACKEND_URL}/api/attendance/user/${loginId}`);
-        if (res.data.status === 'success') {
-          setAttendanceHistory(res.data.data);
-        }
-      } catch (err) {
-        console.error('Failed to load attendance history', err);
-      }
-    };
-    fetchAttendance();
-  }, [user]);
+  const profilePic = profile?.profilePic || user?.profile_pic;
+  const feeStatus = profile?.feeStatus || user?.fee_status;
+  const feeMeta = FEE_META[feeStatus] || FEE_META.unpaid;
+
+  /** One labelled value in a detail row. */
+  const Detail = ({ icon: Icon, label, value, mono }) => {
+    if (value === null || value === undefined || value === '') return null;
+    return (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: '0.7rem',
+          padding: '0.6rem 0',
+          minWidth: 0,
+        }}
+      >
+        <span
+          style={{
+            width: '32px',
+            height: '32px',
+            borderRadius: '9px',
+            background: 'var(--bg-color)',
+            color: 'var(--primary-blue)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}
+        >
+          <Icon size={15} />
+        </span>
+        <div style={{ minWidth: 0 }}>
+          <p
+            style={{
+              margin: 0,
+              fontSize: '0.72rem',
+              color: 'var(--text-light)',
+              fontWeight: '600',
+              textTransform: 'uppercase',
+              letterSpacing: '0.03em',
+            }}
+          >
+            {label}
+          </p>
+          <p
+            style={{
+              margin: '0.1rem 0 0',
+              fontSize: '0.92rem',
+              color: 'var(--text-dark)',
+              fontWeight: '600',
+              fontFamily: mono ? 'monospace' : 'inherit',
+              overflowWrap: 'anywhere',
+            }}
+          >
+            {value}
+          </p>
+        </div>
+      </div>
+    );
+  };
+
+  /** A titled card. */
+  const Section = ({ title, icon: Icon, children, accent }) => (
+    <section
+      className="glass"
+      style={{
+        borderRadius: '18px',
+        padding: '1.25rem',
+        border: '1px solid var(--border-color)',
+        boxShadow: '0 2px 10px rgba(16,24,40,0.05)',
+      }}
+    >
+      {title && (
+        <h2
+          style={{
+            margin: '0 0 0.9rem',
+            fontSize: '0.78rem',
+            fontWeight: '800',
+            color: accent || 'var(--primary-blue)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+          }}
+        >
+          {Icon && <Icon size={15} />} {title}
+        </h2>
+      )}
+      {children}
+    </section>
+  );
 
   return (
-    <div className="min-h-screen flex flex-col relative bg-[var(--bg-color)]">
-      {/* Header */}
-      <header className="p-header sticky top-0" style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        backgroundColor: 'var(--primary-blue)', color: 'white', zIndex: 10,
-        boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <button onClick={() => navigate(-1)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <ArrowLeft size={24} />
+    <div className="min-h-screen flex flex-col relative">
+      {/* ── Header ─────────────────────────────────────────────── */}
+      <header
+        className="p-header sticky top-0"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '1rem',
+          backgroundColor: 'var(--primary-blue)',
+          color: 'white',
+          zIndex: 40,
+          boxShadow: '0 2px 12px rgba(0,0,0,0.12)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.9rem', minWidth: 0 }}>
+          <button
+            onClick={() => navigate(-1)}
+            aria-label="Go back"
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'white',
+              cursor: 'pointer',
+              display: 'flex',
+              padding: 0,
+            }}
+          >
+            <ArrowLeft size={22} />
           </button>
-          <h1 style={{ fontSize: '1.25rem', fontWeight: '700', margin: 0, letterSpacing: '0.5px' }}>{t('myProfile')}</h1>
+          <h1
+            style={{
+              fontSize: '1.1rem',
+              fontWeight: '700',
+              margin: 0,
+              letterSpacing: '-0.2px',
+            }}
+          >
+            My Profile
+          </h1>
         </div>
-
+        <button
+          onClick={() => {
+            logout();
+            navigate('/login', { replace: true });
+          }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.4rem',
+            background: 'rgba(255,255,255,0.16)',
+            border: '1px solid rgba(255,255,255,0.28)',
+            color: 'white',
+            borderRadius: '20px',
+            padding: '0.4rem 0.85rem',
+            fontSize: '0.78rem',
+            fontWeight: '700',
+            cursor: 'pointer',
+          }}
+        >
+          <LogOut size={14} /> Log out
+        </button>
       </header>
 
-      <main style={{ paddingBottom: '6rem' }}>
-        {/* Profile Banner */}
-        <div style={{
-          backgroundColor: 'var(--primary-blue)', height: '120px',
-          borderBottomLeftRadius: '35px', borderBottomRightRadius: '35px',
-          position: 'relative', marginBottom: '5rem',
-          boxShadow: '0 8px 20px rgba(18, 52, 86, 0.15)'
-        }}>
+      <main
+        className="p-main"
+        style={{
+          maxWidth: '860px',
+          margin: '0 auto',
+          width: '100%',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+          gap: '1rem',
+          alignItems: 'start',
+        }}
+      >
+        {/* ── Identity card ─────────────────────────────────────── */}
+        <section
+          className="glass"
+          style={{
+            borderRadius: '18px',
+            padding: '1.5rem',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '0.9rem',
+            textAlign: 'center',
+            border: '1px solid var(--border-color)',
+            boxShadow: '0 2px 10px rgba(16,24,40,0.05)',
+          }}
+        >
           {/* Avatar */}
-          <div style={{
-            position: 'absolute', bottom: '-50px', left: '50%', transform: 'translateX(-50%)',
-            width: '110px', height: '110px', backgroundColor: 'var(--white)', borderRadius: '50%',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            border: '5px solid var(--white)', overflow: 'hidden', zIndex: 5
-          }}>
-            {profilePic ? (
-              <img src={profilePic} alt="Profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            ) : (
-              <User size={55} color="var(--primary-blue)" style={{ opacity: 0.8 }} />
-            )}
-            <button 
-              onClick={() => fileInputRef.current.click()}
+          <div
+            style={{
+              position: 'relative',
+              width: '108px',
+              height: '108px',
+            }}
+          >
+            <UserAvatar
+              src={profilePic}
+              name={profile?.name || user?.name}
+              size={108}
+              className="border-[3px] border-[var(--border-color)]"
               style={{
-                position: 'absolute', bottom: 0, right: 0, backgroundColor: 'var(--secondary-orange)',
-                color: 'white', border: 'none', borderRadius: '50%', padding: '0.5rem', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-                transition: 'transform 0.2s'
+                background: profilePic
+                  ? 'var(--bg-color)'
+                  : `linear-gradient(135deg, ${roleMeta.color}, ${roleMeta.color}cc)`,
               }}
-              onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.1)'}
-              onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+              aria-label="Change profile picture"
+              style={{
+                position: 'absolute',
+                bottom: 0,
+                right: 0,
+                width: '32px',
+                height: '32px',
+                background: 'var(--secondary-orange)',
+                color: 'white',
+                border: '2px solid var(--card-bg)',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: isUploading ? 'default' : 'pointer',
+              }}
             >
-              <Camera size={18} />
+              <Camera size={15} />
             </button>
-            <input 
-              type="file" 
-              ref={fileInputRef} 
-              style={{ display: 'none' }} 
-              accept="image/*" 
-              onChange={handleProfilePicUpload} 
+            <input
+              type="file"
+              ref={fileInputRef}
+              style={{ display: 'none' }}
+              accept="image/*"
+              onChange={handleProfilePicUpload}
             />
           </div>
-        </div>
 
-        <div className="p-main" style={{ paddingTop: 0, display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '600px', margin: '0 auto' }}>
-          
-          <div style={{ textAlign: 'center', animation: 'fadeIn 0.5s ease-out' }}>
-            <h2 style={{ fontSize: '1.6rem', fontWeight: '800', color: 'var(--text-dark)', margin: '0 0 0.4rem 0' }}>
-              {translateName(user?.name) || t('passengerProfile')}
+          <div>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: '1.3rem',
+                fontWeight: '800',
+                color: 'var(--text-dark)',
+                letterSpacing: '-0.3px',
+              }}
+            >
+              {profile?.name || user?.name || '—'}
             </h2>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.4rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.8rem' }}>
-                <p style={{ color: 'var(--text-light)', margin: 0, fontSize: '0.95rem', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <Shield size={16} color="var(--primary-blue)" />
-                  {user?.role === 'admin' ? `${t('administrator')} | ID: ${user?.loginId || user?.login_id || 'N/A'}` : user?.role === 'driver' ? `${t('driver')} ID: ${user?.loginId || user?.login_id || 'N/A'}` : `ID: ${user?.loginId || user?.login_id || 'N/A'}`}
-                </p>
-                {user?.role === 'passenger' && (
-                  <span style={{ backgroundColor: '#e6fae6', color: '#28a745', padding: '0.3rem 0.8rem', borderRadius: '12px', fontSize: '0.75rem', fontWeight: '700', border: '1px solid #c3e6c3' }}>
-                    {t('feePaidStatus')}
-                  </span>
-                )}
-              </div>
-              {user?.email && (
-                <p style={{ color: 'var(--text-light)', margin: 0, fontSize: '0.9rem', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <Mail size={14} /> {user.email}
-                </p>
-              )}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.4rem',
+                marginTop: '0.45rem',
+                flexWrap: 'wrap',
+              }}
+            >
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  background: roleMeta.color + '18',
+                  color: roleMeta.color,
+                  padding: '0.25rem 0.65rem',
+                  borderRadius: '20px',
+                  fontSize: '0.75rem',
+                  fontWeight: '800',
+                }}
+              >
+                <RoleIcon size={13} /> {roleMeta.label}
+              </span>
+              <span
+                style={{
+                  fontFamily: 'monospace',
+                  fontSize: '0.78rem',
+                  color: 'var(--text-light)',
+                  fontWeight: '700',
+                }}
+              >
+                {loginId}
+              </span>
             </div>
+            <p
+              style={{
+                margin: '0.5rem 0 0',
+                fontSize: '0.82rem',
+                color: 'var(--text-light)',
+              }}
+            >
+              {roleMeta.tagline}
+            </p>
           </div>
 
-          {/* Digital ID Card (Toggleable) */}
-          {showIdCard && (
-            <div className="animate-slide-up" style={{
-              backgroundColor: 'var(--card-bg)', padding: '1.8rem', borderRadius: '24px',
-              boxShadow: '0 12px 30px rgba(18, 52, 86, 0.1)', border: '2px solid var(--primary-blue)',
-              textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.2rem',
-              position: 'relative', overflow: 'hidden'
-            }}>
-              <h3 style={{ margin: 0, color: 'var(--primary-blue)', fontSize: '1.2rem', fontWeight: '800' }}>{t('digitalBusPass')}</h3>
-              
-              <div style={{ width: '160px', height: '160px', backgroundColor: '#f8f9fa', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '16px', border: '1px solid #e9ecef', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)' }}>
-                <QrCode size={110} color="var(--text-dark)" />
-              </div>
-              <p style={{ fontSize: '0.9rem', color: 'var(--text-light)', margin: 0, fontWeight: '500' }}>{t('scanQrHint')}</p>
-            </div>
+          {/* Fee status — only for the roles that pay a transport fee */}
+          {(role === 'passenger' || role === 'teacher') && (
+            <span
+              style={{
+                background: feeMeta.bg,
+                color: feeMeta.color,
+                padding: '0.35rem 0.9rem',
+                borderRadius: '20px',
+                fontSize: '0.8rem',
+                fontWeight: '800',
+              }}
+            >
+              {feeMeta.label}
+            </span>
           )}
 
-          {/* Weekly Attendance (For Passengers) */}
-          {user?.role === 'passenger' && (
-            <div className="glass animate-slide-up p-glass" style={{ borderRadius: '24px', padding: '1.5rem', boxShadow: '0 8px 24px rgba(0,0,0,0.06)', border: '1px solid rgba(255,255,255,0.5)' }}>
-              <h3 style={{ margin: '0 0 1.2rem 0', fontSize: '1.15rem', color: 'var(--primary-blue)', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <CheckCircle2 size={20} color="var(--primary-blue)" /> {t('weeklyAttendance')}
-              </h3>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', overflowX: 'auto', paddingBottom: '0.5rem' }}>
-                {attendanceHistory.length > 0 ? (
-                  attendanceHistory.map((record, idx) => (
-                    <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.6rem', minWidth: '3.5rem' }}>
-                      <span style={{ fontSize: '0.8rem', color: 'var(--text-light)', fontWeight: '700', textTransform: 'uppercase' }}>{t(record.day.toLowerCase())}</span>
-                      <div style={{
-                        width: '42px', height: '42px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        backgroundColor: record.status === 'present' ? '#e6fae6' : '#fff1f0',
-                        color: record.status === 'present' ? '#28a745' : '#cf1322',
-                        boxShadow: record.status === 'present' ? '0 4px 10px rgba(40, 167, 69, 0.2)' : '0 4px 10px rgba(207, 19, 34, 0.2)'
-                      }}>
-                        {record.status === 'present' ? <CheckCircle2 size={22} strokeWidth={2.5} /> : <XCircle size={22} strokeWidth={2.5} />}
-                      </div>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-light)', fontWeight: '600' }}>{record.date}</span>
-                    </div>
-                  ))
-                ) : (
-                  <div style={{ width: '100%', padding: '1.5rem', textAlign: 'center', color: 'var(--text-light)', fontWeight: '500', backgroundColor: '#f8f9fa', borderRadius: '12px' }}>
-                    No attendance records found for this week.
-                  </div>
+          {/* Bus pass */}
+          {(role === 'passenger' || role === 'teacher') && (
+            <button
+              onClick={() => setShowIdCard((v) => !v)}
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                padding: '0.7rem',
+                borderRadius: '12px',
+                border: '1px solid var(--border-color)',
+                background: 'var(--bg-color)',
+                color: 'var(--text-dark)',
+                fontWeight: '700',
+                fontSize: '0.88rem',
+                cursor: 'pointer',
+              }}
+            >
+              <IdCardIcon size={16} />
+              {showIdCard ? 'Hide bus pass' : 'View bus pass'}
+            </button>
+          )}
+
+          {showIdCard && (
+            <div
+              style={{
+                width: '100%',
+                borderRadius: '16px',
+                border: '1px solid var(--border-color)',
+                background: 'var(--bg-color)',
+                padding: '1.25rem',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '0.9rem',
+              }}
+            >
+              <div
+                style={{
+                  width: '132px',
+                  height: '132px',
+                  background: 'var(--card-bg)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: '14px',
+                  border: '1px solid var(--border-color)',
+                }}
+              >
+                <QrCode size={96} color="var(--text-dark)" />
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: '0.95rem',
+                    fontWeight: '800',
+                    color: 'var(--text-dark)',
+                  }}
+                >
+                  {profile?.name || user?.name}
+                </p>
+                <p
+                  style={{
+                    margin: '0.2rem 0 0',
+                    fontFamily: 'monospace',
+                    fontSize: '0.8rem',
+                    color: 'var(--text-light)',
+                  }}
+                >
+                  {loginId}
+                </p>
+                {profile?.routeId && (
+                  <p
+                    style={{
+                      margin: '0.35rem 0 0',
+                      fontSize: '0.8rem',
+                      color: 'var(--text-light)',
+                    }}
+                  >
+                    {profile.routeName || `Route ${profile.routeId}`}
+                    {profile.busNumber ? ` · Bus ${profile.busNumber}` : ''}
+                  </p>
                 )}
               </div>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: '0.76rem',
+                  color: 'var(--text-light)',
+                  textAlign: 'center',
+                }}
+              >
+                {t('scanQrHint')}
+              </p>
             </div>
           )}
+        </section>
 
-          {/* Admin / Transport Incharge Details Section */}
-          {(user?.role === 'admin' || user?.role === 'transport_incharge') && (
-            <div className="animate-slide-up" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-              
-              {/* Role & Access Level */}
-              <div className="glass p-glass" style={{ borderRadius: '24px', padding: '1.5rem', boxShadow: '0 8px 24px rgba(0,0,0,0.06)', border: '1px solid rgba(255,255,255,0.5)' }}>
-                <h3 style={{ margin: '0 0 1.2rem 0', fontSize: '1.15rem', color: 'var(--primary-blue)', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <Briefcase size={20} color="var(--primary-blue)" /> {t('roleAndAccess', 'Role & Access Level')}
-                </h3>
-                
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                    <div style={{ backgroundColor: '#e9ecef', padding: '0.6rem', borderRadius: '12px', color: 'var(--primary-blue)' }}>
-                      <ShieldCheck size={20} />
-                    </div>
-                    <div>
-                      <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-light)', fontWeight: '600' }}>Designation</p>
-                      <p style={{ margin: 0, fontWeight: '700', color: 'var(--text-dark)', textTransform: 'capitalize' }}>
-                        {user?.designation || (user?.role === 'admin' ? 'System Administrator' : 'Transport Incharge')}
-                      </p>
-                    </div>
-                  </div>
+        {/* ── Details ───────────────────────────────────────────── */}
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1rem',
+            minWidth: 0,
+          }}
+        >
+          {/* Route & bus — everyone who is allocated to a route */}
+          {profile?.routeId && (
+            <Section title="Route & bus" icon={Bus}>
+              <Detail
+                icon={IdCard}
+                label="Route"
+                value={
+                  profile.routeName
+                    ? `${profile.routeName} (${profile.routeId})`
+                    : `Route ${profile.routeId}`
+                }
+              />
+              <Detail
+                icon={Bus}
+                label="Bus serving this route"
+                value={profile.busNumber}
+                mono
+              />
+              {profile.driverName && (
+                <Detail icon={UserRound} label="Driver" value={profile.driverName} />
+              )}
+            </Section>
+          )}
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                    <div style={{ backgroundColor: '#e9ecef', padding: '0.6rem', borderRadius: '12px', color: 'var(--primary-blue)' }}>
-                      <Shield size={20} />
-                    </div>
-                    <div>
-                      <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-light)', fontWeight: '600' }}>Access Level</p>
-                      <span style={{ backgroundColor: '#e6fae6', color: '#28a745', padding: '0.2rem 0.6rem', borderRadius: '8px', fontSize: '0.75rem', fontWeight: '700', border: '1px solid #c3e6c3', display: 'inline-block', marginTop: '0.2rem' }}>
-                        {user?.role === 'admin' ? 'Full Access - Fleet & Users' : 'Route & Driver Management'}
-                      </span>
-                    </div>
-                  </div>
+          {/* Contact */}
+          <Section title="Contact" icon={Phone}>
+            <Detail icon={Phone} label="Phone" value={profile?.phone} />
+            <Detail icon={Mail} label="Email" value={profile?.email} />
+            <Detail
+              icon={MapPin}
+              label="Address"
+              value={profile?.address}
+            />
+          </Section>
+
+          {/* Student / staff specifics */}
+          {(role === 'passenger' || role === 'teacher') && (
+            <Section title="Academic details" icon={GraduationCap}>
+              <Detail
+                icon={GraduationCap}
+                label={role === 'teacher' ? 'Class / course' : 'Class'}
+                value={profile?.gradeClass}
+              />
+              {role === 'teacher' && (
+                <Detail
+                  icon={Briefcase}
+                  label="Subject"
+                  value={profile?.subject}
+                />
+              )}
+              <Detail
+                icon={CalendarDays}
+                label="Date of birth"
+                value={
+                  profile?.dob
+                    ? new Date(profile.dob).toLocaleDateString('en-IN', {
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric',
+                      })
+                    : null
+                }
+              />
+              <Detail
+                icon={Droplets}
+                label="Blood group"
+                value={profile?.bloodGroup}
+              />
+              <Detail
+                icon={Users}
+                label="Parent / guardian"
+                value={profile?.parentName}
+              />
+              <Detail
+                icon={Phone}
+                label="Parent phone"
+                value={profile?.parentPhone}
+              />
+            </Section>
+          )}
+
+          {/* Driver specifics */}
+          {role === 'driver' && (
+            <Section title="Licence" icon={IdCardIcon}>
+              <Detail
+                icon={IdCardIcon}
+                label="Licence number"
+                value={profile?.licenseNumber}
+                mono
+              />
+              <Detail
+                icon={CalendarDays}
+                label="Licence expires"
+                value={
+                  profile?.licenseExpiry
+                    ? new Date(profile.licenseExpiry).toLocaleDateString('en-IN', {
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric',
+                      })
+                    : null
+                }
+              />
+              <Detail
+                icon={Clock}
+                label="Experience"
+                value={
+                  profile?.experienceYears
+                    ? `${profile.experienceYears} years`
+                    : null
+                }
+              />
+            </Section>
+          )}
+
+          {/* Staff specifics */}
+          {(role === 'admin' ||
+            role === 'tech_admin' ||
+            role === 'transport_incharge') && (
+            <Section title="Staff details" icon={Briefcase}>
+              <Detail
+                icon={Briefcase}
+                label="Designation"
+                value={profile?.designation}
+              />
+              <Detail
+                icon={Phone}
+                label="Phone"
+                value={profile?.phone}
+              />
+              <Detail icon={Mail} label="Email" value={profile?.email} />
+              <Detail
+                icon={Clock}
+                label="Last sign-in"
+                value={
+                  profile?.lastLogin
+                    ? new Date(profile.lastLogin).toLocaleString('en-IN', {
+                        day: '2-digit',
+                        month: 'short',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    : null
+                }
+              />
+            </Section>
+          )}
+
+          {/* Face enrolment — only a student rides the bus */}
+          {role === 'passenger' && (
+            <Section title="Face recognition" icon={Fingerprint}>
+              {profile?.faceEnrolledAt ? (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.6rem',
+                    fontSize: '0.9rem',
+                    fontWeight: '700',
+                    color: '#28a745',
+                  }}
+                >
+                  <CheckCircle2 size={17} />
+                  Enrolled on{' '}
+                  {new Date(profile.faceEnrolledAt).toLocaleDateString('en-IN', {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric',
+                  })}
                 </div>
-              </div>
-
-              {/* System & Activity Stats - Only shown if dynamic data exists */}
-              {(user?.last_login || (user?.recent_actions && user?.recent_actions.length > 0)) && (
-                <div className="glass p-glass" style={{ borderRadius: '24px', padding: '1.5rem', boxShadow: '0 8px 24px rgba(0,0,0,0.06)', border: '1px solid rgba(255,255,255,0.5)' }}>
-                  <h3 style={{ margin: '0 0 1.2rem 0', fontSize: '1.15rem', color: 'var(--primary-blue)', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <Activity size={20} color="var(--primary-blue)" /> System & Activity Stats
-                  </h3>
-                  
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
-                    {user?.last_login && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                        <div style={{ backgroundColor: '#e9ecef', padding: '0.6rem', borderRadius: '12px', color: 'var(--primary-blue)' }}>
-                          <Clock size={20} />
-                        </div>
-                        <div>
-                          <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-light)', fontWeight: '600' }}>Last Login</p>
-                          <p style={{ margin: 0, fontWeight: '700', color: 'var(--text-dark)' }}>{user.last_login}</p>
-                        </div>
-                      </div>
-                    )}
-
-                    {user?.recent_actions && user.recent_actions.length > 0 && (
-                      <div>
-                        <p style={{ margin: '0 0 0.8rem 0', fontSize: '0.9rem', color: 'var(--text-light)', fontWeight: '600' }}>Recent Actions (Audit Log)</p>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', borderLeft: '2px solid #e9ecef', paddingLeft: '1.2rem', marginLeft: '0.6rem' }}>
-                          {user.recent_actions.map((action, idx) => (
-                            <div key={idx} style={{ position: 'relative' }}>
-                              <div style={{ position: 'absolute', left: '-1.55rem', top: '0.25rem', width: '12px', height: '12px', borderRadius: '50%', backgroundColor: 'var(--primary-blue)', border: '2.5px solid white', boxShadow: '0 0 0 1px var(--primary-blue)' }}></div>
-                              <p style={{ margin: 0, fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-dark)' }}>{action.title}</p>
-                              <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-light)', fontWeight: '500' }}>{action.time}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
+              ) : (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.6rem',
+                    fontSize: '0.9rem',
+                    fontWeight: '700',
+                    color: '#d46b08',
+                  }}
+                >
+                  <AlertTriangle size={17} />
+                  Not enrolled yet — visit the transport office
                 </div>
               )}
-            </div>
+            </Section>
+          )}
+
+          {/* Live attendance — from the bus app's face recognition */}
+          {(role === 'passenger' || role === 'teacher') && (
+            <Section title="Attendance" icon={CheckCircle2}>
+              {attendance ? (
+                <>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      gap: '0.4rem',
+                      marginBottom: '0.9rem',
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: '1.9rem',
+                        fontWeight: '800',
+                        color: 'var(--text-dark)',
+                        letterSpacing: '-0.5px',
+                      }}
+                    >
+                      {attendance.attendancePercent}%
+                    </span>
+                    <span
+                      style={{
+                        fontSize: '0.82rem',
+                        color: 'var(--text-light)',
+                        fontWeight: '600',
+                      }}
+                    >
+                      present · {attendance.presentDays} of{' '}
+                      {attendance.totalDays} days
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
+                      gap: '0.4rem',
+                    }}
+                  >
+                    {attendance.days.map((day) => {
+                      const date = new Date(day.date + 'T00:00:00');
+                      const dow = date
+                        .toLocaleDateString('en-IN', { weekday: 'short' })
+                        .slice(0, 2);
+                      return (
+                        <div
+                          key={day.date}
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            minWidth: 0,
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: '0.68rem',
+                              color: 'var(--text-light)',
+                              fontWeight: '700',
+                              textTransform: 'uppercase',
+                            }}
+                          >
+                            {dow}
+                          </span>
+                          <div
+                            title={
+                              day.present
+                                ? `Present on ${day.date}`
+                                : `Not on the bus on ${day.date}`
+                            }
+                            style={{
+                              width: '100%',
+                              aspectRatio: '1',
+                              maxWidth: '38px',
+                              borderRadius: '12px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              backgroundColor: day.present
+                                ? '#e6fae6'
+                                : 'var(--bg-color)',
+                              color: day.present ? '#28a745' : '#adb5bd',
+                              border: `1px solid ${day.present ? '#c3e6c3' : 'var(--border-color)'}`,
+                            }}
+                          >
+                            {day.present ? (
+                              <CheckCircle2 size={17} strokeWidth={2.5} />
+                            ) : (
+                              <XCircle size={17} strokeWidth={2.5} />
+                            )}
+                          </div>
+                          <span
+                            style={{
+                              fontSize: '0.62rem',
+                              color: 'var(--text-light)',
+                              fontWeight: '600',
+                            }}
+                          >
+                            {date.getDate()}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {attendance.totalRecords > 0 && (
+                    <p
+                      style={{
+                        margin: '0.9rem 0 0',
+                        fontSize: '0.76rem',
+                        color: 'var(--text-light)',
+                      }}
+                    >
+                      {attendance.totalRecords} boarding
+                      {attendance.totalRecords === 1 ? '' : 's'} recorded by the
+                      bus scanner.
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: '0.88rem',
+                    color: 'var(--text-light)',
+                  }}
+                >
+                  {isLoading
+                    ? 'Loading attendance…'
+                    : 'No attendance has been recorded for you yet. It appears here once the bus scanner recognises you.'}
+                </p>
+              )}
+            </Section>
           )}
         </div>
       </main>

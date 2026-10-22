@@ -26,11 +26,14 @@ export class UsersController {
   /**
    * The signed-in user's own record. This MUST be declared before
    * `:loginId`, otherwise Nest matches "me" as a login id.
+   *
+   * Any authenticated user may read their own profile — this is what the
+   * profile page and the admin portal's session check use.
    */
   @Get('me')
   findMe(@Request() req: any) {
     const loginId = req.user?.loginId || req.user?.login_id;
-    return this.usersService.findByLoginId(loginId);
+    return this.usersService.findOwnProfile(loginId);
   }
 
   @Get()

@@ -5,6 +5,7 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import HamburgerMenu from '../components/HamburgerMenu';
+import UserAvatar from '../components/UserAvatar';
 import WakeAlarmModal from '../components/WakeAlarmModal';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
@@ -632,28 +633,24 @@ const Home = () => {
               className="bg-transparent p-[2px] rounded-full cursor-pointer transition-all duration-300 hover:scale-105 active:scale-95 flex items-center justify-center border-none shadow-sm hover:shadow-md"
               style={{ background: 'linear-gradient(135deg, #3b82f6, #8b5cf6, #ec4899)' }}
             >
-              <div className="w-9 h-9 rounded-full bg-white dark:bg-slate-900 flex items-center justify-center overflow-hidden border-2 border-transparent relative">
-                {user?.profile_pic ? (
-                  <img src={user.profile_pic} alt="Profile" className="w-full h-full object-cover" />
-                ) : (
-                  <span className="font-bold text-sm bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-violet-600 dark:from-blue-400 dark:to-violet-400">
-                    {user?.name ? user.name.charAt(0).toUpperCase() : <User size={18} className="text-blue-500" />}
-                  </span>
-                )}
-              </div>
+              <UserAvatar
+                src={user?.profile_pic}
+                name={user?.name}
+                size={36}
+                className="border-2 border-transparent"
+              />
             </button>
             {showProfileMenu && (
               <div className="absolute top-full right-0 mt-3 w-64 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/60 dark:border-slate-700/60 rounded-2xl shadow-2xl z-50 p-2 animate-in slide-in-from-top-4 fade-in duration-300 flex flex-col gap-1">
                 
                 {/* User Info Header */}
                 <div className="flex items-center gap-3 p-3 mb-1">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-100 to-violet-100 dark:from-blue-900/40 dark:to-violet-900/40 flex items-center justify-center text-blue-600 dark:text-blue-400 font-bold text-xl flex-shrink-0 overflow-hidden ring-2 ring-white dark:ring-slate-800 shadow-sm">
-                    {user?.profile_pic ? (
-                      <img src={user.profile_pic} alt="Profile" className="w-full h-full object-cover" />
-                    ) : (
-                      user?.name ? user.name.charAt(0).toUpperCase() : <User size={24} />
-                    )}
-                  </div>
+                  <UserAvatar
+                    src={user?.profile_pic}
+                    name={user?.name}
+                    size={48}
+                    className="ring-2 ring-white dark:ring-slate-800 shadow-sm"
+                  />
                   <div className="flex flex-col min-w-0">
                     <span className="font-bold text-slate-800 dark:text-slate-100 truncate text-base">{user?.name || 'Passenger User'}</span>
                     <span className="text-xs text-slate-500 dark:text-slate-400 truncate font-medium">{user?.email || user?.login_id || 'passenger@invertis.edu'}</span>

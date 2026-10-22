@@ -247,4 +247,84 @@ export class AttendanceService {
       take: 30,
     });
   }
+
+  /**
+   * A per-day attendance summary for the profile page.
+   *
+   * The raw attendance rows are one-per-boarding; the profile needs "was
+   * this student on the bus on each of the last N days", with the day
+   * labelled. The IST day boundary is used so the day rolls over at the
+   * campus day change, not at UTC midnight.
+   */
+  async getAttendanceSummary(loginId: string, days = 7) {
+    const end = new Date();
+    const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
+
+    const records = await this.prisma.attendance.findMany({
+      where: { passengerId: loginId, timestamp: { gte: start } },
+      orderBy: { timestamp: 'desc' },
+    });
+
+    // Group the records by calendar day (in the campus timezone).
+    const byDay = new Map<string, any>();
+    for (const r of records) {
+      const key = this.dayKey(r.timestamp);
+      if (!byDay.has(key)) {
+        byDay.set(key, {
+          date: key,
+          present: true,
+          count: 0,
+          firstIn: r.timestamp,
+          lastOut: r.timestamp,
+          routeId: r.routeId,
+          confidence: r.confidence,
+        });
+      }
+      const day = byDay.get(key);
+      day.count += 1;
+      if (r.timestamp < day.firstIn) day.firstIn = r.timestamp;
+      if (r.timestamp > day.lastOut) day.lastOut = r.timestamp;
+      if (r.confidence != null) day.confidence = r.confidence;
+    }
+
+    // Build a continuous list of the last N days, marking the ones with no
+    // record as absent.
+    const summary: any[] = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(end.getTime() - i * 24 * 60 * 60 * 1000);
+      const key = this.dayKey(d);
+      const found = byDay.get(key);
+      summary.push(
+        found || {
+          date: key,
+          present: false,
+          count: 0,
+          firstIn: null,
+          lastOut: null,
+          routeId: null,
+          confidence: null,
+        },
+      );
+    }
+
+    const presentDays = summary.filter((d) => d.present).length;
+
+    return {
+      status: 'success',
+      data: {
+        days: summary,
+        presentDays,
+        totalDays: days,
+        attendancePercent: Math.round((presentDays / days) * 100),
+        totalRecords: records.length,
+      },
+    };
+  }
+
+  /** A YYYY-MM-DD key in the campus timezone. */
+  private dayKey(date: Date): string {
+    // IST is UTC+5:30.
+    const ist = new Date(date.getTime() + 330 * 60000);
+    return ist.toISOString().slice(0, 10);
+  }
 }

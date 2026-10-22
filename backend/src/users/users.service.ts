@@ -40,6 +40,83 @@ export class UsersService {
     return this.sanitize(user);
   }
 
+  /**
+   * The signed-in user's own profile.
+   *
+   * This is the single source of truth for the profile page. The login
+   * response only carries a subset (role, route, fee status …), which is why
+   * the profile used to show stale values — the fee status a passenger sees
+   * had not been re-read since they signed in.
+   *
+   * The fields are exactly the ones the User model has, so nothing is
+   * invented for a role that does not use it.
+   */
+  async findOwnProfile(loginId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { loginId },
+      select: {
+        id: true,
+        loginId: true,
+        name: true,
+        role: true,
+        routeId: true,
+        feeStatus: true,
+        phone: true,
+        email: true,
+        profilePic: true,
+        designation: true,
+        subject: true,
+        gradeClass: true,
+        bloodGroup: true,
+        parentName: true,
+        parentPhone: true,
+        dob: true,
+        address: true,
+        licenseNumber: true,
+        licenseExpiry: true,
+        experienceYears: true,
+        lastLogin: true,
+        createdAt: true,
+        faceEnrolledAt: true,
+        awsFaceId: true,
+        wakeAlarm: true,
+      },
+    });
+    if (!user) {
+      throw new NotFoundException(`User with login ID ${loginId} not found`);
+    }
+
+    // The live bus serving the user's route. The route is the stable
+    // identity; the bus can be swapped out.
+    let busNumber: string | null = null;
+    let routeName: string | null = null;
+    let driverName: string | null = null;
+    if (user.routeId) {
+      const route = await this.prisma.route.findUnique({
+        where: { routeId: user.routeId },
+        select: {
+          routeName: true,
+          busNumber: true,
+          bus: { select: { busNumber: true } },
+          driverId: true,
+        },
+      });
+      if (route) {
+        routeName = route.routeName;
+        busNumber = route.bus?.busNumber ?? route.busNumber;
+        if (route.driverId) {
+          const driver = await this.prisma.user.findUnique({
+            where: { loginId: route.driverId },
+            select: { name: true },
+          });
+          driverName = driver?.name ?? null;
+        }
+      }
+    }
+
+    return { ...user, busNumber, routeName, driverName };
+  }
+
   async findAll() {
     const users = await this.prisma.user.findMany({
       select: {

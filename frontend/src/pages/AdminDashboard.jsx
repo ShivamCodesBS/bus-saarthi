@@ -14,6 +14,7 @@ import '../index.css';
 import HamburgerMenu from '../components/HamburgerMenu';
 import Papa from 'papaparse';
 import { sanitizePayload, normalizeFeeStatus, USER_PAYLOAD_KEYS } from '../lib/utils';
+import UserAvatar from '../components/UserAvatar';
 import { friendlyError } from '../lib/errors';
 import WebRTCPlayer from '../components/WebRTCPlayer';
 
@@ -2228,12 +2229,25 @@ const AdminDashboard = () => {
             
             <div className="flex flex-col gap-6">
               <div className="flex items-center gap-6">
-                <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-3xl font-bold shadow-lg">
-                  {viewingUser.name.charAt(0).toUpperCase()}
-                </div>
+                <UserAvatar
+                  src={viewingUser.profilePic || viewingUser.profile_pic}
+                  name={viewingUser.name}
+                  size={96}
+                  className="shadow-lg"
+                />
                 <div>
                   <h3 className="text-2xl font-bold text-slate-800 dark:text-slate-100 m-0">{viewingUser.name}</h3>
-                  <p className="text-slate-500 dark:text-slate-400 m-0 text-sm font-semibold capitalize">{viewingUser.role}</p>
+                  <p className="text-slate-500 dark:text-slate-400 m-0 text-sm font-semibold capitalize">
+                    {{
+                      passenger: 'Student / Passenger',
+                      teacher: 'Teacher / Staff',
+                      parent: 'Parent',
+                      driver: 'Driver',
+                      transport_incharge: 'Transport Incharge',
+                      admin: 'Administrator',
+                      tech_admin: 'System Administrator',
+                    }[viewingUser.role] || viewingUser.role}
+                  </p>
                   <div className="mt-2 inline-block bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full text-sm font-semibold text-slate-600 dark:text-slate-300">
                     ID: {viewingUser.loginId || viewingUser.login_id}
                   </div>
@@ -2244,7 +2258,20 @@ const AdminDashboard = () => {
                 <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700">
                   <p className="text-xs text-slate-500 dark:text-slate-400 m-0 mb-1 font-bold uppercase tracking-wider">Assigned Route</p>
                   <p className="font-semibold text-slate-800 dark:text-slate-200 m-0">
-                    {viewingUser.routeId || viewingUser.route_id || 'Not Assigned'}
+                    {(() => {
+                      const rid = viewingUser.routeId || viewingUser.route_id;
+                      if (!rid) return 'Not Assigned';
+                      const r = routesList.find(
+                        (x) => String(x.routeId || x.route_id) === String(rid),
+                      );
+                      const bus = r?.bus?.busNumber || r?.busNumber;
+                      return (
+                        <>
+                          {r?.routeName || `Route ${rid}`}
+                          {bus ? ` · Bus ${bus}` : ''}
+                        </>
+                      );
+                    })()}
                   </p>
                 </div>
                 <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700">
@@ -2256,7 +2283,7 @@ const AdminDashboard = () => {
                   <>
                     <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700">
                       <p className="text-xs text-slate-500 dark:text-slate-400 m-0 mb-1 font-bold uppercase tracking-wider">Fee Status</p>
-                      <p className={`font-bold m-0 ${viewingUser.feeStatus === 'paid' ? 'text-green-600' : 'text-red-500'}`}>
+                      <p className={`font-bold m-0 ${(viewingUser.feeStatus || viewingUser.fee_status) === 'paid' ? 'text-green-600' : (viewingUser.feeStatus || viewingUser.fee_status) === 'partial' ? 'text-orange-600' : 'text-red-500'}`}>
                         {(viewingUser.feeStatus || viewingUser.fee_status || 'Unpaid').toUpperCase()}
                       </p>
                     </div>
@@ -2305,6 +2332,60 @@ const AdminDashboard = () => {
                 <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700">
                   <p className="text-xs text-slate-500 dark:text-slate-400 m-0 mb-1 font-bold uppercase tracking-wider">Address</p>
                   <p className="font-semibold text-slate-800 dark:text-slate-200 m-0">{viewingUser.address}</p>
+                </div>
+              )}
+
+              {viewingUser.email && (
+                <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 m-0 mb-1 font-bold uppercase tracking-wider">Email</p>
+                  <p className="font-semibold text-slate-800 dark:text-slate-200 m-0">{viewingUser.email}</p>
+                </div>
+              )}
+
+              {viewingUser.subject && (
+                <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 m-0 mb-1 font-bold uppercase tracking-wider">Subject</p>
+                  <p className="font-semibold text-slate-800 dark:text-slate-200 m-0">{viewingUser.subject}</p>
+                </div>
+              )}
+
+              {viewingUser.designation && (
+                <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 m-0 mb-1 font-bold uppercase tracking-wider">Designation</p>
+                  <p className="font-semibold text-slate-800 dark:text-slate-200 m-0">{viewingUser.designation}</p>
+                </div>
+              )}
+
+              {viewingUser.licenseExpiry && (
+                <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 m-0 mb-1 font-bold uppercase tracking-wider">Licence expires</p>
+                  <p className="font-semibold text-slate-800 dark:text-slate-200 m-0">
+                    {new Date(viewingUser.licenseExpiry).toLocaleDateString('en-IN', {
+                      day: '2-digit', month: 'short', year: 'numeric',
+                    })}
+                  </p>
+                </div>
+              )}
+
+              {viewingUser.lastLogin && (
+                <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 m-0 mb-1 font-bold uppercase tracking-wider">Last sign-in</p>
+                  <p className="font-semibold text-slate-800 dark:text-slate-200 m-0">
+                    {new Date(viewingUser.lastLogin).toLocaleString('en-IN', {
+                      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+                    })}
+                  </p>
+                </div>
+              )}
+
+              {viewingUser.createdAt && (
+                <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 m-0 mb-1 font-bold uppercase tracking-wider">Account created</p>
+                  <p className="font-semibold text-slate-800 dark:text-slate-200 m-0">
+                    {new Date(viewingUser.createdAt).toLocaleDateString('en-IN', {
+                      day: '2-digit', month: 'short', year: 'numeric',
+                    })}
+                  </p>
                 </div>
               )}
             </div>
