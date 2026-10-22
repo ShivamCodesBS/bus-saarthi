@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../core/constants.dart';
 import '../models/sensor_payload.dart';
