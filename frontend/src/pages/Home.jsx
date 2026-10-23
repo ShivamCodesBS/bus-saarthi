@@ -117,9 +117,12 @@ const Home = () => {
   };
 
   const getDirection = (heading) => {
-    const dir = heading > 315 || heading <= 45 ? 'North' :
-      heading > 45 && heading <= 135 ? 'East' :
-      heading > 135 && heading <= 225 ? 'South' : 'West';
+    if (heading == null || isNaN(heading)) return '—';
+    let h = Number(heading) % 360;
+    if (h < 0) h += 360;
+    const dir = (h >= 315 || h < 45) ? 'North' :
+      (h >= 45 && h < 135) ? 'East' :
+      (h >= 135 && h < 225) ? 'South' : 'West';
     return t(dir.toLowerCase());
   };
   const [isMenuOpen, setIsMenuOpen] = useState(false);

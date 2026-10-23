@@ -50,23 +50,31 @@ class TelemetryData {
     'route_id': routeId,
   };
 
+  /// Normalize any heading degrees (e.g. negative azimuth from Android sensors)
+  /// into the canonical [0.0, 360.0) range.
+  static double normalizeHeading(double deg) {
+    double h = deg % 360.0;
+    if (h < 0) h += 360.0;
+    return h;
+  }
+
   /// Get cardinal direction from heading
   String get headingLabel {
     if (heading == null) return '—';
-    final deg = heading!;
-    if (deg > 315 || deg <= 45) return 'N';
-    if (deg > 45 && deg <= 135) return 'E';
-    if (deg > 135 && deg <= 225) return 'S';
+    final deg = normalizeHeading(heading!);
+    if (deg >= 315 || deg < 45) return 'N';
+    if (deg >= 45 && deg < 135) return 'E';
+    if (deg >= 135 && deg < 225) return 'S';
     return 'W';
   }
 
   /// Get full heading label with arrow
   String get headingLabelFull {
     if (heading == null) return '—';
-    final deg = heading!;
-    if (deg > 315 || deg <= 45) return 'N ↑';
-    if (deg > 45 && deg <= 135) return 'E →';
-    if (deg > 135 && deg <= 225) return 'S ↓';
+    final deg = normalizeHeading(heading!);
+    if (deg >= 315 || deg < 45) return 'N ↑';
+    if (deg >= 45 && deg < 135) return 'E →';
+    if (deg >= 135 && deg < 225) return 'S ↓';
     return 'W ←';
   }
 }

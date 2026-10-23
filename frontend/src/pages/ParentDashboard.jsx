@@ -5,7 +5,7 @@ import {
   Gauge, Compass, AlertOctagon, Menu, X, Activity, ChevronLeft, ChevronRight,
   IndianRupee, Megaphone, Settings, Eye, ArrowLeft, GitMerge,
   MessageSquareWarning, RotateCcw, Check, Wrench, Timer, ShieldAlert,
-  Maximize2
+  Maximize2, AlertTriangle
 } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -32,6 +32,15 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
+// --- Grievance lifecycle states ---
+const GRIEVANCE_STATUS = {
+  pending:      { label: 'Pending',                   bg: '#fff1f0', color: '#cf1322', Icon: AlertTriangle },
+  in_progress:  { label: 'In Progress',               bg: '#fff7e6', color: '#d46b08', Icon: Wrench },
+  resolved:     { label: 'Awaiting Confirmation',     bg: '#e6f4ff', color: '#0958d9', Icon: Timer },
+  reopened:     { label: 'Not Resolved (Reopened)',   bg: '#fff1f0', color: '#cf1322', Icon: RotateCcw },
+  closed:       { label: 'Closed - Confirmed',        bg: '#e6fae6', color: '#28a745', Icon: CheckCircle2 },
+};
+
 // --- Color constants ---
 const PURPLE = '#7c3aed';
 const PURPLE_LIGHT = '#f3e8ff';
@@ -41,6 +50,13 @@ const busIcon = new L.Icon({
   iconUrl: 'https://cdn-icons-png.flaticon.com/512/3448/3448339.png',
   iconSize: [38, 38],
   iconAnchor: [19, 19],
+});
+
+const destinationIcon = new L.Icon({
+  iconUrl: 'https://cdn-icons-png.flaticon.com/512/684/684908.png',
+  iconSize: [28, 28],
+  iconAnchor: [14, 28],
+  popupAnchor: [0, -28],
 });
 
 // STOP_COORDS from Home page for route polyline
@@ -236,6 +252,13 @@ const ParentDashboard = () => {
   const [busLocation, setBusLocation] = useState([28.3180, 79.4670]);
   const [telemetry, setTelemetry] = useState(null);
   const [telemetryStale, setTelemetryStale] = useState(false);
+  
+  // View locking & map controls (same as student Home map)
+  const [autoFollow, setAutoFollow] = useState(true);
+  const autoFollowRef = useRef(true);
+  useEffect(() => {
+    autoFollowRef.current = autoFollow;
+  }, [autoFollow]);
   
   // Map instance ref for proper map control
   const mapInstance = useRef(null);
@@ -451,7 +474,11 @@ const ParentDashboard = () => {
       });
       socket.on('live_telemetry', (data) => {
         if (data.location?.lat && data.location?.lng) {
-          setBusLocation([data.location.lat, data.location.lng]);
+          const newLoc = [data.location.lat, data.location.lng];
+          setBusLocation(newLoc);
+          if (autoFollowRef.current && mapInstance.current) {
+            mapInstance.current.setView(newLoc, mapInstance.current.getZoom(), { animate: true });
+          }
         }
         setTelemetry({
           speed: data.speed || 0,
@@ -506,10 +533,12 @@ const ParentDashboard = () => {
   };
 
   const getHeadingLabel = (deg) => {
-    if (!deg && deg !== 0) return '—';
-    if (deg > 315 || deg <= 45) return 'N ↑';
-    if (deg > 45 && deg <= 135) return 'E →';
-    if (deg > 135 && deg <= 225) return 'S ↓';
+    if (deg == null || isNaN(deg)) return '—';
+    let h = Number(deg) % 360;
+    if (h < 0) h += 360;
+    if (h >= 315 || h < 45) return 'N ↑';
+    if (h >= 45 && h < 135) return 'E →';
+    if (h >= 135 && h < 225) return 'S ↓';
     return 'W ←';
   };
 
@@ -536,9 +565,9 @@ const ParentDashboard = () => {
       {/* ========= HEADER ========= */}
       <header style={{
         background: `linear-gradient(135deg, ${PURPLE_DARK} 0%, ${PURPLE} 100%)`,
-        color: 'white', padding: '0 1rem',
+        color: 'white', padding: '0 1.25rem',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        height: '52px', position: 'sticky', top: 0, zIndex: 100,
+        height: '54px', position: 'sticky', top: 0, zIndex: 100,
         boxShadow: '0 3px 14px rgba(139,92,246,0.35)',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
@@ -550,67 +579,27 @@ const ParentDashboard = () => {
             <p style={{ margin: 0, fontSize: '0.68rem', opacity: 0.9 }}>Invertis Bus Saarthi · Guardian View</p>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <button
-            onClick={() => setIsMenuOpen(!isMenuOpen)}
-            style={{ background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: '10px', padding: '8px', cursor: 'pointer', color: 'white' }}
-          >
-            {isMenuOpen ? <X size={20} /> : <Menu size={20} />}
-          </button>
-        </div>
+        <button
+          onClick={() => { logout(); navigate('/login'); }}
+          style={{
+            background: 'rgba(255,255,255,0.18)',
+            border: 'none',
+            borderRadius: '10px',
+            padding: '6px 12px',
+            cursor: 'pointer',
+            color: 'white',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            fontSize: '0.8rem',
+            fontWeight: 600,
+            transition: 'background 0.2s',
+          }}
+          title="Sign Out"
+        >
+          <LogOut size={16} /> Logout
+        </button>
       </header>
-
-      {/* ========= SIDE MENU (Mobile Only - Hamburger) ========= */}
-      {isMenuOpen && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-        }} onClick={() => setIsMenuOpen(false)}>
-          <div style={{
-            position: 'absolute', right: 0, top: 0, bottom: 0, width: '240px',
-            background: 'var(--card-bg)', boxShadow: '-8px 0 32px rgba(0,0,0,0.2)',
-            padding: '1.5rem 1rem',
-            display: 'flex', flexDirection: 'column',
-          }} onClick={e => e.stopPropagation()}>
-            <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
-              <div style={{ width: 60, height: 60, borderRadius: '50%', background: PURPLE_LIGHT, margin: '0 auto 0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <User size={28} color={PURPLE} />
-              </div>
-              <p style={{ margin: 0, fontWeight: 700, color: 'var(--text-dark)' }}>{parentData?.name || user?.name}</p>
-              <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-light)' }}>Parent Account</p>
-            </div>
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-              {[
-                { icon: <Bus size={18} />, label: 'Overview', tab: 'overview' },
-                { icon: <Calendar size={18} />, label: 'Attendance', tab: 'attendance' },
-                { icon: <MessageSquareWarning size={18} />, label: 'Complaints', tab: 'complaints' },
-                { icon: <Megaphone size={18} />, label: 'Announcements', tab: 'announcements' },
-                { icon: <Activity size={18} />, label: 'Speed Analytics', tab: 'analytics' },
-              ].map(item => (
-                <button key={item.tab} onClick={() => { setActiveTab(item.tab); setIsMenuOpen(false); }} style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: '0.75rem',
-                  padding: '0.75rem 1rem', borderRadius: '10px', border: 'none', cursor: 'pointer',
-                  background: activeTab === item.tab ? PURPLE_LIGHT : 'transparent',
-                  color: activeTab === item.tab ? PURPLE : 'var(--text-dark)',
-                  fontWeight: activeTab === item.tab ? 700 : 500, fontSize: '0.9rem',
-                  marginBottom: '4px', textAlign: 'left',
-                }}>
-                  {item.icon} {item.label}
-                </button>
-              ))}
-            </div>
-            <div style={{ borderTop: '1px solid var(--border-color)', marginTop: '1rem', paddingTop: '1rem' }}>
-              <button onClick={() => { logout(); navigate('/login'); }} style={{
-                width: '100%', display: 'flex', alignItems: 'center', gap: '0.75rem',
-                padding: '0.75rem 1rem', borderRadius: '10px', border: 'none', cursor: 'pointer',
-                background: '#fff1f0', color: '#cf1322', fontWeight: 600, fontSize: '0.9rem',
-              }}>
-                <LogOut size={18} /> Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ========= CHILD INFO BANNER ========= */}
       {isLoading && !child ? (
@@ -831,6 +820,67 @@ const ParentDashboard = () => {
                 </div>
               </div>
               <div style={{ height: '320px', position: 'relative' }}>
+                {/* Recenter Button */}
+                <div style={{ position: 'absolute', top: '12px', right: '12px', zIndex: 500, pointerEvents: 'auto' }}>
+                  <button
+                    onClick={() => {
+                      setAutoFollow(true);
+                      if (mapInstance.current) {
+                        mapInstance.current.setView(busLocation, 16, { animate: true });
+                      }
+                    }}
+                    title="Recenter on bus"
+                    style={{
+                      padding: '6px',
+                      borderRadius: '50%',
+                      background: 'rgba(255,255,255,0.95)',
+                      backdropFilter: 'blur(4px)',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+                      border: '1px solid var(--border-color)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '36px',
+                      height: '36px',
+                    }}
+                  >
+                    <Navigation size={18} color={PURPLE} />
+                  </button>
+                </div>
+
+                {/* Auto-follow toggle (lock view) */}
+                <div style={{ position: 'absolute', bottom: '12px', right: '12px', zIndex: 500, pointerEvents: 'auto' }}>
+                  <label style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '4px 10px',
+                    borderRadius: '20px',
+                    fontSize: '0.72rem',
+                    fontWeight: 700,
+                    background: 'rgba(255,255,255,0.95)',
+                    backdropFilter: 'blur(4px)',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+                    border: '1px solid var(--border-color)',
+                    cursor: 'pointer',
+                    color: 'var(--text-dark)',
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={autoFollow}
+                      onChange={(e) => {
+                        setAutoFollow(e.target.checked);
+                        if (e.target.checked && mapInstance.current) {
+                          mapInstance.current.setView(busLocation, 16, { animate: true });
+                        }
+                      }}
+                      style={{ accentColor: PURPLE, cursor: 'pointer' }}
+                    />
+                    <span>Lock on Bus</span>
+                  </label>
+                </div>
+
                 <MapContainer 
                   center={busLocation} 
                   zoom={14} 
@@ -853,11 +903,12 @@ const ParentDashboard = () => {
                     </Popup>
                   </Marker>
                   <Polyline positions={dynamicRoutePolyline} color="#0056b3" weight={5} opacity={0.8} />
-                  <Marker position={dynamicRoutePolyline[dynamicRoutePolyline.length - 1]}>
+                  <Marker position={dynamicRoutePolyline[dynamicRoutePolyline.length - 1]} icon={destinationIcon}>
                     <Popup>Destination</Popup>
                   </Marker>
                 </MapContainer>
               </div>
+            </div>
 
             {/* Route & Driver Info */}
             {routeInfo && (
@@ -905,6 +956,8 @@ const ParentDashboard = () => {
               </div>
             )}
           </div>
+        )}
+
         {/* ===== ATTENDANCE TAB ===== */}
         {activeTab === 'attendance' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -1364,9 +1417,11 @@ const ParentDashboard = () => {
                     </div>
                   ))}
                 </div>
-</div>
+              </div>
             )}
           </div>
+        )}
+      </div>
 
       {/* EXPANDED MAP MODAL */}
       {isMapExpanded && (
@@ -1384,7 +1439,73 @@ const ParentDashboard = () => {
             </button>
           </div>
           <div className="flex-1 z-0 relative">
-            <MapContainer center={busLocation} zoom={15} style={{ height: '100%', width: '100%' }} zoomControl={true} scrollWheelZoom={true} dragging={true}>
+            {/* Auto-follow & Recenter in Fullscreen */}
+            <div style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 500, pointerEvents: 'auto' }}>
+              <button
+                onClick={() => {
+                  setAutoFollow(true);
+                  if (mapInstance.current) {
+                    mapInstance.current.setView(busLocation, 16, { animate: true });
+                  }
+                }}
+                title="Recenter on bus"
+                style={{
+                  padding: '8px',
+                  borderRadius: '50%',
+                  background: 'rgba(255,255,255,0.95)',
+                  boxShadow: '0 2px 10px rgba(0,0,0,0.25)',
+                  border: '1px solid var(--border-color)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '40px',
+                  height: '40px',
+                }}
+              >
+                <Navigation size={20} color={PURPLE} />
+              </button>
+            </div>
+
+            <div style={{ position: 'absolute', bottom: '16px', right: '16px', zIndex: 500, pointerEvents: 'auto' }}>
+              <label style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '6px 14px',
+                borderRadius: '24px',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                background: 'rgba(255,255,255,0.95)',
+                boxShadow: '0 2px 10px rgba(0,0,0,0.25)',
+                border: '1px solid var(--border-color)',
+                cursor: 'pointer',
+                color: 'var(--text-dark)',
+              }}>
+                <input
+                  type="checkbox"
+                  checked={autoFollow}
+                  onChange={(e) => {
+                    setAutoFollow(e.target.checked);
+                    if (e.target.checked && mapInstance.current) {
+                      mapInstance.current.setView(busLocation, 16, { animate: true });
+                    }
+                  }}
+                  style={{ accentColor: PURPLE, cursor: 'pointer' }}
+                />
+                <span>Lock on Bus</span>
+              </label>
+            </div>
+
+            <MapContainer 
+              center={busLocation} 
+              zoom={15} 
+              style={{ height: '100%', width: '100%' }} 
+              zoomControl={true} 
+              scrollWheelZoom={true} 
+              dragging={true}
+              whenCreated={(map) => { mapInstance.current = map; }}
+            >
               <MapResizer />
               <TileLayer
                 url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
@@ -1397,7 +1518,7 @@ const ParentDashboard = () => {
                 </Popup>
               </Marker>
               <Polyline positions={dynamicRoutePolyline} color="#0056b3" weight={6} />
-              <Marker position={dynamicRoutePolyline[dynamicRoutePolyline.length - 1]}>
+              <Marker position={dynamicRoutePolyline[dynamicRoutePolyline.length - 1]} icon={destinationIcon}>
                 <Popup>Destination</Popup>
               </Marker>
             </MapContainer>

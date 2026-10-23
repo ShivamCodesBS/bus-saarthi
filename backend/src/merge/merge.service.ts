@@ -280,15 +280,20 @@ export class MergeService {
    * Check if a specific route is cancelled today (used by telemetry & attendance).
    */
   async isRouteCancelledToday(routeId: string): Promise<boolean> {
-    const todayStart = getISTMidnightUTC();
-    const merge = await this.prisma.mergeEvent.findFirst({
-      where: {
-        cancelledRouteId: routeId,
-        status: { in: ['active', 'cancelled'] },
-        createdAt: { gte: todayStart },
-      },
-    });
-    return !!merge;
+    try {
+      const todayStart = getISTMidnightUTC();
+      const merge = await this.prisma.mergeEvent.findFirst({
+        where: {
+          cancelledRouteId: String(routeId),
+          status: { in: ['active', 'cancelled'] },
+          createdAt: { gte: todayStart },
+        },
+      });
+      return !!merge;
+    } catch (err: any) {
+      this.logger.warn(`isRouteCancelledToday check failed for route ${routeId}: ${err?.message}`);
+      return false;
+    }
   }
 
   /**
@@ -299,29 +304,39 @@ export class MergeService {
     cancelledRouteId: string,
     targetRouteId: string,
   ) {
-    const todayStart = getISTMidnightUTC();
-    return this.prisma.mergeEvent.findFirst({
-      where: {
-        cancelledRouteId,
-        targetRouteId,
-        status: 'active',
-        createdAt: { gte: todayStart },
-      },
-    });
+    try {
+      const todayStart = getISTMidnightUTC();
+      return await this.prisma.mergeEvent.findFirst({
+        where: {
+          cancelledRouteId: String(cancelledRouteId),
+          targetRouteId: String(targetRouteId),
+          status: 'active',
+          createdAt: { gte: todayStart },
+        },
+      });
+    } catch (err: any) {
+      this.logger.warn(`findActiveMerge check failed: ${err?.message}`);
+      return null;
+    }
   }
 
   /**
    * Find an active merge for a cancelled route (regardless of target).
    */
   async findActiveMergeForCancelledRoute(cancelledRouteId: string) {
-    const todayStart = getISTMidnightUTC();
-    return this.prisma.mergeEvent.findFirst({
-      where: {
-        cancelledRouteId,
-        status: { in: ['active', 'cancelled'] },
-        createdAt: { gte: todayStart },
-      },
-    });
+    try {
+      const todayStart = getISTMidnightUTC();
+      return await this.prisma.mergeEvent.findFirst({
+        where: {
+          cancelledRouteId: String(cancelledRouteId),
+          status: { in: ['active', 'cancelled'] },
+          createdAt: { gte: todayStart },
+        },
+      });
+    } catch (err: any) {
+      this.logger.warn(`findActiveMergeForCancelledRoute check failed: ${err?.message}`);
+      return null;
+    }
   }
 
   /**

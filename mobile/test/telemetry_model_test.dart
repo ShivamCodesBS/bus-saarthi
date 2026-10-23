@@ -94,11 +94,26 @@ void main() {
         latitude: 0, longitude: 0, speed: 0, heading: 270, comfort: '',
         timestamp: DateTime.now(), receivedAt: DateTime.now(), routeId: '1',
       );
+      // Negative angles from Android magnetometer sensors
+      final westNeg = TelemetryData(
+        latitude: 0, longitude: 0, speed: 0, heading: -90, comfort: 'Rough',
+        timestamp: DateTime.now(), receivedAt: DateTime.now(), routeId: '1',
+      );
+      final southNeg = TelemetryData(
+        latitude: 0, longitude: 0, speed: 0, heading: -180, comfort: 'Moderate',
+        timestamp: DateTime.now(), receivedAt: DateTime.now(), routeId: '1',
+      );
 
       expect(north.headingLabel, 'N');
       expect(east.headingLabel, 'E');
       expect(south.headingLabel, 'S');
       expect(west.headingLabel, 'W');
+      expect(westNeg.headingLabel, 'W');
+      expect(westNeg.headingLabelFull, 'W ←');
+      expect(southNeg.headingLabel, 'S');
+      expect(southNeg.headingLabelFull, 'S ↓');
+      expect(westNeg.comfort, 'Rough');
+      expect(southNeg.comfort, 'Moderate');
     });
 
     test('toJson serializes correctly', () {

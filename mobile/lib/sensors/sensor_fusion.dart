@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:geolocator/geolocator.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import '../models/sensor_payload.dart';
+import '../models/telemetry_model.dart';
 import '../core/constants.dart';
 import 'gps_sensor.dart';
 import 'accelerometer_sensor.dart';
@@ -62,7 +63,11 @@ class SensorFusion {
 
     try {
       _compassSub = _compass.compassStream?.listen(
-        (e) => _lastHeading = e.heading,
+        (e) {
+          if (e.heading != null) {
+            _lastHeading = TelemetryData.normalizeHeading(e.heading!);
+          }
+        },
         onError: (e) => print('[Compass] Stream error (non-fatal): $e'),
       );
     } catch (e) {
@@ -101,22 +106,17 @@ class SensorFusion {
 
   String _calculateComfort() {
     if (_accelBuffer.isEmpty) return 'Smooth';
-    
-    // Calculate standard deviation of acceleration magnitude
+
     final mean = _accelBuffer.reduce((a, b) => a + b) / _accelBuffer.length;
     final variance = _accelBuffer.map((v) => pow(v - mean, 2)).reduce((a, b) => a + b) / _accelBuffer.length;
     final stdDev = sqrt(variance);
-    
-    // Also check peak acceleration
     final maxAccel = _accelBuffer.reduce(max);
-    
-    // Classification thresholds (m/s²)
-    // Smooth: stdDev < 1.5 && max < 12
-    // Moderate: stdDev < 3.0 && max < 18
-    // Rough: otherwise
-    if (stdDev < 1.5 && maxAccel < 12.0) return 'Smooth';
-    if (stdDev < 3.0 && maxAccel < 18.0) return 'Moderate';
-    return 'Rough';
+
+    // Realistic user-accelerometer thresholds:
+    // Hand shake / road bump produces maxAccel 3-10 m/s², stdDev 1.5-4.0
+    if (maxAccel >= 6.0 || stdDev >= 2.2) return 'Rough';
+    if (maxAccel >= 2.5 || stdDev >= 1.0) return 'Moderate';
+    return 'Smooth';
   }
 
   void _publish(String routeId) {

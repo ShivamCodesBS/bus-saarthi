@@ -136,9 +136,14 @@ export class EventsGateway
     const formattedPayload = {
       route_id: String(routeId),
       location: { lat, lng },
-      speed: payload?.mpu_speed_kmh || (payload?.gps_speed_knots ?? 0) * 1.852,
-      heading: payload?.heading_deg,
-      comfort: 'Smooth',
+      speed:
+        typeof payload?.mpu_speed_kmh === 'number'
+          ? payload.mpu_speed_kmh
+          : typeof payload?.speed === 'number'
+            ? payload.speed
+            : (payload?.gps_speed_knots ?? 0) * 1.852,
+      heading: payload?.heading_deg ?? payload?.heading,
+      comfort: payload?.comfort || 'Smooth',
       timestamp: payload?.timestamp || new Date().toISOString(),
     };
     this.server.to(`route_${routeId}`).emit('live_telemetry', formattedPayload);
@@ -168,9 +173,14 @@ export class EventsGateway
         lat,
         lng,
       },
-      speed: payload.mpu_speed_kmh || (payload.gps_speed_knots ? payload.gps_speed_knots * 1.852 : 0),
-      heading: payload.heading_deg,
-      comfort: 'Smooth', // Mock since hardware doesn't send this yet
+      speed:
+        typeof payload?.mpu_speed_kmh === 'number'
+          ? payload.mpu_speed_kmh
+          : typeof payload?.speed === 'number'
+            ? payload.speed
+            : (payload?.gps_speed_knots ? payload.gps_speed_knots * 1.852 : 0),
+      heading: payload.heading_deg ?? payload.heading,
+      comfort: payload.comfort || 'Smooth',
       timestamp: payload.timestamp || new Date().toISOString(),
     };
     this.server

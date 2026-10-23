@@ -1,10 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter_compass/flutter_compass.dart';
+import 'package:sensors_plus/sensors_plus.dart';
 import 'package:latlong2/latlong.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/connection_provider.dart';
@@ -47,10 +51,18 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
   double _distanceTraveledMeters = 0.0;
   Position? _lastRecordedPosition;
 
-  // Foreground GPS stream
+  // Live Hardware Sensors
   StreamSubscription<Position>? _positionStreamSub;
-  Timer? _broadcastThrottleTimer;
+  StreamSubscription<CompassEvent>? _compassSub;
+  StreamSubscription<UserAccelerometerEvent>? _accelSub;
+  double? _currentCompassHeading;
+  String _currentComfort = 'Smooth';
+  final List<double> _accelBuffer = [];
+
+  // Low-latency GPS & Broadcast
   Position? _currentGpsPosition;
+  Position? _pendingBroadcastPosition;
+  Timer? _broadcastThrottleTimer;
 
   // Next stop calculation
   int _nextStopIndex = 0;
@@ -62,7 +74,6 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
 
   // UI animations
   late AnimationController _sheetAnimationCtrl;
-  bool _isSheetExpanded = false;
 
   @override
   void initState() {
@@ -77,16 +88,97 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
       duration: const Duration(milliseconds: 300),
     );
 
+    _initSensors();
     _initializeDriverSession();
   }
 
   @override
   void dispose() {
-    _tripTimer?.cancel();
-    _broadcastThrottleTimer?.cancel();
+    _compassSub?.cancel();
+    _accelSub?.cancel();
     _positionStreamSub?.cancel();
+    _broadcastThrottleTimer?.cancel();
+    _tripTimer?.cancel();
     _sheetAnimationCtrl.dispose();
     super.dispose();
+  }
+
+  // ────────────────────────────────────────────────────────────
+  //  Hardware Sensors: Compass (Magnetometer) & Accelerometer
+  // ────────────────────────────────────────────────────────────
+  void _initSensors() {
+    // 1. Hardware Compass: live orientation regardless of movement
+    try {
+      _compassSub?.cancel();
+      _compassSub = FlutterCompass.events?.listen((event) {
+        if (event.heading != null && mounted) {
+          final normalized = TelemetryData.normalizeHeading(event.heading!);
+          if (_currentCompassHeading == null ||
+              (_currentCompassHeading! - normalized).abs() > 0.4) {
+            setState(() {
+              _currentCompassHeading = normalized;
+            });
+            // If trip is running and we have location, broadcast heading update
+            if (_isTripActive && _pendingBroadcastPosition != null) {
+              final telemetry = Provider.of<TelemetryProvider>(context, listen: false);
+              _emitPosition(telemetry);
+            }
+          }
+        }
+      }, onError: (e) {
+        print('[DriverDashboard] Compass error: $e');
+      });
+    } catch (e) {
+      print('[DriverDashboard] Compass init error: $e');
+    }
+
+    // 2. Hardware Accelerometer: instant ride comfort & shake detection
+    try {
+      _accelSub?.cancel();
+      _accelSub = userAccelerometerEventStream().listen((event) {
+        final mag = sqrt(event.x * event.x + event.y * event.y + event.z * event.z);
+        _accelBuffer.add(mag);
+        if (_accelBuffer.length > 12) {
+          _accelBuffer.removeAt(0);
+        }
+        final newComfort = _calculateComfort();
+        if (newComfort != _currentComfort && mounted) {
+          setState(() {
+            _currentComfort = newComfort;
+          });
+          // Broadcast comfort change immediately to web and listeners
+          if (_isTripActive && _pendingBroadcastPosition != null) {
+            final telemetry = Provider.of<TelemetryProvider>(context, listen: false);
+            _emitPosition(telemetry);
+          }
+        }
+      }, onError: (e) {
+        print('[DriverDashboard] Accel error: $e');
+      });
+    } catch (e) {
+      print('[DriverDashboard] Accel init error: $e');
+    }
+  }
+
+  String _calculateComfort() {
+    if (_accelBuffer.isEmpty) return 'Smooth';
+
+    final mean = _accelBuffer.reduce((a, b) => a + b) / _accelBuffer.length;
+    final variance = _accelBuffer
+            .map((v) => pow(v - mean, 2))
+            .reduce((a, b) => a + b) /
+        _accelBuffer.length;
+    final stdDev = sqrt(variance);
+    final maxAccel = _accelBuffer.reduce(max);
+
+    // Dynamic thresholds: shaking phone by hand will easily trigger Moderate/Rough
+    // Standing still / cruising on good tarmac: max < 2.0, stdDev < 0.8
+    if (maxAccel >= 5.5 || stdDev >= 2.0) {
+      return 'Rough';
+    } else if (maxAccel >= 2.2 || stdDev >= 0.9) {
+      return 'Moderate';
+    }
+    return 'Smooth';
   }
 
   Future<void> _initializeDriverSession() async {
@@ -120,10 +212,13 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
     // 5. Automatically get current position to center map
     try {
       final pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
+        desiredAccuracy: LocationAccuracy.bestForNavigation,
       );
       if (mounted) {
-        setState(() => _currentGpsPosition = pos);
+        setState(() {
+          _currentGpsPosition = pos;
+          _pendingBroadcastPosition = pos;
+        });
       }
     } catch (e) {
       print('[DriverDashboard] Initial GPS fix: $e');
@@ -198,8 +293,23 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
   }
 
   // ────────────────────────────────────────────────────────────
-  //  Trip Tracking: Collecting Phone GPS & Broadcasting to Backend
+  //  Trip Tracking: Ultra-Low Latency GPS & Instant Broadcasting
   // ────────────────────────────────────────────────────────────
+  LocationSettings _getLocationSettings() {
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return AndroidSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 0, // No deadband: emit as soon as GPS has a fix!
+        forceLocationManager: false,
+        intervalDuration: const Duration(milliseconds: 200), // Check every 200ms
+      );
+    }
+    return const LocationSettings(
+      accuracy: LocationAccuracy.bestForNavigation,
+      distanceFilter: 0,
+    );
+  }
+
   void _startTrip() async {
     HapticFeedback.heavyImpact();
 
@@ -227,15 +337,10 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
     // 1. Start foreground background service (runs in persistent notification)
     await sensors.startSensors(_routeId);
 
-    // 2. Start high-precision foreground GPS stream for immediate UI & socket emission
-    const locationSettings = LocationSettings(
-      accuracy: LocationAccuracy.bestForNavigation,
-      distanceFilter: 2, // meters
-    );
-
+    // 2. Start high-precision foreground GPS stream (200ms interval, 0m filter)
     _positionStreamSub?.cancel();
     _positionStreamSub = Geolocator.getPositionStream(
-      locationSettings: locationSettings,
+      locationSettings: _getLocationSettings(),
     ).listen((Position position) {
       _handlePositionUpdate(position, telemetry);
     }, onError: (e) {
@@ -250,7 +355,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                'Trip Started: Broadcasting location for $_busNumber ($_routeName)',
+                'Trip Started: Broadcasting live location for $_busNumber ($_routeName)',
               ),
             ),
           ],
@@ -265,6 +370,9 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
   void _handlePositionUpdate(Position position, TelemetryProvider telemetry) {
     if (!mounted) return;
 
+    _currentGpsPosition = position;
+    _pendingBroadcastPosition = position;
+
     // Calculate distance traveled
     if (_lastRecordedPosition != null) {
       final delta = Geolocator.distanceBetween(
@@ -273,31 +381,42 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
         position.latitude,
         position.longitude,
       );
-      if (delta > 2.0 && delta < 500.0) { // filter GPS noise / jumps
+      if (delta > 0.5 && delta < 500.0) { // filter noise
         _distanceTraveledMeters += delta;
       }
     }
     _lastRecordedPosition = position;
-    _currentGpsPosition = position;
 
-    // Recalculate next stop distance
     _calculateNextStop();
 
-    // Throttle socket broadcasting to once every 2 seconds
+    // Broadcast with ultra-low latency trailing throttle (200ms)
     if (_broadcastThrottleTimer == null || !_broadcastThrottleTimer!.isActive) {
-      _broadcastThrottleTimer = Timer(const Duration(milliseconds: 2000), () {
-        final speedKmh = position.speed * 3.6;
-        telemetry.emitLocation(
-          latitude: position.latitude,
-          longitude: position.longitude,
-          speedKmh: speedKmh > 0 ? speedKmh : 0,
-          heading: position.heading > 0 ? position.heading : null,
-          routeId: _routeId,
-        );
+      _emitPosition(telemetry);
+      _broadcastThrottleTimer = Timer(const Duration(milliseconds: 200), () {
+        if (_pendingBroadcastPosition != null) {
+          _emitPosition(telemetry);
+        }
       });
     }
 
     setState(() {});
+  }
+
+  void _emitPosition(TelemetryProvider telemetry) {
+    if (_pendingBroadcastPosition == null) return;
+    final pos = _pendingBroadcastPosition!;
+    final speedKmh = pos.speed * 3.6;
+    final heading = _currentCompassHeading ??
+        (pos.heading > 0 ? TelemetryData.normalizeHeading(pos.heading) : null);
+
+    telemetry.emitLocation(
+      latitude: pos.latitude,
+      longitude: pos.longitude,
+      speedKmh: speedKmh > 0 ? speedKmh : 0,
+      heading: heading,
+      comfort: _currentComfort,
+      routeId: _routeId,
+    );
   }
 
   void _calculateNextStop() {
@@ -655,13 +774,37 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
             final isLive = _isTripActive || (telemetry.isConnected && telemetry.hasValidTelemetry);
             final currentTelemetry = telemetry.latestTelemetry;
 
+            // Use real, zero-latency local sensor readings for the driver's own display
+            final localSpeed = _currentGpsPosition != null
+                ? (_currentGpsPosition!.speed * 3.6).clamp(0.0, 140.0)
+                : (currentTelemetry?.speed ?? 0.0);
+
+            final localHeading = _currentCompassHeading ??
+                (_currentGpsPosition != null && _currentGpsPosition!.heading > 0
+                    ? TelemetryData.normalizeHeading(_currentGpsPosition!.heading)
+                    : currentTelemetry?.heading);
+
+            // Construct seamless live telemetry object for map
+            final displayTelemetry = _currentGpsPosition != null
+                ? TelemetryData(
+                    latitude: _currentGpsPosition!.latitude,
+                    longitude: _currentGpsPosition!.longitude,
+                    speed: localSpeed,
+                    heading: localHeading,
+                    comfort: _currentComfort,
+                    timestamp: DateTime.now(),
+                    receivedAt: DateTime.now(),
+                    routeId: _routeId,
+                  )
+                : currentTelemetry;
+
             return Stack(
               children: [
                 // ── 1. Full-Screen Interactive Map ─────────────────────
                 Positioned.fill(
                   child: DriverMapWidget(
                     key: _mapKey,
-                    telemetry: currentTelemetry,
+                    telemetry: displayTelemetry,
                     isLive: isLive,
                     routeId: _routeId,
                     busNumber: _busNumber,
@@ -673,7 +816,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
                   ),
                 ),
 
-                // ── 2. Top App Bar with Driver Profile & Bus Switcher ──
+                // ── 2. Top App Bar with Invertis Logo & Bus Switcher ──
                 Positioned(
                   top: 0,
                   left: 0,
@@ -695,7 +838,13 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
                   bottom: 0,
                   left: 0,
                   right: 0,
-                  child: _buildBottomPanel(context, user, telemetry, currentTelemetry),
+                  child: _buildBottomPanel(
+                    context,
+                    user,
+                    telemetry,
+                    localSpeed,
+                    localHeading,
+                  ),
                 ),
               ],
             );
@@ -985,19 +1134,19 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
     BuildContext context,
     UserModel? user,
     TelemetryProvider telemetryProvider,
-    TelemetryData? telemetry,
+    double speed,
+    double? heading,
   ) {
-    final speed = _currentGpsPosition != null
-        ? (_currentGpsPosition!.speed * 3.6).clamp(0.0, 140.0)
-        : (telemetry?.speed ?? 0.0);
-
-    final heading = _currentGpsPosition != null && _currentGpsPosition!.heading > 0
-        ? _currentGpsPosition!.heading
-        : telemetry?.heading;
-
     final nextStopName = (_stopsData.isNotEmpty && _nextStopIndex < _stopsData.length)
         ? _stopsData[_nextStopIndex]['name'].toString()
         : 'Destination';
+
+    // Ride comfort color and icon
+    final comfortColor = _currentComfort == 'Smooth'
+        ? const Color(0xFF10B981)
+        : _currentComfort == 'Moderate'
+            ? const Color(0xFFF59E0B)
+            : const Color(0xFFEF4444);
 
     return Container(
       decoration: BoxDecoration(
@@ -1033,7 +1182,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
               ),
               const SizedBox(height: 12),
 
-              // ── Next Stop Hero Card ────────────────────────────────
+              // ── Next Stop & Live Ride Comfort Banner ───────────────
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
@@ -1061,14 +1210,51 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            'NEXT STOP',
-                            style: TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w800,
-                              color: AppTheme.orange,
-                              letterSpacing: 1.2,
-                            ),
+                          Row(
+                            children: [
+                              const Text(
+                                'NEXT STOP',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppTheme.orange,
+                                  letterSpacing: 1.2,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              // Live Ride Comfort badge
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1.5),
+                                decoration: BoxDecoration(
+                                  color: comfortColor.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: comfortColor.withOpacity(0.4)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      width: 6,
+                                      height: 6,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: comfortColor,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      _currentComfort.toUpperCase(),
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w900,
+                                        color: comfortColor,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
                           Text(
                             nextStopName,
@@ -1116,7 +1302,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
               // ── Live Telemetry Metrics Row (Speed, Heading, Distance, Duration) ──
               Row(
                 children: [
-                  // Speed
+                  // Speedometer (Real-time GPS update)
                   Expanded(
                     child: _MetricTile(
                       label: 'SPEED',
@@ -1127,7 +1313,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // Heading
+                  // Compass Heading (Physical Magnetometer)
                   Expanded(
                     child: _MetricTile(
                       label: 'HEADING',
@@ -1208,9 +1394,10 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
 
   String _getCardinal(double? deg) {
     if (deg == null) return '';
-    if (deg > 315 || deg <= 45) return 'North';
-    if (deg > 45 && deg <= 135) return 'East';
-    if (deg > 135 && deg <= 225) return 'South';
+    final h = TelemetryData.normalizeHeading(deg);
+    if (h >= 315 || h < 45) return 'North';
+    if (h >= 45 && h < 135) return 'East';
+    if (h >= 135 && h < 225) return 'South';
     return 'West';
   }
 
@@ -1329,7 +1516,7 @@ class _MetricTile extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             value,
-            style: TextStyle(
+            style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w900,
               color: AppTheme.black,

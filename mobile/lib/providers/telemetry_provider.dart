@@ -117,20 +117,25 @@ class TelemetryProvider extends ChangeNotifier {
     });
   }
 
-  /// Directly emit driver phone's GPS location to the backend
+  /// Directly emit driver phone's GPS location and sensors to the backend
   void emitLocation({
     required double latitude,
     required double longitude,
     required double speedKmh,
     double? heading,
+    String comfort = 'Smooth',
     required String routeId,
   }) {
     if (_socket != null && _isConnected) {
+      final normalizedHeading = heading != null ? TelemetryData.normalizeHeading(heading) : null;
       _socket!.emit('mobile_sensor_data', {
         'latitude': latitude,
         'longitude': longitude,
         'mpu_speed_kmh': speedKmh,
-        'heading_deg': heading,
+        'speed': speedKmh,
+        'heading_deg': normalizedHeading,
+        'heading': normalizedHeading,
+        'comfort': comfort,
         'route_id': routeId,
         'timestamp': DateTime.now().toUtc().toIso8601String(),
       });

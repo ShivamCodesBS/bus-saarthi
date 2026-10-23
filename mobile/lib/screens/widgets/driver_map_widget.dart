@@ -410,7 +410,8 @@ class DriverMapWidgetState extends State<DriverMapWidget> with TickerProviderSta
   }
 
   Widget _buildAnimatedBusMarker() {
-    final heading = widget.telemetry?.heading;
+    final rawHeading = widget.telemetry?.heading;
+    final heading = rawHeading != null ? TelemetryData.normalizeHeading(rawHeading) : null;
     final busLabel = widget.busNumber != null && widget.busNumber!.isNotEmpty
         ? widget.busNumber!
         : 'BUS';

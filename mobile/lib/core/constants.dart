@@ -53,7 +53,7 @@ class AppConstants {
   );
 
   // Sensor intervals
-  static const int sensorIntervalMs = 500; // Send telemetry every 500ms for near real-time updates
+  static const int sensorIntervalMs = 250; // Ultra-low latency telemetry: 250ms for live speedometer
 
   // ── Face Recognition (ArcFace — on-device) ───────────────────────────────
   // Interval between face recognition attempts
