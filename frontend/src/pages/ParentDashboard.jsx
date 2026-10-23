@@ -1366,11 +1366,9 @@ const ParentDashboard = () => {
                     </div>
                   ))}
                 </div>
-              </div>
+</div>
             )}
           </div>
-        )}
-      </div>
 
       {/* EXPANDED MAP MODAL */}
       {isMapExpanded && (
