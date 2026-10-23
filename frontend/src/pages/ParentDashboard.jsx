@@ -32,6 +32,11 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
+// --- Color constants ---
+const PURPLE = '#7c3aed';
+const PURPLE_LIGHT = '#f3e8ff';
+const PURPLE_DARK = '#6d28d9';
+
 const busIcon = new L.Icon({
   iconUrl: 'https://cdn-icons-png.flaticon.com/512/3448/3448339.png',
   iconSize: [38, 38],

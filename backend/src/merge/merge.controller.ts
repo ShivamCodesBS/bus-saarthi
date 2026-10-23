@@ -120,6 +120,7 @@ export class MergeController {
    * Check if a specific route is cancelled today.
    */
   @Get('check/:routeId')
+  @UseGuards(JwtAuthGuard)
   async checkRouteMergeStatus(@Param('routeId') routeId: string) {
     const isCancelled = await this.mergeService.isRouteCancelledToday(routeId);
     const activeMerge = isCancelled
