@@ -9,6 +9,7 @@ class SensorPayload {
   final double mpuSpeedKmh;
   final String routeId;
   final String timestamp;
+  final String comfort;
 
   SensorPayload({
     this.latitude,
@@ -21,6 +22,7 @@ class SensorPayload {
     required this.mpuSpeedKmh,
     required this.routeId,
     required this.timestamp,
+    this.comfort = 'Smooth',
   });
 
   Map<String, dynamic> toJson() => {
@@ -34,6 +36,7 @@ class SensorPayload {
     'mpu_speed_kmh': mpuSpeedKmh,
     'route_id': routeId,
     'timestamp': timestamp,
+    'comfort': comfort,
   };
 
   factory SensorPayload.fromJson(Map<String, dynamic> json) {
@@ -48,6 +51,7 @@ class SensorPayload {
       mpuSpeedKmh: (json['mpu_speed_kmh'] as num?)?.toDouble() ?? 0.0,
       routeId: json['route_id'] as String? ?? '4',
       timestamp: json['timestamp'] as String? ?? DateTime.now().toUtc().toIso8601String(),
+      comfort: json['comfort'] as String? ?? 'Smooth',
     );
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:geolocator/geolocator.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import '../models/sensor_payload.dart';
@@ -24,10 +25,13 @@ class SensorFusion {
   Position? _lastGps;
   UserAccelerometerEvent? _lastAccel;
   double? _lastHeading;
+  
+  // For ride comfort calculation - maintain rolling buffer of acceleration magnitudes
+  final List<double> _accelBuffer = [];
+  static const int _bufferSize = 20;
 
   Future<void> start(String routeId) async {
     // Guard: stop any existing session before starting a new one.
-    // This prevents duplicate timers if start() is called while already running.
     stop();
 
     try {
@@ -41,7 +45,15 @@ class SensorFusion {
 
     try {
       _accelSub = _accel.accelerometerStream.listen(
-        (e) => _lastAccel = e,
+        (e) {
+          _lastAccel = e;
+          // Calculate acceleration magnitude for comfort
+          final magnitude = sqrt(e.x * e.x + e.y * e.y + e.z * e.z);
+          _accelBuffer.add(magnitude);
+          if (_accelBuffer.length > _bufferSize) {
+            _accelBuffer.removeAt(0);
+          }
+        },
         onError: (e) => print('[Accel] Stream error (non-fatal): $e'),
       );
     } catch (e) {
@@ -64,7 +76,6 @@ class SensorFusion {
   }
 
   void stop() {
-    // Cancel and null all subscriptions to prevent ghost timers / data leaks
     _gpsSub?.cancel();
     _gpsSub = null;
 
@@ -77,22 +88,42 @@ class SensorFusion {
     _publishTimer?.cancel();
     _publishTimer = null;
 
-    // Clear cached sensor state so stale values aren't emitted after restart
     _lastGps = null;
     _lastAccel = null;
     _lastHeading = null;
+    _accelBuffer.clear();
   }
 
-  /// Call when this SensorFusion instance will never be used again.
-  /// Closes the broadcast stream so downstream listeners get their onDone.
   void dispose() {
     stop();
     _controller.close();
   }
 
+  String _calculateComfort() {
+    if (_accelBuffer.isEmpty) return 'Smooth';
+    
+    // Calculate standard deviation of acceleration magnitude
+    final mean = _accelBuffer.reduce((a, b) => a + b) / _accelBuffer.length;
+    final variance = _accelBuffer.map((v) => pow(v - mean, 2)).reduce((a, b) => a + b) / _accelBuffer.length;
+    final stdDev = sqrt(variance);
+    
+    // Also check peak acceleration
+    final maxAccel = _accelBuffer.reduce(max);
+    
+    // Classification thresholds (m/s²)
+    // Smooth: stdDev < 1.5 && max < 12
+    // Moderate: stdDev < 3.0 && max < 18
+    // Rough: otherwise
+    if (stdDev < 1.5 && maxAccel < 12.0) return 'Smooth';
+    if (stdDev < 3.0 && maxAccel < 18.0) return 'Moderate';
+    return 'Rough';
+  }
+
   void _publish(String routeId) {
     final gpsSpeedMs = _lastGps?.speed ?? 0.0;
     final gpsSpeedKmh = gpsSpeedMs * 3.6;
+    
+    final comfort = _calculateComfort();
 
     final payload = SensorPayload(
       latitude: _lastGps?.latitude,
@@ -105,6 +136,7 @@ class SensorFusion {
       mpuSpeedKmh: gpsSpeedKmh,
       routeId: routeId,
       timestamp: DateTime.now().toUtc().toIso8601String(),
+      comfort: comfort,
     );
 
     _controller.add(payload);

@@ -236,7 +236,10 @@ const ParentDashboard = () => {
   const [busLocation, setBusLocation] = useState([28.3180, 79.4670]);
   const [telemetry, setTelemetry] = useState(null);
   const [telemetryStale, setTelemetryStale] = useState(false);
-
+  
+  // Map instance ref for proper map control
+  const mapInstance = useRef(null);
+  
   // Dynamic Route Polyline based on routeInfo (same as student Home map)
   const dynamicRoutePolyline = useMemo(() => {
     if (!routeInfo || !routeInfo.stops) {
@@ -828,7 +831,16 @@ const ParentDashboard = () => {
                 </div>
               </div>
               <div style={{ height: '320px', position: 'relative' }}>
-                <MapContainer center={busLocation} zoom={14} style={{ height: '100%', width: '100%' }} attributionControl={false} zoomControl={true} scrollWheelZoom={true} dragging={true}>
+                <MapContainer 
+                  center={busLocation} 
+                  zoom={14} 
+                  style={{ height: '100%', width: '100%' }} 
+                  zoomControl={true}
+                  attributionControl={true}
+                  scrollWheelZoom={true}
+                  dragging={true}
+                  whenCreated={(map) => { mapInstance.current = map; }}
+                >
                   <MapResizer />
                   <TileLayer
                     url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
@@ -846,7 +858,6 @@ const ParentDashboard = () => {
                   </Marker>
                 </MapContainer>
               </div>
-            </div>
 
             {/* Route & Driver Info */}
             {routeInfo && (
