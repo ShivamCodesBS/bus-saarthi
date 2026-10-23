@@ -905,8 +905,6 @@ const ParentDashboard = () => {
               </div>
             )}
           </div>
-        )}
-
         {/* ===== ATTENDANCE TAB ===== */}
         {activeTab === 'attendance' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
