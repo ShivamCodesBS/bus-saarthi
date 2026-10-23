@@ -533,16 +533,16 @@ const Home = () => {
     <div className="min-h-screen w-full flex flex-col bg-transparent text-slate-900 dark:text-slate-50 transition-colors duration-300">
       
       {/* HEADER */}
-      <header className="flex justify-between items-center px-4 py-3 md:px-6 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800 z-50 sticky top-0 shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="h-10 md:h-12 px-2.5 py-1 rounded-xl bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700/60 flex items-center justify-center shrink-0">
-            <img src="/logo.png" alt="Invertis University" className="h-full w-auto max-h-8 md:max-h-9 object-contain filter drop-shadow-sm" />
+      <header className="flex justify-between items-center px-3.5 py-2 md:px-6 md:py-2.5 bg-white/85 dark:bg-slate-900/85 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800 z-50 sticky top-0 shadow-xs">
+        <div className="flex items-center gap-2.5">
+          <div className="h-8.5 md:h-10 px-2 py-0.5 rounded-lg bg-white dark:bg-slate-800 shadow-xs border border-slate-200 dark:border-slate-700/60 flex items-center justify-center shrink-0">
+            <img src="/logo.png" alt="Invertis University" className="h-full w-auto max-h-7 md:max-h-8 object-contain filter drop-shadow-xs" />
           </div>
           <div>
-            <h1 className="text-lg md:text-xl font-extrabold text-blue-700 dark:text-blue-400 tracking-tight leading-tight">
+            <h1 className="text-base md:text-lg font-extrabold text-blue-700 dark:text-blue-400 tracking-tight leading-tight">
               BUS <span className="text-orange-500">SAARTHI</span>
             </h1>
-            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{t('welcome')}, {translateName(user?.name) || 'Passenger'}</p>
+            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">{t('welcome')}, {translateName(user?.name) || 'Passenger'}</p>
           </div>
         </div>
         <div className="flex items-center gap-2 md:gap-4">

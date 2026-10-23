@@ -12,7 +12,7 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/src/main.js",
-    "prisma:generate": "npx prisma generate",
+    "prisma:generate": "prisma generate",
     "migrate:data": "ts-node migration/migrate.ts",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",

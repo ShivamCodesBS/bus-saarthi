@@ -19,6 +19,9 @@
     "build:frontend": "npm run build --prefix frontend",
     "build:admin": "npm run build --prefix admin-frontend",
     "build:all": "npm run build:backend && npm run build:frontend && npm run build:admin",
-    "postinstall": "npm --prefix backend run prisma:generate || true"
+    "postinstall": "cd backend && prisma generate || true"
+  },
+  "dependencies": {
+    "react-is": "^19.0.0"
   }
 }

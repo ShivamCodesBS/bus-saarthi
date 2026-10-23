@@ -681,14 +681,14 @@ const TransportInchargeDashboard = () => {
   return (
     <div className="min-h-screen flex flex-col relative">
       {/* Header */}
-      <header className="p-header z-50 sticky top-0" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--white)', boxShadow: 'var(--shadow)' }}>
+      <header className="z-50 sticky top-0" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--white)', boxShadow: 'var(--shadow)', padding: '0.6rem 1.25rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <div style={{ height: '42px', padding: '4px 10px', borderRadius: '12px', backgroundColor: 'white', border: '1px solid #bbf7d0', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(0,0,0,0.06)' }}>
-            <img src="/logo.png" alt="Invertis University" style={{ height: '100%', width: 'auto', maxHeight: '34px', objectFit: 'contain' }} />
+          <div style={{ height: '36px', padding: '3px 8px', borderRadius: '10px', backgroundColor: 'white', border: '1px solid #bbf7d0', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+            <img src="/logo.png" alt="Invertis University" style={{ height: '100%', width: 'auto', maxHeight: '28px', objectFit: 'contain' }} />
           </div>
           <div>
-            <h1 style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--text-dark)', lineHeight: 1.2 }}>Transport <span style={{ color: '#28a745' }}>Incharge</span></h1>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-light)', fontWeight: '500' }}>Welcome, {user?.name}</p>
+            <h1 style={{ fontSize: '1.1rem', fontWeight: '700', color: 'var(--text-dark)', lineHeight: 1.2, margin: 0 }}>Transport <span style={{ color: '#28a745' }}>Incharge</span></h1>
+            <p style={{ fontSize: '0.7rem', color: 'var(--text-light)', fontWeight: '500', margin: 0 }}>Welcome, {user?.name}</p>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>

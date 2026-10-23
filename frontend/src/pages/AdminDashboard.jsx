@@ -1025,18 +1025,18 @@ const AdminDashboard = () => {
   return (
     <div className="min-h-screen flex flex-col relative">
       {/* Header */}
-      <header className="p-header flex justify-between items-center gap-2 z-50 sticky top-0" style={{
+      <header className="px-3.5 py-2 md:px-6 md:py-2.5 flex justify-between items-center gap-2 z-50 sticky top-0" style={{
         backgroundColor: 'var(--white)', boxShadow: 'var(--shadow)'
       }}>
         <div className="flex items-center gap-2 md:gap-3 min-w-0">
-          <div className="h-10 md:h-11 px-2.5 py-1 rounded-xl bg-white dark:bg-slate-800 shrink-0 flex items-center justify-center border border-slate-200 dark:border-slate-700 shadow-sm">
-            <img src="/logo.png" alt="Invertis University" className="h-full w-auto max-h-8 md:max-h-9 object-contain filter drop-shadow-sm" />
+          <div className="h-8.5 md:h-10 px-2 py-0.5 rounded-lg bg-white dark:bg-slate-800 shrink-0 flex items-center justify-center border border-slate-200 dark:border-slate-700 shadow-xs">
+            <img src="/logo.png" alt="Invertis University" className="h-full w-auto max-h-7 md:max-h-8 object-contain filter drop-shadow-xs" />
           </div>
           <div className="min-w-0">
-            <h1 className="text-lg md:text-xl font-bold text-slate-800 dark:text-slate-100 leading-tight m-0 truncate">
+            <h1 className="text-base md:text-lg font-bold text-slate-800 dark:text-slate-100 leading-tight m-0 truncate">
               Admin <span className="text-orange-500">Dashboard</span>
             </h1>
-            <p className="text-xs md:text-sm font-medium text-slate-500 dark:text-slate-400 m-0 truncate">Welcome, {user?.name || 'Admin'}</p>
+            <p className="text-[11px] md:text-xs font-medium text-slate-500 dark:text-slate-400 m-0 truncate">Welcome, {user?.name || 'Admin'}</p>
           </div>
         </div>
 

@@ -528,18 +528,18 @@ const ParentDashboard = () => {
       {/* ========= HEADER ========= */}
       <header style={{
         background: `linear-gradient(135deg, ${PURPLE_DARK} 0%, ${PURPLE} 100%)`,
-        color: 'white', padding: '0 1.25rem',
+        color: 'white', padding: '0 1rem',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        height: '64px', position: 'sticky', top: 0, zIndex: 100,
-        boxShadow: '0 4px 20px rgba(139,92,246,0.4)',
+        height: '52px', position: 'sticky', top: 0, zIndex: 100,
+        boxShadow: '0 3px 14px rgba(139,92,246,0.35)',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <div style={{ height: '40px', padding: '4px 10px', borderRadius: '12px', backgroundColor: 'rgba(255,255,255,0.95)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
-            <img src="/logo.png" alt="Invertis University" style={{ height: '100%', width: 'auto', maxHeight: '32px', objectFit: 'contain' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+          <div style={{ height: '34px', padding: '3px 8px', borderRadius: '10px', backgroundColor: 'rgba(255,255,255,0.95)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 4px rgba(0,0,0,0.12)' }}>
+            <img src="/logo.png" alt="Invertis University" style={{ height: '100%', width: 'auto', maxHeight: '26px', objectFit: 'contain' }} />
           </div>
           <div>
-            <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, letterSpacing: '-0.3px' }}>Parent Dashboard</h1>
-            <p style={{ margin: 0, fontSize: '0.72rem', opacity: 0.9 }}>Invertis Bus Saarthi · Guardian View</p>
+            <h1 style={{ margin: 0, fontSize: '0.98rem', fontWeight: 800, letterSpacing: '-0.3px' }}>Parent Dashboard</h1>
+            <p style={{ margin: 0, fontSize: '0.68rem', opacity: 0.9 }}>Invertis Bus Saarthi · Guardian View</p>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>

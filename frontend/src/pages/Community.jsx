@@ -736,34 +736,15 @@ const Community = () => {
 
   return (
     <div className="min-h-screen flex flex-col relative">
-      {/* Unified Hero Header */}
+      {/* Unified Compact Navbar */}
       <div
-        className="sticky top-0"
-        style={{
-          backgroundColor: 'var(--primary-blue)',
-          zIndex: 50,
-          boxShadow: '0 2px 12px rgba(0,0,0,0.15)',
-        }}
+        className="sticky top-0 z-50 shadow-md backdrop-blur-md"
+        style={{ backgroundColor: 'var(--primary-blue)' }}
       >
-        <div
-          className="p-header"
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: '1rem',
-            paddingBottom: '0.75rem',
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '1rem',
-              flexShrink: 0,
-            }}
-          >
+        {/* Row 1: Core Navigation & Title */}
+        <div className="flex items-center justify-between px-3 md:px-6 py-2 gap-2">
+          {/* Left: Back Arrow + Logo + Title */}
+          <div className="flex items-center gap-2 min-w-0">
             <button
               onClick={() => {
                 if (showMyComplaints) {
@@ -774,255 +755,97 @@ const Community = () => {
               }}
               aria-label={showMyComplaints ? "Return to Community Feed" : "Go back"}
               title={showMyComplaints ? "Back to Community Home" : "Go back"}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: 'white',
-                cursor: 'pointer',
-                padding: '4px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
+              className="p-1 text-white/90 hover:text-white rounded-lg hover:bg-white/10 transition-colors shrink-0"
+              style={{ background: 'none', border: 'none', cursor: 'pointer' }}
             >
-              <ArrowLeft size={24} />
+              <ArrowLeft size={20} />
             </button>
-            <div>
-              <h1
-                style={{
-                  fontSize: '1.15rem',
-                  fontWeight: '700',
-                  margin: 0,
-                  color: 'white',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.45rem',
-                }}
-              >
+
+            {/* Invertis Logo */}
+            <div className="h-7 px-1.5 py-0.5 rounded-lg bg-white shrink-0 hidden sm:flex items-center justify-center shadow-xs">
+              <img
+                src="/logo.png"
+                alt="Invertis"
+                className="h-full w-auto object-contain"
+              />
+            </div>
+
+            <div className="min-w-0">
+              <h1 className="text-sm md:text-base font-bold text-white m-0 leading-tight truncate flex items-center gap-1.5">
                 {showMyComplaints ? (
                   <>
-                    <ClipboardList size={20} /> My Complaints
+                    <ClipboardList size={16} /> My Complaints
                   </>
                 ) : (
                   t('grievancePortal')
                 )}
               </h1>
-              {showMyComplaints ? (
-                <div
-                  style={{
-                    display: 'flex',
-                    gap: '0.4rem',
-                    fontSize: '0.65rem',
-                    color: 'rgba(255,255,255,0.85)',
-                    marginTop: '2px',
-                    fontWeight: '600',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.02em',
-                    flexWrap: 'wrap',
-                  }}
-                >
-                  <span>{myComplaints.length} Total Raised</span>
-                  <span>•</span>
-                  <span style={{ color: '#fcd34d' }}>
-                    {myComplaints.filter(c => c.status === 'pending' || c.status === 'in_progress').length} In Progress
+
+              {/* Subtitle Counts */}
+              <div className="text-[10px] md:text-xs text-white/75 font-semibold m-0 truncate tracking-wide">
+                {showMyComplaints ? (
+                  <span>
+                    {myComplaints.length} Total •{' '}
+                    <span style={{ color: '#fcd34d' }}>
+                      {myComplaints.filter(c => c.status === 'pending' || c.status === 'in_progress').length} In Progress
+                    </span>{' '}
+                    •{' '}
+                    <span style={{ color: '#86efac' }}>
+                      {myComplaints.filter(c => c.status === 'closed').length} Closed
+                    </span>
                   </span>
-                  <span>•</span>
-                  <span style={{ color: '#86efac' }}>
-                    {myComplaints.filter(c => c.status === 'closed').length} Closed
+                ) : (
+                  <span>
+                    {stats.total} Total •{' '}
+                    <span style={{ color: '#fcd34d' }}>{stats.pending} Open</span>
+                    {stats.awaiting > 0 && (
+                      <> • <span style={{ color: '#91d5ff' }}>{stats.awaiting} Awaiting</span></>
+                    )}
+                    {stats.reopened > 0 && (
+                      <> • <span style={{ color: '#ffa39e' }}>{stats.reopened} Reopened</span></>
+                    )}
+                    {' '}• <span style={{ color: '#86efac' }}>{stats.closed} Closed</span>
                   </span>
-                </div>
-              ) : (
-                <div
-                  style={{
-                    display: 'flex',
-                    gap: '0.4rem',
-                    fontSize: '0.65rem',
-                    color: 'rgba(255,255,255,0.7)',
-                    marginTop: '2px',
-                    fontWeight: '600',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.02em',
-                    flexWrap: 'wrap',
-                  }}
-                >
-                  <span>{stats.total} Total</span>
-                  <span>•</span>
-                  <span style={{ color: '#fcd34d' }}>{stats.pending} Open</span>
-                  {stats.awaiting > 0 && (
-                    <>
-                      <span>•</span>
-                      <span style={{ color: '#91d5ff' }}>
-                        {stats.awaiting} Awaiting Confirmation
-                      </span>
-                    </>
-                  )}
-                  {stats.reopened > 0 && (
-                    <>
-                      <span>•</span>
-                      <span style={{ color: '#ffa39e' }}>
-                        {stats.reopened} Reopened
-                      </span>
-                    </>
-                  )}
-                  <span>•</span>
-                  <span style={{ color: '#86efac' }}>{stats.closed} Closed</span>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
 
-          <div
-            style={{
-              display: 'flex',
-              flex: 1,
-              gap: '0.6rem',
-              alignItems: 'center',
-              minWidth: '260px',
-              justifyContent: 'flex-end',
-              flexWrap: 'wrap',
-            }}
-          >
+          {/* Right Action Buttons */}
+          <div className="flex items-center gap-1.5 shrink-0">
             {showMyComplaints ? (
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <>
                 <button
                   onClick={() => setShowMyComplaints(false)}
-                  style={{
-                    background: 'rgba(255,255,255,0.22)',
-                    border: '1px solid rgba(255,255,255,0.3)',
-                    borderRadius: '20px',
-                    padding: '0.45rem 0.9rem',
-                    color: 'white',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.4rem',
-                    fontSize: '0.75rem',
-                    fontWeight: '700',
-                    transition: 'all 0.15s',
-                  }}
+                  className="px-2.5 py-1 text-xs font-bold text-white bg-white/20 hover:bg-white/30 rounded-full border border-white/30 transition-all"
+                  style={{ cursor: 'pointer' }}
                 >
-                  <ArrowLeft size={14} /> Back to Community Home
+                  Feed
                 </button>
                 <button
                   onClick={() => setShowModal(true)}
+                  className="px-2.5 py-1 text-xs font-bold text-white rounded-full flex items-center gap-1 shadow-sm transition-all"
                   style={{
-                    background: 'var(--secondary-orange)',
+                    backgroundColor: 'var(--secondary-orange)',
                     border: 'none',
-                    borderRadius: '20px',
-                    padding: '0.45rem 0.9rem',
-                    color: 'white',
                     cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.4rem',
-                    fontSize: '0.75rem',
-                    fontWeight: '700',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
                   }}
                 >
-                  <Plus size={14} /> New Complaint
+                  <Plus size={14} /> New
                 </button>
-              </div>
+              </>
             ) : (
               <>
-                <div
-                  style={{
-                    position: 'relative',
-                    flex: '1 1 180px',
-                    maxWidth: '320px',
-                    minWidth: 0,
-                  }}
-                >
-                  <Search
-                    size={15}
-                    style={{
-                      position: 'absolute',
-                      left: '0.75rem',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      color: 'rgba(255,255,255,0.6)',
-                    }}
-                  />
-                  <input
-                    type="text"
-                    placeholder="Search..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    style={{
-                      width: '100%',
-                      paddingLeft: '2.2rem',
-                      paddingRight: '0.9rem',
-                      paddingTop: '0.55rem',
-                      paddingBottom: '0.55rem',
-                      borderRadius: '24px',
-                      border: '1px solid rgba(255,255,255,0.25)',
-                      fontSize: '0.875rem',
-                      outline: 'none',
-                      fontFamily: 'inherit',
-                      backgroundColor: 'rgba(255,255,255,0.14)',
-                      color: 'white',
-                      boxSizing: 'border-box',
-                    }}
-                  />
-                </div>
-
-                <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
-                  {[
-                    { key: 'newest', label: 'New' },
-                    { key: 'priority', label: 'Priority' },
-                    { key: 'most_agreed', label: 'Top' },
-                    { key: 'oldest', label: 'Old' },
-                  ].map((tab) => (
-                    <button
-                      key={tab.key}
-                      onClick={() => setSortBy(tab.key)}
-                      style={{
-                        padding: '0.45rem 0.65rem',
-                        borderRadius: '20px',
-                        border: '1px solid rgba(255,255,255,0.25)',
-                        cursor: 'pointer',
-                        fontSize: '0.72rem',
-                        fontWeight: '700',
-                        backgroundColor:
-                          sortBy === tab.key ? 'white' : 'rgba(255,255,255,0.12)',
-                        color: sortBy === tab.key ? 'var(--primary-blue)' : 'white',
-                        transition: 'all 0.15s',
-                      }}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
-
                 {!isAdmin && (
                   <button
                     onClick={() => setShowMyComplaints(true)}
-                    style={{
-                      background: 'rgba(255,255,255,0.2)',
-                      border: '1px solid rgba(255,255,255,0.3)',
-                      borderRadius: '20px',
-                      padding: '0.45rem 0.85rem',
-                      color: 'white',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.4rem',
-                      fontSize: '0.72rem',
-                      fontWeight: '700',
-                      flexShrink: 0,
-                      transition: 'all 0.2s ease',
-                    }}
+                    className="px-2.5 py-1 text-xs font-bold text-white bg-white/15 hover:bg-white/25 rounded-full border border-white/20 flex items-center gap-1 transition-all"
+                    style={{ cursor: 'pointer' }}
                   >
-                    <ClipboardList size={13} /> My complaints
+                    <ClipboardList size={13} />
+                    <span className="hidden sm:inline">My Complaints</span>
                     {myComplaints.length > 0 && (
-                      <span
-                        style={{
-                          background: 'rgba(255,255,255,0.35)',
-                          borderRadius: '10px',
-                          padding: '0.05rem 0.4rem',
-                          fontSize: '0.68rem',
-                        }}
-                      >
+                      <span className="bg-white/30 text-white rounded-full px-1.5 text-[10px] font-extrabold">
                         {myComplaints.length}
                       </span>
                     )}
@@ -1031,44 +854,68 @@ const Community = () => {
 
                 <button
                   onClick={() => setShowFilters(!showFilters)}
-                  style={{
-                    background: showFilters
-                      ? 'rgba(255,255,255,0.25)'
-                      : 'rgba(255,255,255,0.12)',
-                    border: '1px solid rgba(255,255,255,0.25)',
-                    borderRadius: '20px',
-                    padding: '0.45rem 0.85rem',
-                    color: 'white',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.4rem',
-                    fontSize: '0.72rem',
-                    fontWeight: '700',
-                    flexShrink: 0,
-                  }}
+                  className={`px-2 py-1 text-xs font-bold rounded-full border flex items-center gap-1 transition-all ${
+                    showFilters
+                      ? 'bg-white text-blue-900 border-white shadow-sm'
+                      : 'bg-white/15 text-white border-white/20 hover:bg-white/25'
+                  }`}
+                  style={{ cursor: 'pointer' }}
                 >
-                  <SlidersHorizontal size={14} /> Filter
+                  <SlidersHorizontal size={13} />
+                  <span className="hidden sm:inline">Filter</span>
                 </button>
               </>
             )}
           </div>
         </div>
 
+        {/* Row 2: Streamlined Search & Sort Filter Strip (only shown on main feed) */}
+        {!showMyComplaints && (
+          <div className="flex items-center justify-between px-3 md:px-6 py-1.5 gap-2 border-t border-white/10 overflow-x-auto scrollbar-none">
+            {/* Search Input */}
+            <div className="relative flex-1 min-w-[130px] max-w-[280px]">
+              <Search
+                size={13}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/60 pointer-events-none"
+              />
+              <input
+                type="text"
+                placeholder="Search..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-7 pr-2.5 py-1 text-xs text-white placeholder-white/50 bg-white/15 rounded-full border border-white/25 focus:outline-none focus:bg-white/25 transition-all"
+              />
+            </div>
+
+            {/* Sort Tabs */}
+            <div className="flex items-center gap-1 shrink-0 overflow-x-auto">
+              {[
+                { key: 'newest', label: 'New' },
+                { key: 'priority', label: 'Priority' },
+                { key: 'most_agreed', label: 'Top' },
+                { key: 'oldest', label: 'Old' },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setSortBy(tab.key)}
+                  className={`px-2.5 py-0.5 text-[11px] font-bold rounded-full transition-all shrink-0 ${
+                    sortBy === tab.key
+                      ? 'bg-white text-blue-900 shadow-sm'
+                      : 'bg-white/10 text-white/90 hover:bg-white/20'
+                  }`}
+                  style={{ border: 'none', cursor: 'pointer' }}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Collapsible Status Filter Pills */}
         {showFilters && (
           <div
-            style={{
-              paddingLeft: '1rem',
-              paddingRight: '1rem',
-              paddingBottom: '0.875rem',
-              maxWidth: '850px',
-              margin: '0 auto',
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: '0.5rem',
-              borderTop: '1px solid rgba(255,255,255,0.12)',
-              paddingTop: '0.75rem',
-            }}
+            className="flex flex-wrap items-center gap-1 px-3 md:px-6 py-2 border-t border-white/15 max-w-[850px] mx-auto animate-fadeIn"
           >
             {[
               'all',
@@ -1081,17 +928,12 @@ const Community = () => {
               <button
                 key={s}
                 onClick={() => setFilterStatus(s)}
-                style={{
-                  padding: '0.35rem 0.75rem',
-                  borderRadius: '20px',
-                  border: '1px solid var(--border-color)',
-                  cursor: 'pointer',
-                  fontSize: '0.78rem',
-                  fontWeight: '600',
-                  backgroundColor:
-                    filterStatus === s ? '#28a745' : 'transparent',
-                  color: filterStatus === s ? 'white' : 'var(--text-dark)',
-                }}
+                className={`px-2.5 py-0.5 text-xs font-semibold rounded-full border transition-all ${
+                  filterStatus === s
+                    ? 'bg-green-500 text-white border-green-400 shadow-sm'
+                    : 'bg-white/10 text-white/90 border-white/20 hover:bg-white/20'
+                }`}
+                style={{ cursor: 'pointer' }}
               >
                 {s === 'all'
                   ? 'All'
@@ -1100,31 +942,20 @@ const Community = () => {
               </button>
             ))}
             {isAdmin && (
-            <button
-              onClick={() => setFilterRoute(filterRoute === 'mine' ? 'all' : 'mine')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.3rem',
-                padding: '0.35rem 0.75rem',
-                borderRadius: '20px',
-                border: '1px solid rgba(255,255,255,0.25)',
-                cursor: 'pointer',
-                fontSize: '0.78rem',
-                fontWeight: '600',
-                backgroundColor:
+              <button
+                onClick={() => setFilterRoute(filterRoute === 'mine' ? 'all' : 'mine')}
+                className={`px-2.5 py-0.5 text-xs font-semibold rounded-full border flex items-center gap-1 transition-all ${
                   filterRoute === 'mine'
-                    ? 'var(--secondary-orange)'
-                    : 'rgba(255,255,255,0.12)',
-                color: 'white',
-              }}
-            >
-              <MapPin size={12} /> My Route Only
-            </button>
+                    ? 'bg-orange-500 text-white border-orange-400 shadow-sm'
+                    : 'bg-white/10 text-white/90 border-white/20 hover:bg-white/20'
+                }`}
+                style={{ cursor: 'pointer' }}
+              >
+                <MapPin size={11} /> My Route Only
+              </button>
             )}
           </div>
         )}
-
       </div>
 
       {/* ── Staff pre-screen: pick a bus ─────────────────────────
