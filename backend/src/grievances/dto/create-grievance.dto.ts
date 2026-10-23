@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, MaxLength, IsBoolean } from 'class-validator';
 
 export class CreateGrievanceDto {
   @IsString()
@@ -21,6 +21,14 @@ export class CreateGrievanceDto {
   @IsString()
   @IsOptional()
   realName?: string;
+
+  /**
+   * True when the reporter asked to stay anonymous. Staff (TI/Admin) still
+   * see the real name internally, but other passengers never do.
+   */
+  @IsBoolean()
+  @IsOptional()
+  isAnonymous?: boolean;
 
   /**
    * Route the complainant believes the issue relates to. The server always

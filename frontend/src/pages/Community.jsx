@@ -31,6 +31,8 @@ import { BACKEND_URL } from '../config';
 import { friendlyError, reportError } from '../lib/errors';
 import BusPicker from '../components/BusPicker';
 import MediaViewer from '../components/MediaViewer';
+import { ComplaintSkeleton, MyComplaintSkeleton } from '../components/ui/skeleton';
+import { useStaleWhileRevalidate } from '../hooks/useStaleWhileRevalidate';
 import '../index.css';
 
 /**
@@ -122,8 +124,6 @@ const Community = () => {
   const [showModal, setShowModal] = useState(false);
   const [newComplaintText, setNewComplaintText] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
-  const [complaints, setComplaints] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [mediaFile, setMediaFile] = useState(null);
   const [processingUpvotes, setProcessingUpvotes] = useState(new Set());
   const [mediaType, setMediaType] = useState('');
@@ -195,86 +195,92 @@ const Community = () => {
     [lang],
   );
 
-  // Fetch complaints + routes in parallel
-  useEffect(() => {
-    let cancelled = false;
+  // Stale-while-revalidate for complaints - fast cached load, then live update
+  const {
+    data: complaintsData,
+    isLoading: complaintsLoading,
+    isStale: complaintsStale,
+    refetch: refetchComplaints,
+    invalidate: invalidateComplaints,
+    setToken: setComplaintsToken,
+  } = useStaleWhileRevalidate('/api/grievances', {
+    cacheKey: 'community:grievances',
+    staleTime: 30000, // 30 seconds
+    onData: (data) => {
+      // Transform data to add isMine flag
+      const userLoginId = user?.login_id || user?.loginId;
+      const processed = data.map(c => ({
+        ...c,
+        isMine: c.isMine === true || (userLoginId && c.loginId === userLoginId),
+      }));
+      setComplaints(processed);
+    },
+  });
 
-    const fetchData = async () => {
-      try {
-        const headers = { Authorization: `Bearer ${token}` };
-        // Each request is independent: one failing or slow call must not
-        // stop the other from rendering.
-        const [grievancesRes, routesRes] = await Promise.allSettled([
-          axios.get(`${BACKEND_URL}/api/grievances`, { headers }),
-          axios.get(`${BACKEND_URL}/api/routes`, { headers }),
-        ]);
-        if (cancelled) return;
+  // Stale-while-revalidate for routes
+  const {
+    data: routesData,
+    isLoading: routesLoading,
+    refetch: refetchRoutes,
+    setToken: setRoutesToken,
+  } = useStaleWhileRevalidate('/api/routes', {
+    cacheKey: 'community:routes',
+    staleTime: 60000, // 60 seconds - routes change less frequently
+    onData: (routes) => {
+      const map = {};
+      routes.forEach((r) => {
+        const liveBus = r.bus?.busNumber || r.busNumber;
+        map[r.routeId] = {
+          name: r.routeName || `Route ${r.routeId}`,
+          // The live bus serving the route. The route is the stable
+          // identity; the bus can change.
+          busNumber: liveBus,
+        };
+      });
+      setRouteMap(map);
 
-        if (grievancesRes.status === 'rejected') {
-          console.warn('[community] complaints failed', grievancesRes.reason);
-        }
-        if (routesRes.status === 'rejected') {
-          console.warn('[community] routes failed', routesRes.reason);
-        }
-
-        const grievancesBody =
-          grievancesRes.status === 'fulfilled'
-            ? grievancesRes.value.data
-            : [];
-        const routesBody =
-          routesRes.status === 'fulfilled' ? routesRes.value.data : [];
-
-        // The endpoint returns a bare array.
-        const data = Array.isArray(grievancesBody)
-          ? grievancesBody
-          : (grievancesBody?.data || []);
-        setComplaints(data);
-
-        const routes = Array.isArray(routesBody)
-          ? routesBody
-          : (routesBody?.data || []);
-        const map = {};
-        routes.forEach((r) => {
+      // The bus list for the staff selector.
+      setBusList(
+        routes.map((r) => {
           const liveBus = r.bus?.busNumber || r.busNumber;
-          map[r.routeId] = {
-            name: r.routeName || `Route ${r.routeId}`,
-            // The live bus serving the route. The route is the stable
-            // identity; the bus can change.
-            busNumber: liveBus,
+          return {
+            routeId: String(r.routeId),
+            routeName: r.routeName || `Route ${r.routeId}`,
+            busNumber: liveBus || 'Unknown',
+            registrationNumber: r.registrationNumber || r.bus?.registrationNumber || '—',
+            vehicleModel: r.vehicleModel || r.bus?.vehicleModel || '—',
+            capacity: r.seatingCapacity || r.bus?.seatingCapacity || '—',
+            city: r.city || 'Bareilly',
+            driverId: r.driverId || '—',
           };
-        });
-        setRouteMap(map);
+        }),
+      );
+    },
+  });
 
-        // The bus list for the staff selector.
-        setBusList(
-          routes.map((r) => {
-            const liveBus = r.bus?.busNumber || r.busNumber;
-            return {
-              routeId: String(r.routeId),
-              routeName: r.routeName || `Route ${r.routeId}`,
-              busNumber: liveBus || 'Unknown',
-              registrationNumber: r.registrationNumber || r.bus?.registrationNumber || '—',
-              vehicleModel: r.vehicleModel || r.bus?.vehicleModel || '—',
-              capacity: r.seatingCapacity || r.bus?.seatingCapacity || '—',
-              city: r.city || 'Bareilly',
-              driverId: r.driverId || '—',
-            };
-          }),
-        );
-      } catch (error) {
-        if (cancelled) return;
-        reportError(error, 'community.load');
-        toast.error(friendlyError(error, 'We could not load the complaints right now. Please try again.'));
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
-    };
+  // Update tokens when user changes
+  useEffect(() => {
+    if (token) {
+      setComplaintsToken(token);
+      setRoutesToken(token);
+    }
+  }, [token, setComplaintsToken, setRoutesToken]);
 
-    fetchData();
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
+  // Sync complaints state with hook data
+  const [complaints, setComplaints] = useState([]);
+  useEffect(() => {
+    if (complaintsData) {
+      const userLoginId = user?.login_id || user?.loginId;
+      const processed = complaintsData.map(c => ({
+        ...c,
+        isMine: c.isMine === true || (userLoginId && c.loginId === userLoginId),
+      }));
+      setComplaints(processed);
+    }
+  }, [complaintsData, user]);
+
+  // Combined loading state
+  const isLoading = complaintsLoading || routesLoading;
 
   /**
    * Format the route of a complaint. Shows the route name and the bus that
@@ -449,14 +455,15 @@ const Community = () => {
     }
     try {
       const payload = {
-        // When the reporter stays anonymous, no name is stored at all.
-        realName: showMyName ? user?.name || 'Passenger User' : 'Anonymous Passenger',
         text: newComplaintText,
         type: mediaFile ? mediaType : 'text',
         mediaUrl: uploadedMediaUrl,
         category: selectedCategory,
         // The route is resolved server-side from the account's allocation.
         route: user?.route_id || undefined,
+        // isAnonymous: true means the reporter's name is hidden from other passengers
+        // but still visible to TI/Admin with an "anonymous" badge.
+        isAnonymous: !showMyName,
       };
       const response = await axios.post(`${BACKEND_URL}/api/grievance`, payload, {
         headers: { Authorization: `Bearer ${token}` },
@@ -474,6 +481,7 @@ const Community = () => {
             mediaUrl: uploadedMediaUrl,
             category: selectedCategory,
             realName: user?.name,
+            isAnonymous: !showMyName,
             status: 'pending',
             upvotes: 0,
             createdAt: created.createdAt || new Date().toISOString(),
@@ -481,6 +489,8 @@ const Community = () => {
           },
           ...prev,
         ]);
+        // Invalidate cache so next fetch gets fresh data
+        invalidateComplaints();
         setShowModal(false);
         setNewComplaintText('');
         setSelectedCategory('');
@@ -583,6 +593,8 @@ const Community = () => {
           : c,
       ),
     );
+    // Invalidate cache so next fetch gets fresh data
+    invalidateComplaints();
     toast.success(
       'Marked as fixed. It stays open until the complainant confirms it.',
     );
@@ -599,6 +611,8 @@ const Community = () => {
       setComplaints((prev) =>
         prev.map((c) => (c.id === id ? { ...c, status: 'in_progress' } : c)),
       );
+      // Invalidate cache so next fetch gets fresh data
+      invalidateComplaints();
       toast.success('Marked as in progress.');
     } catch (err) {
       toast.error(friendlyError(err, 'We could not update the complaint. Please try again.'));
@@ -623,6 +637,8 @@ const Community = () => {
       setComplaints((prev) =>
         prev.map((c) => (c.id === id ? { ...c, status: 'closed' } : c)),
       );
+      // Invalidate cache so next fetch gets fresh data
+      invalidateComplaints();
       toast.success('Thank you! Your complaint is now closed.');
     } catch (err) {
       toast.error(friendlyError(err, 'We could not confirm the fix. Please try again.'));
@@ -656,6 +672,8 @@ const Community = () => {
             : c,
         ),
       );
+      // Invalidate cache so next fetch gets fresh data
+      invalidateComplaints();
       setRejectingId(null);
       setRejectReason('');
       toast.success('Complaint reopened. It is now at the top of the queue.');
@@ -678,6 +696,8 @@ const Community = () => {
         { hours: 24 },
         { headers: { Authorization: `Bearer ${token}` } },
       );
+      // Invalidate cache so next fetch gets fresh data
+      invalidateComplaints();
       toast.success('Confirmation window extended by 24 hours.');
     } catch (err) {
       toast.error(friendlyError(err, 'We could not extend the deadline. Please try again.'));
@@ -745,14 +765,24 @@ const Community = () => {
             }}
           >
             <button
-              onClick={() => navigate(-1)}
-              aria-label="Go back"
+              onClick={() => {
+                if (showMyComplaints) {
+                  setShowMyComplaints(false);
+                } else {
+                  navigate(-1);
+                }
+              }}
+              aria-label={showMyComplaints ? "Return to Community Feed" : "Go back"}
+              title={showMyComplaints ? "Back to Community Home" : "Go back"}
               style={{
                 background: 'none',
                 border: 'none',
                 color: 'white',
                 cursor: 'pointer',
                 padding: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
             >
               <ArrowLeft size={24} />
@@ -764,45 +794,80 @@ const Community = () => {
                   fontWeight: '700',
                   margin: 0,
                   color: 'white',
-                }}
-              >
-                {t('grievancePortal')}
-              </h1>
-              <div
-                style={{
                   display: 'flex',
-                  gap: '0.4rem',
-                  fontSize: '0.65rem',
-                  color: 'rgba(255,255,255,0.7)',
-                  marginTop: '2px',
-                  fontWeight: '600',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.02em',
-                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  gap: '0.45rem',
                 }}
               >
-                <span>{stats.total} Total</span>
-                <span>•</span>
-                <span style={{ color: '#fcd34d' }}>{stats.pending} Open</span>
-                {stats.awaiting > 0 && (
+                {showMyComplaints ? (
                   <>
-                    <span>•</span>
-                    <span style={{ color: '#91d5ff' }}>
-                      {stats.awaiting} Awaiting Confirmation
-                    </span>
+                    <ClipboardList size={20} /> My Complaints
                   </>
+                ) : (
+                  t('grievancePortal')
                 )}
-                {stats.reopened > 0 && (
-                  <>
-                    <span>•</span>
-                    <span style={{ color: '#ffa39e' }}>
-                      {stats.reopened} Reopened
-                    </span>
-                  </>
-                )}
-                <span>•</span>
-                <span style={{ color: '#86efac' }}>{stats.closed} Closed</span>
-              </div>
+              </h1>
+              {showMyComplaints ? (
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: '0.4rem',
+                    fontSize: '0.65rem',
+                    color: 'rgba(255,255,255,0.85)',
+                    marginTop: '2px',
+                    fontWeight: '600',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.02em',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <span>{myComplaints.length} Total Raised</span>
+                  <span>•</span>
+                  <span style={{ color: '#fcd34d' }}>
+                    {myComplaints.filter(c => c.status === 'pending' || c.status === 'in_progress').length} In Progress
+                  </span>
+                  <span>•</span>
+                  <span style={{ color: '#86efac' }}>
+                    {myComplaints.filter(c => c.status === 'closed').length} Closed
+                  </span>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: '0.4rem',
+                    fontSize: '0.65rem',
+                    color: 'rgba(255,255,255,0.7)',
+                    marginTop: '2px',
+                    fontWeight: '600',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.02em',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <span>{stats.total} Total</span>
+                  <span>•</span>
+                  <span style={{ color: '#fcd34d' }}>{stats.pending} Open</span>
+                  {stats.awaiting > 0 && (
+                    <>
+                      <span>•</span>
+                      <span style={{ color: '#91d5ff' }}>
+                        {stats.awaiting} Awaiting Confirmation
+                      </span>
+                    </>
+                  )}
+                  {stats.reopened > 0 && (
+                    <>
+                      <span>•</span>
+                      <span style={{ color: '#ffa39e' }}>
+                        {stats.reopened} Reopened
+                      </span>
+                    </>
+                  )}
+                  <span>•</span>
+                  <span style={{ color: '#86efac' }}>{stats.closed} Closed</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -817,132 +882,176 @@ const Community = () => {
               flexWrap: 'wrap',
             }}
           >
-            <div
-              style={{
-                position: 'relative',
-                flex: '1 1 180px',
-                maxWidth: '320px',
-                minWidth: 0,
-              }}
-            >
-              <Search
-                size={15}
-                style={{
-                  position: 'absolute',
-                  left: '0.75rem',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: 'rgba(255,255,255,0.6)',
-                }}
-              />
-              <input
-                type="text"
-                placeholder="Search..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{
-                  width: '100%',
-                  paddingLeft: '2.2rem',
-                  paddingRight: '0.9rem',
-                  paddingTop: '0.55rem',
-                  paddingBottom: '0.55rem',
-                  borderRadius: '24px',
-                  border: '1px solid rgba(255,255,255,0.25)',
-                  fontSize: '0.875rem',
-                  outline: 'none',
-                  fontFamily: 'inherit',
-                  backgroundColor: 'rgba(255,255,255,0.14)',
-                  color: 'white',
-                  boxSizing: 'border-box',
-                }}
-              />
-            </div>
-
-            <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
-              {[
-                { key: 'newest', label: 'New' },
-                { key: 'priority', label: 'Priority' },
-                { key: 'most_agreed', label: 'Top' },
-                { key: 'oldest', label: 'Old' },
-              ].map((tab) => (
+            {showMyComplaints ? (
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 <button
-                  key={tab.key}
-                  onClick={() => setSortBy(tab.key)}
+                  onClick={() => setShowMyComplaints(false)}
                   style={{
-                    padding: '0.45rem 0.65rem',
+                    background: 'rgba(255,255,255,0.22)',
+                    border: '1px solid rgba(255,255,255,0.3)',
                     borderRadius: '20px',
-                    border: '1px solid rgba(255,255,255,0.25)',
+                    padding: '0.45rem 0.9rem',
+                    color: 'white',
                     cursor: 'pointer',
-                    fontSize: '0.72rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    fontSize: '0.75rem',
                     fontWeight: '700',
-                    backgroundColor:
-                      sortBy === tab.key ? 'white' : 'rgba(255,255,255,0.12)',
-                    color: sortBy === tab.key ? 'var(--primary-blue)' : 'white',
                     transition: 'all 0.15s',
                   }}
                 >
-                  {tab.label}
+                  <ArrowLeft size={14} /> Back to Community Home
                 </button>
-              ))}
-            </div>
-
-            {!isAdmin && (
-              <button
-                onClick={() => setShowMyComplaints((v) => !v)}
-                style={{
-                  background: showMyComplaints
-                    ? 'rgba(255,255,255,0.28)'
-                    : 'rgba(255,255,255,0.12)',
-                  border: '1px solid rgba(255,255,255,0.25)',
-                  borderRadius: '20px',
-                  padding: '0.45rem 0.85rem',
-                  color: 'white',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                  fontSize: '0.72rem',
-                  fontWeight: '700',
-                  flexShrink: 0,
-                }}
-              >
-                <ClipboardList size={13} /> My complaints
-                {myComplaints.length > 0 && (
-                  <span
+                <button
+                  onClick={() => setShowModal(true)}
+                  style={{
+                    background: 'var(--secondary-orange)',
+                    border: 'none',
+                    borderRadius: '20px',
+                    padding: '0.45rem 0.9rem',
+                    color: 'white',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    fontSize: '0.75rem',
+                    fontWeight: '700',
+                    boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+                  }}
+                >
+                  <Plus size={14} /> New Complaint
+                </button>
+              </div>
+            ) : (
+              <>
+                <div
+                  style={{
+                    position: 'relative',
+                    flex: '1 1 180px',
+                    maxWidth: '320px',
+                    minWidth: 0,
+                  }}
+                >
+                  <Search
+                    size={15}
                     style={{
-                      background: 'rgba(255,255,255,0.28)',
-                      borderRadius: '10px',
-                      padding: '0.05rem 0.4rem',
-                      fontSize: '0.68rem',
+                      position: 'absolute',
+                      left: '0.75rem',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      color: 'rgba(255,255,255,0.6)',
+                    }}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Search..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    style={{
+                      width: '100%',
+                      paddingLeft: '2.2rem',
+                      paddingRight: '0.9rem',
+                      paddingTop: '0.55rem',
+                      paddingBottom: '0.55rem',
+                      borderRadius: '24px',
+                      border: '1px solid rgba(255,255,255,0.25)',
+                      fontSize: '0.875rem',
+                      outline: 'none',
+                      fontFamily: 'inherit',
+                      backgroundColor: 'rgba(255,255,255,0.14)',
+                      color: 'white',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
+                  {[
+                    { key: 'newest', label: 'New' },
+                    { key: 'priority', label: 'Priority' },
+                    { key: 'most_agreed', label: 'Top' },
+                    { key: 'oldest', label: 'Old' },
+                  ].map((tab) => (
+                    <button
+                      key={tab.key}
+                      onClick={() => setSortBy(tab.key)}
+                      style={{
+                        padding: '0.45rem 0.65rem',
+                        borderRadius: '20px',
+                        border: '1px solid rgba(255,255,255,0.25)',
+                        cursor: 'pointer',
+                        fontSize: '0.72rem',
+                        fontWeight: '700',
+                        backgroundColor:
+                          sortBy === tab.key ? 'white' : 'rgba(255,255,255,0.12)',
+                        color: sortBy === tab.key ? 'var(--primary-blue)' : 'white',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                {!isAdmin && (
+                  <button
+                    onClick={() => setShowMyComplaints(true)}
+                    style={{
+                      background: 'rgba(255,255,255,0.2)',
+                      border: '1px solid rgba(255,255,255,0.3)',
+                      borderRadius: '20px',
+                      padding: '0.45rem 0.85rem',
+                      color: 'white',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      fontSize: '0.72rem',
+                      fontWeight: '700',
+                      flexShrink: 0,
+                      transition: 'all 0.2s ease',
                     }}
                   >
-                    {myComplaints.length}
-                  </span>
+                    <ClipboardList size={13} /> My complaints
+                    {myComplaints.length > 0 && (
+                      <span
+                        style={{
+                          background: 'rgba(255,255,255,0.35)',
+                          borderRadius: '10px',
+                          padding: '0.05rem 0.4rem',
+                          fontSize: '0.68rem',
+                        }}
+                      >
+                        {myComplaints.length}
+                      </span>
+                    )}
+                  </button>
                 )}
-              </button>
-            )}
 
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              style={{
-                background: showFilters
-                  ? 'rgba(255,255,255,0.25)'
-                  : 'rgba(255,255,255,0.12)',
-                border: '1px solid rgba(255,255,255,0.25)',
-                borderRadius: '20px',
-                padding: '0.45rem 0.85rem',
-                color: 'white',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.4rem',
-                fontSize: '0.72rem',
-                fontWeight: '700',
-                flexShrink: 0,
-              }}
-            >
-              <SlidersHorizontal size={14} /> Filter
-            </button>
+                <button
+                  onClick={() => setShowFilters(!showFilters)}
+                  style={{
+                    background: showFilters
+                      ? 'rgba(255,255,255,0.25)'
+                      : 'rgba(255,255,255,0.12)',
+                    border: '1px solid rgba(255,255,255,0.25)',
+                    borderRadius: '20px',
+                    padding: '0.45rem 0.85rem',
+                    color: 'white',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    fontSize: '0.72rem',
+                    fontWeight: '700',
+                    flexShrink: 0,
+                  }}
+                >
+                  <SlidersHorizontal size={14} /> Filter
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -1082,11 +1191,8 @@ const Community = () => {
         </div>
       )}
 
-      {/* ── Page heading ─────────────────────────────────────────
-          The list needs a clear heading and a short line explaining
-          what the page is, so it does not read as a wall of cards. */}
-      {/* Non-staff see the heading here; staff have it on the pre-screen. */}
-      {!isAdmin && (
+      {/* ── Page heading & Section Button (when on main community home) ── */}
+      {!isAdmin && !showMyComplaints && (
         <div
           style={{
             maxWidth: '850px',
@@ -1095,199 +1201,474 @@ const Community = () => {
             padding: '1.25rem 1rem 0.5rem',
           }}
         >
-          <h1
-            style={{
-              margin: 0,
-              fontSize: '1.45rem',
-              fontWeight: '800',
-              color: 'var(--text-dark)',
-              letterSpacing: '-0.4px',
-            }}
-          >
-            Bus complaints
-          </h1>
-          <p
-            style={{
-              margin: '0.35rem 0 0',
-              fontSize: '0.9rem',
-              color: 'var(--text-light)',
-              maxWidth: '62ch',
-              lineHeight: 1.5,
-            }}
-          >
-            Complaints raised by passengers on your bus route. Open one to see
-            its status and the transport team’s response.
-          </p>
-        </div>
-      )}
-
-      {/* ── My complaints ───────────────────────────────────────
-          The signed-in user's own complaints, with their status. */}
-      {showMyComplaints && !isAdmin && (
-        <div
-          style={{
-            maxWidth: '850px',
-            margin: '0 auto',
-            width: '100%',
-            padding: '0 1rem 0.5rem',
-          }}
-        >
-          <div
-            className="glass"
-            style={{
-              borderRadius: '16px',
-              padding: '1.1rem 1.25rem',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '0.9rem',
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                gap: '0.75rem',
-                flexWrap: 'wrap',
-              }}
-            >
-              <h2
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap' }}>
+            <div>
+              <h1
                 style={{
                   margin: 0,
-                  fontSize: '1.05rem',
-                  fontWeight: '700',
+                  fontSize: '1.45rem',
+                  fontWeight: '800',
                   color: 'var(--text-dark)',
+                  letterSpacing: '-0.4px',
                 }}
               >
-                My complaints
-              </h2>
-              <button
-                onClick={() => setShowMyComplaints(false)}
-                aria-label="Close my complaints"
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
-                  color: 'var(--text-light)',
-                  display: 'flex',
-                }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {myComplaints.length === 0 ? (
+                Bus complaints
+              </h1>
               <p
                 style={{
-                  margin: 0,
+                  margin: '0.35rem 0 0',
+                  fontSize: '0.9rem',
                   color: 'var(--text-light)',
-                  fontSize: '0.88rem',
+                  maxWidth: '62ch',
+                  lineHeight: 1.5,
                 }}
               >
-                You have not raised any complaints yet.
+                Complaints raised by passengers on your bus route. Open one to see
+                its status and the transport team’s response.
               </p>
-            ) : (
-              myComplaints.map((c) => {
-                const meta = STATUS_META[c.status] || STATUS_META.pending;
-                const { Icon } = meta;
-                return (
-                  <div
-                    key={c.id}
-                    onClick={() => setDetailId(c.id)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        setDetailId(c.id);
-                      }
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: '0.75rem',
-                      padding: '0.75rem 0.85rem',
-                      borderRadius: '12px',
-                      border: '1px solid var(--border-color)',
-                      background: 'var(--bg-color)',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <span
-                      style={{
-                        width: '30px',
-                        height: '30px',
-                        borderRadius: '9px',
-                        background: meta.bg,
-                        color: meta.color,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        flexShrink: 0,
-                      }}
-                    >
-                      <Icon size={15} />
-                    </span>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <p
-                        style={{
-                          margin: 0,
-                          fontSize: '0.88rem',
-                          color: 'var(--text-dark)',
-                          fontWeight: '600',
-                          lineHeight: 1.45,
-                          overflowWrap: 'anywhere',
-                        }}
-                      >
-                        {c.text}
-                      </p>
-                      <p
-                        style={{
-                          margin: '0.3rem 0 0',
-                          fontSize: '0.74rem',
-                          color: 'var(--text-light)',
-                          display: 'flex',
-                          gap: '0.3rem',
-                          flexWrap: 'wrap',
-                          alignItems: 'center',
-                        }}
-                      >
-                        <Bus size={11} />
-                        {formatRoute(c.route, c.busNumber)}
-                        <span>•</span>
-                        {formatTime(c.createdAt)}
-                        {c.category ? (
-                          <>
-                            <span>•</span>
-                            {c.category}
-                          </>
-                        ) : null}
-                      </p>
-                    </div>
-                    <span
-                      style={{
-                        fontSize: '0.68rem',
-                        fontWeight: '800',
-                        padding: '0.2rem 0.5rem',
-                        borderRadius: '7px',
-                        background: meta.bg,
-                        color: meta.color,
-                        whiteSpace: 'nowrap',
-                        flexShrink: 0,
-                      }}
-                    >
-                      {meta.label}
-                    </span>
-                  </div>
-                );
-              })
-            )}
+            </div>
+
+            {/* Prominent Section Button to open My Complaints Window */}
+            <button
+              onClick={() => setShowMyComplaints(true)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.6rem',
+                padding: '0.65rem 1.25rem',
+                borderRadius: '24px',
+                background: 'linear-gradient(135deg, var(--primary-blue), #004494)',
+                color: 'white',
+                fontWeight: '700',
+                fontSize: '0.88rem',
+                border: 'none',
+                cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(0, 86, 179, 0.28)',
+                transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                flexShrink: 0,
+              }}
+              className="hover-lift"
+              title="Open your personal complaints window"
+            >
+              <ClipboardList size={18} />
+              <span>My Complaints</span>
+              {myComplaints.length > 0 && (
+                <span
+                  style={{
+                    background: 'rgba(255,255,255,0.25)',
+                    padding: '0.15rem 0.55rem',
+                    borderRadius: '12px',
+                    fontSize: '0.75rem',
+                    fontWeight: '800',
+                  }}
+                >
+                  {myComplaints.length}
+                </span>
+              )}
+            </button>
           </div>
         </div>
       )}
 
-      {/* Feed Area — for staff this only appears once a bus is chosen. */}
-      {(!isAdmin || selectedBus !== 'all') && (
+      {/* ── My Complaints Window (Dedicated Animated View) ────────────────── */}
+      {showMyComplaints && !isAdmin && (
+        <main
+          className="p-main pb-24 animate-slide-up"
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1.25rem',
+            maxWidth: '850px',
+            margin: '0 auto',
+            width: '100%',
+          }}
+        >
+          {/* Window Navigation Bar */}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '0.75rem',
+              flexWrap: 'wrap',
+            }}
+          >
+            <button
+              onClick={() => setShowMyComplaints(false)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                background: 'var(--card-bg)',
+                border: '1px solid var(--border-color)',
+                color: 'var(--text-dark)',
+                borderRadius: '24px',
+                padding: '0.55rem 1.15rem',
+                fontSize: '0.85rem',
+                fontWeight: '700',
+                cursor: 'pointer',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.05)',
+                transition: 'all 0.2s ease',
+              }}
+              className="hover-lift"
+            >
+              <ArrowLeft size={16} /> Back to Community Home
+            </button>
+
+            <button
+              onClick={() => setShowModal(true)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.45rem',
+                background: 'var(--secondary-orange)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '24px',
+                padding: '0.55rem 1.15rem',
+                fontSize: '0.85rem',
+                fontWeight: '700',
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(255, 102, 0, 0.3)',
+                transition: 'all 0.2s ease',
+              }}
+              className="hover-lift"
+            >
+              <Plus size={16} /> Raise New Complaint
+            </button>
+          </div>
+
+          {/* Window Hero Card with Stats */}
+          <div
+            className="glass"
+            style={{
+              borderRadius: '20px',
+              padding: '1.35rem 1.5rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '1.1rem',
+              borderLeft: '5px solid var(--primary-blue)',
+            }}
+          >
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <ClipboardList size={22} color="var(--primary-blue)" />
+                <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: '800', color: 'var(--text-dark)' }}>
+                  My Raised Complaints
+                </h2>
+              </div>
+              <p style={{ margin: '0.35rem 0 0', fontSize: '0.85rem', color: 'var(--text-light)', lineHeight: 1.45 }}>
+                Track issues you have raised. When the transport team marks a complaint as fixed, you can confirm it or reopen if not satisfied.
+              </p>
+            </div>
+
+            {/* Quick Stat Chips */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                gap: '0.65rem',
+              }}
+            >
+              <div style={{ background: 'var(--bg-color)', padding: '0.65rem 0.9rem', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-light)', fontWeight: '600' }}>Total Raised</span>
+                <p style={{ margin: '0.15rem 0 0', fontSize: '1.35rem', fontWeight: '800', color: 'var(--text-dark)' }}>
+                  {myComplaints.length}
+                </p>
+              </div>
+              <div style={{ background: '#fff7e6', padding: '0.65rem 0.9rem', borderRadius: '12px', border: '1px solid #ffe7ba' }}>
+                <span style={{ fontSize: '0.72rem', color: '#d46b08', fontWeight: '600' }}>In Progress / Open</span>
+                <p style={{ margin: '0.15rem 0 0', fontSize: '1.35rem', fontWeight: '800', color: '#d46b08' }}>
+                  {myComplaints.filter(c => c.status === 'pending' || c.status === 'in_progress' || c.status === 'reopened').length}
+                </p>
+              </div>
+              <div style={{ background: '#e6f4ff', padding: '0.65rem 0.9rem', borderRadius: '12px', border: '1px solid #bae0ff' }}>
+                <span style={{ fontSize: '0.72rem', color: '#0958d9', fontWeight: '600' }}>Awaiting Confirmation</span>
+                <p style={{ margin: '0.15rem 0 0', fontSize: '1.35rem', fontWeight: '800', color: '#0958d9' }}>
+                  {myComplaints.filter(c => c.status === 'resolved').length}
+                </p>
+              </div>
+              <div style={{ background: '#e6fae6', padding: '0.65rem 0.9rem', borderRadius: '12px', border: '1px solid #b7eb8f' }}>
+                <span style={{ fontSize: '0.72rem', color: '#28a745', fontWeight: '600' }}>Closed (Resolved)</span>
+                <p style={{ margin: '0.15rem 0 0', fontSize: '1.35rem', fontWeight: '800', color: '#28a745' }}>
+                  {myComplaints.filter(c => c.status === 'closed').length}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* List of My Complaints */}
+          {isLoading ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              {[1, 2, 3].map((i) => (
+                <ComplaintSkeleton key={i} style={{ opacity: 1 - i * 0.2 }} />
+              ))}
+            </div>
+          ) : myComplaints.length === 0 ? (
+            <div
+              className="glass"
+              style={{
+                borderRadius: '20px',
+                padding: '3.5rem 1.5rem',
+                textAlign: 'center',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '1rem',
+              }}
+            >
+              <div
+                style={{
+                  width: '68px',
+                  height: '68px',
+                  borderRadius: '50%',
+                  background: 'rgba(0, 86, 179, 0.1)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--primary-blue)',
+                }}
+              >
+                <ClipboardList size={34} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '800', color: 'var(--text-dark)' }}>
+                  No Complaints Raised
+                </h3>
+                <p style={{ margin: '0.35rem 0 0', fontSize: '0.88rem', color: 'var(--text-light)', maxWidth: '44ch', lineHeight: 1.5 }}>
+                  You have not submitted any complaints yet. If you notice any issue with the bus service, drivers, or route, let the transport team know.
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+                <button
+                  onClick={() => setShowModal(true)}
+                  style={{
+                    background: 'var(--primary-blue)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '24px',
+                    padding: '0.65rem 1.4rem',
+                    fontWeight: '700',
+                    fontSize: '0.88rem',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 12px rgba(0,86,179,0.25)',
+                  }}
+                >
+                  Raise a Complaint
+                </button>
+                <button
+                  onClick={() => setShowMyComplaints(false)}
+                  style={{
+                    background: 'transparent',
+                    color: 'var(--text-dark)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '24px',
+                    padding: '0.65rem 1.25rem',
+                    fontWeight: '700',
+                    fontSize: '0.88rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Return to Community Feed
+                </button>
+              </div>
+            </div>
+          ) : (
+            myComplaints.map((comp) => {
+              const busy = busyIds.has(comp.id);
+              const meta = STATUS_META[comp.status] || STATUS_META.pending;
+              const { Icon } = meta;
+              return (
+                <div
+                  key={comp.id}
+                  className="glass animate-slide-up p-glass"
+                  onClick={() => setDetailId(comp.id)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setDetailId(comp.id);
+                    }
+                  }}
+                  style={{
+                    borderRadius: '16px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '1rem',
+                    cursor: 'pointer',
+                    borderLeft: `4px solid ${
+                      comp.status === 'closed'
+                        ? '#28a745'
+                        : comp.status === 'resolved'
+                          ? '#0958d9'
+                          : comp.status === 'in_progress'
+                            ? '#d46b08'
+                            : '#cf1322'
+                    }`,
+                  }}
+                >
+                  {/* Card Header */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'flex-start',
+                      gap: '0.75rem',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
+                      <div
+                        style={{
+                          backgroundColor: meta.bg,
+                          color: meta.color,
+                          width: '40px',
+                          height: '40px',
+                          borderRadius: '50%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <Icon size={20} />
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 'bold', color: 'var(--text-dark)' }}>
+                          {t('yourComplaint')}
+                        </h3>
+                        <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-light)', display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
+                          <Bus size={12} />
+                          {formatRoute(comp.route, comp.busNumber)}
+                          <span>•</span>
+                          {formatTime(comp.createdAt)}
+                        </p>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', justifyContent: 'flex-end', flexShrink: 0 }}>
+                      <span style={{ fontSize: '0.65rem', fontWeight: '800', color: 'var(--text-light)', backgroundColor: '#f1f3f5', padding: '0.25rem 0.4rem', borderRadius: '6px', fontFamily: 'monospace' }}>
+                        #{String(comp.id).substring(0, 6).toUpperCase()}
+                      </span>
+                      {renderStatusBadge(comp.status)}
+                      {comp.category && (
+                        <span style={{ fontSize: '0.65rem', fontWeight: '700', padding: '0.2rem 0.5rem', borderRadius: '6px', backgroundColor: 'rgba(24,119,242,0.1)', color: 'var(--primary-blue)' }}>
+                          {comp.category}
+                        </span>
+                      )}
+                      {comp.reopenCount > 0 && comp.status !== 'closed' && (
+                        <span style={{ fontSize: '0.62rem', fontWeight: '700', padding: '0.15rem 0.4rem', borderRadius: '6px', backgroundColor: '#fff1f0', color: '#cf1322' }}>
+                          ×{comp.reopenCount} Reopened
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Complaint Text */}
+                  <p style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text-dark)', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {comp.text}
+                  </p>
+
+                  {/* Media attachment if any */}
+                  {comp.type === 'photo' && comp.mediaUrl && (
+                    <div onClick={(e) => { e.stopPropagation(); setMediaOpen({ type: 'photo', url: comp.mediaUrl }); }} style={{ borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-color)', cursor: 'zoom-in', maxHeight: '300px' }}>
+                      <img src={comp.mediaUrl} alt="Complaint attachment" loading="lazy" style={{ width: '100%', maxHeight: '300px', objectFit: 'contain', display: 'block' }} />
+                    </div>
+                  )}
+
+                  {/* Admin Response Callout */}
+                  {comp.adminResponse && (
+                    <div style={{ padding: '0.75rem 1rem', backgroundColor: 'rgba(0,86,179,0.06)', borderLeft: '3px solid var(--primary-blue)', borderRadius: '8px' }}>
+                      <p style={{ margin: 0, fontSize: '0.7rem', fontWeight: '700', color: 'var(--primary-blue)', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                        Response from the transport team
+                      </p>
+                      <p style={{ margin: '0.3rem 0 0', fontSize: '0.88rem', color: 'var(--text-dark)', lineHeight: 1.5 }}>
+                        {comp.adminResponse}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Complainant actions when resolved */}
+                  {comp.status === 'resolved' && (
+                    <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', gap: '0.75rem', borderTop: '1px solid #f0f0f0', paddingTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#0958d9', flex: '1 1 100%' }}>
+                        ⚡ The transport team marked this as fixed. Please confirm if satisfied:
+                      </span>
+                      <button
+                        onClick={() => handleConfirm(comp.id)}
+                        disabled={busy}
+                        style={{
+                          backgroundColor: '#28a745',
+                          color: 'white',
+                          border: 'none',
+                          padding: '0.45rem 1rem',
+                          borderRadius: '8px',
+                          fontWeight: 'bold',
+                          fontSize: '0.82rem',
+                          cursor: busy ? 'default' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.35rem',
+                        }}
+                      >
+                        <Check size={14} /> Yes, Confirmed Fixed
+                      </button>
+                      <button
+                        onClick={() => {
+                          setRejectingId(comp.id);
+                          setRejectReason('');
+                        }}
+                        disabled={busy}
+                        style={{
+                          backgroundColor: '#cf1322',
+                          color: 'white',
+                          border: 'none',
+                          padding: '0.45rem 1rem',
+                          borderRadius: '8px',
+                          fontWeight: 'bold',
+                          fontSize: '0.82rem',
+                          cursor: busy ? 'default' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.35rem',
+                        }}
+                      >
+                        <RotateCcw size={14} /> Not Fixed Yet
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+
+          {/* Bottom Return Button */}
+          <div style={{ textAlign: 'center', marginTop: '1rem' }}>
+            <button
+              onClick={() => setShowMyComplaints(false)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                background: 'transparent',
+                border: '1px solid var(--border-color)',
+                color: 'var(--text-light)',
+                borderRadius: '24px',
+                padding: '0.5rem 1.25rem',
+                fontSize: '0.82rem',
+                fontWeight: '600',
+                cursor: 'pointer',
+              }}
+            >
+              <ArrowLeft size={14} /> Return to Community Feed
+            </button>
+          </div>
+        </main>
+      )}
+
+      {/* Feed Area — for staff this only appears once a bus is chosen. Only shown when not in My Complaints window. */}
+      {!showMyComplaints && (!isAdmin || selectedBus !== 'all') && (
       <main
         className="p-main pb-24"
         style={{
@@ -1303,66 +1684,7 @@ const Community = () => {
         {isLoading ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             {[1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className="glass p-glass"
-                style={{
-                  borderRadius: '16px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '1rem',
-                  padding: '1.5rem',
-                  opacity: 1 - i * 0.2,
-                }}
-              >
-                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                  <div
-                    className="animate-pulse"
-                    style={{
-                      width: '40px',
-                      height: '40px',
-                      borderRadius: '50%',
-                      backgroundColor: '#e9ecef',
-                    }}
-                  ></div>
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '0.5rem',
-                    }}
-                  >
-                    <div
-                      className="animate-pulse"
-                      style={{
-                        width: '120px',
-                        height: '14px',
-                        borderRadius: '4px',
-                        backgroundColor: '#e9ecef',
-                      }}
-                    ></div>
-                    <div
-                      className="animate-pulse"
-                      style={{
-                        width: '80px',
-                        height: '10px',
-                        borderRadius: '4px',
-                        backgroundColor: '#e9ecef',
-                      }}
-                    ></div>
-                  </div>
-                </div>
-                <div
-                  className="animate-pulse"
-                  style={{
-                    width: '100%',
-                    height: '14px',
-                    borderRadius: '4px',
-                    backgroundColor: '#e9ecef',
-                    marginTop: '0.5rem',
-                  }}
-                ></div>
-              </div>
+              <ComplaintSkeleton key={i} style={{ opacity: 1 - i * 0.2 }} />
             ))}
           </div>
         ) : filteredComplaints.length === 0 ? (
@@ -1378,10 +1700,14 @@ const Community = () => {
             <p style={{ fontSize: '0.85rem' }}>Try adjusting your filters</p>
           </div>
         ) : (
-          filteredComplaints.map((comp) => {
-            const isMine = comp.isMine || comp.loginId === user?.login_id;
-            const busy = busyIds.has(comp.id);
-            return (
+filteredComplaints.map((comp) => {
+              // Check if this complaint belongs to the current user
+              // Use strict equality and handle potential case/formatting differences
+              const userLoginId = user?.login_id || user?.loginId;
+              const compLoginId = comp.loginId;
+              const isMine = comp.isMine === true || (userLoginId && compLoginId && compLoginId === userLoginId);
+              const busy = busyIds.has(comp.id);
+              return (
               <div
                 key={comp.id}
                 className="glass animate-slide-up p-glass"
@@ -1450,7 +1776,7 @@ const Community = () => {
                       >
                         {/* The reporter's identity is not on the card.
                             Staff open the complaint to see the details. */}
-                        {isMine ? 'Your complaint' : t('anonymousPassenger')}
+                        {isMine ? t('yourComplaint') : t('anonymousPassenger')}
                       </h3>
                       <p
                         style={{
@@ -2396,6 +2722,22 @@ const Community = () => {
                         Raised by:
                       </strong>{' '}
                       {comp.realName || 'Anonymous Passenger'}{' '}
+                      {comp.isAnonymous && (
+                        <span
+                          style={{
+                            fontSize: '0.65rem',
+                            fontWeight: '700',
+                            padding: '0.15rem 0.4rem',
+                            borderRadius: '6px',
+                            backgroundColor: '#fff3cd',
+                            color: '#856404',
+                            whiteSpace: 'nowrap',
+                            border: '1px solid #ffeeba',
+                          }}
+                        >
+                          🕵️ Anonymous
+                        </span>
+                      )}
                       {comp.loginId ? `(${comp.loginId})` : ''}
                     </span>
                     {comp.resolvedBy && (
@@ -2807,7 +3149,7 @@ const Community = () => {
                   >
                     {showMyName
                       ? 'The transport team will see your name.'
-                      : 'Your name is not shared with anyone.'}
+                      : 'Your name is hidden from other passengers, but the transport team will see it with an "Anonymous" badge.'}
                   </p>
                 </div>
                 <button

@@ -163,12 +163,12 @@ const Login = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <img 
             src="/logo.png" 
-            alt="Invertis Bus Saarthi" 
-            style={{ height: '52px', maxHeight: '52px', objectFit: 'contain' }}
+            alt="Invertis University" 
+            style={{ height: '48px', maxHeight: '48px', width: 'auto', objectFit: 'contain' }}
             onError={(e) => { e.target.onerror = null; e.target.src = '/favicon.png'; }}
           />
           <span style={{ fontWeight: '800', fontSize: '1.2rem', color: 'var(--primary-blue)', letterSpacing: '-0.3px' }} className="hidden sm:inline">
-            INVERTIS <span style={{ color: 'var(--secondary-orange)' }}>BUS SAARTHI</span>
+            BUS <span style={{ color: 'var(--secondary-orange)' }}>SAARTHI</span>
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -198,8 +198,8 @@ const Login = () => {
         boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)'
       }}>
         <div className="flex flex-col items-center" style={{ marginBottom: '1.25rem' }}>
-          <div className="w-20 h-20 mb-2 p-1.5 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 shadow-lg flex items-center justify-center">
-            <img src="/logo.png" alt="Invertis Bus Saarthi" className="w-full h-full object-contain filter drop-shadow-md" />
+          <div className="h-16 px-4 py-1.5 mb-2 rounded-2xl bg-white/30 backdrop-blur-md border border-white/40 shadow-lg flex items-center justify-center">
+            <img src="/logo.png" alt="Invertis University" className="h-full w-auto object-contain filter drop-shadow-md" />
           </div>
           <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: 'white', margin: 0, lineHeight: 1.2 }}>{t('loginTitle')}</h2>
           <p style={{ color: 'rgba(255,255,255,0.8)', margin: 0, fontSize: '0.9rem' }}>{t('loginSubtitle')}</p>

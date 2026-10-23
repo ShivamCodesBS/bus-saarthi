@@ -3,10 +3,12 @@ import 'package:provider/provider.dart';
 import 'core/theme.dart';
 import 'screens/splash_screen.dart';
 import 'screens/admin_dashboard_screen.dart';
+import 'screens/driver_dashboard_screen.dart';
 import 'providers/auth_provider.dart';
 import 'providers/sensor_provider.dart';
 import 'providers/attendance_provider.dart';
 import 'providers/connection_provider.dart';
+import 'providers/telemetry_provider.dart';
 import 'services/socket_service.dart';
 
 class BusSensorApp extends StatelessWidget {
@@ -23,6 +25,7 @@ class BusSensorApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ConnectionProvider(socketService)),
         ChangeNotifierProvider(create: (_) => SensorProvider(socketService)),
         ChangeNotifierProvider(create: (_) => AttendanceProvider()),
+        ChangeNotifierProvider(create: (_) => TelemetryProvider()),
       ],
       child: MaterialApp(
         title: 'Invertis Bus Sensor',
@@ -32,6 +35,7 @@ class BusSensorApp extends StatelessWidget {
         routes: {
           '/': (context) => const SplashScreen(),
           '/admin_dashboard': (context) => const AdminDashboardScreen(),
+          '/driver_dashboard': (context) => const DriverDashboardScreen(),
         },
       ),
     );

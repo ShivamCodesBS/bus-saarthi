@@ -44,24 +44,28 @@ export class SosService {
     // attribute the alert to an arbitrary route (the old code silently used
     // route "4", which produced phantom alerts on the wrong bus).
     const routeId = user?.routeId || 'unknown';
+    const passengerName = user?.name || user?.loginId || loginId;
 
     await this.prisma.sosAlert.create({
       data: {
         loginId,
-        passenger: user?.name,
+        passenger: passengerName,
         route: routeId,
       },
     });
 
-    const timeFormatted = new Date().toLocaleTimeString([], {
+    const now = new Date();
+    const timeFormatted = now.toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',
     });
+    const fullTimestamp = now.toISOString();
     this.eventEmitter.emit('sos.triggered', {
       login_id: loginId,
-      passenger: user?.name || 'Anonymous',
+      passenger: passengerName,
       route: routeId,
       time: timeFormatted,
+      timestamp: fullTimestamp,
     });
 
     return {
@@ -72,9 +76,10 @@ export class SosService {
           : 'SOS alert broadcasted to route ' + routeId,
       data: {
         login_id: loginId,
-        passenger: user?.name,
+        passenger: passengerName,
         route: routeId,
         time: timeFormatted,
+        timestamp: fullTimestamp,
       },
     };
   }
@@ -93,7 +98,15 @@ export class SosService {
       );
     }
 
-    this.eventEmitter.emit('sos.cancelled', { login_id: loginId });
+    const user = await this.prisma.user.findUnique({
+      where: { loginId },
+      select: { routeId: true },
+    });
+
+    this.eventEmitter.emit('sos.cancelled', {
+      login_id: loginId,
+      route: user?.routeId || 'unknown',
+    });
     return { status: 'success', message: 'SOS alert cancelled' };
   }
 
@@ -112,12 +125,13 @@ export class SosService {
       data: alerts.map((a) => ({
         id: a.id,
         login_id: a.loginId,
-        passenger: a.passenger || 'Anonymous',
+        passenger: a.passenger || a.loginId || 'Student',
         route: a.route,
         time: new Date(a.time).toLocaleTimeString([], {
           hour: '2-digit',
           minute: '2-digit',
         }),
+        timestamp: a.time.toISOString(),
       })),
     };
   }
@@ -143,6 +157,7 @@ export class SosService {
               hour: '2-digit',
               minute: '2-digit',
             }),
+            timestamp: active.time.toISOString(),
           }
         : null,
     };

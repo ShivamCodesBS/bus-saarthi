@@ -9,7 +9,7 @@ import {
   Req,
 } from '@nestjs/common';
 import { MergeService } from './merge.service';
-import { CreateMergeDto } from './dto/create-merge.dto';
+import { CreateMergeDto, CreateBusCancelDto } from './dto/create-merge.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -40,6 +40,17 @@ export class MergeController {
   @Roles(UserRole.driver, UserRole.transport_incharge, UserRole.admin, UserRole.tech_admin)
   async requestMerge(@Body() dto: CreateMergeDto, @Req() req: any) {
     return this.mergeService.createMerge(dto, req.user.loginId || req.user.login_id);
+  }
+
+  /**
+   * Cancel a bus without merging (no replacement bus).
+   * Primary flow: Driver calls TI on phone → TI cancels bus from dashboard.
+   */
+  @Post('cancel')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.transport_incharge, UserRole.admin, UserRole.tech_admin)
+  async cancelBus(@Body() dto: CreateBusCancelDto, @Req() req: any) {
+    return this.mergeService.cancelBus(dto, req.user.loginId || req.user.login_id);
   }
 
   /**

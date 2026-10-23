@@ -208,43 +208,110 @@ export class AttendanceService {
 
   async getAllAttendanceToday() {
     const todayStart = getISTMidnightUTC();
-    return this.prisma.attendance.findMany({
+    const records = await this.prisma.attendance.findMany({
       where: {
         timestamp: { gte: todayStart },
       },
       orderBy: { timestamp: 'desc' },
-      select: {
-        id: true,
-        passengerId: true,
-        routeId: true,
-        name: true,
-        feeStatus: true,
-        confidence: true,
-        timestamp: true,
-        originalRouteId: true,
-        mergeEventId: true,
+      include: {
+        passenger: {
+          select: {
+            name: true,
+            feeStatus: true,
+            routeId: true,
+          },
+        },
       },
+    });
+
+    return records.map((r) => {
+      const resolvedName = r.name || r.passenger?.name || r.passengerId;
+      const resolvedRoute = r.routeId || r.passenger?.routeId || '1';
+      return {
+        id: r.id,
+        passengerId: r.passengerId,
+        passenger_id: r.passengerId,
+        routeId: resolvedRoute,
+        route_id: resolvedRoute,
+        name: resolvedName,
+        passenger_name: resolvedName,
+        feeStatus: r.feeStatus || r.passenger?.feeStatus,
+        fee_status: r.feeStatus || r.passenger?.feeStatus,
+        confidence: r.confidence,
+        timestamp: r.timestamp,
+        originalRouteId: r.originalRouteId,
+        original_route_id: r.originalRouteId,
+        mergeEventId: r.mergeEventId,
+      };
     });
   }
 
   async getAttendanceForRoute(routeId: string) {
     const todayStart = getISTMidnightUTC();
-    return this.prisma.attendance.findMany({
+    const records = await this.prisma.attendance.findMany({
       where: {
         routeId: String(routeId),
         timestamp: { gte: todayStart },
       },
       orderBy: { timestamp: 'desc' },
+      include: {
+        passenger: {
+          select: {
+            name: true,
+            feeStatus: true,
+            routeId: true,
+          },
+        },
+      },
+    });
+
+    return records.map((r) => {
+      const resolvedName = r.name || r.passenger?.name || r.passengerId;
+      return {
+        ...r,
+        passengerId: r.passengerId,
+        passenger_id: r.passengerId,
+        routeId: r.routeId,
+        route_id: r.routeId,
+        name: resolvedName,
+        passenger_name: resolvedName,
+        feeStatus: r.feeStatus || r.passenger?.feeStatus,
+        fee_status: r.feeStatus || r.passenger?.feeStatus,
+      };
     });
   }
 
   async getAttendanceForUser(loginId: string) {
-    return this.prisma.attendance.findMany({
+    const records = await this.prisma.attendance.findMany({
       where: {
         passengerId: loginId,
       },
       orderBy: { timestamp: 'desc' },
       take: 30,
+      include: {
+        passenger: {
+          select: {
+            name: true,
+            feeStatus: true,
+            routeId: true,
+          },
+        },
+      },
+    });
+
+    return records.map((r) => {
+      const resolvedName = r.name || r.passenger?.name || r.passengerId;
+      return {
+        ...r,
+        passengerId: r.passengerId,
+        passenger_id: r.passengerId,
+        routeId: r.routeId,
+        route_id: r.routeId,
+        name: resolvedName,
+        passenger_name: resolvedName,
+        feeStatus: r.feeStatus || r.passenger?.feeStatus,
+        fee_status: r.feeStatus || r.passenger?.feeStatus,
+      };
     });
   }
 

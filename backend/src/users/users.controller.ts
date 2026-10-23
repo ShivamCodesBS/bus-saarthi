@@ -137,4 +137,26 @@ export class UsersController {
     const loginId = req.user?.loginId || req.user?.login_id;
     return this.usersService.cancelWakeAlarm(loginId);
   }
+
+  /**
+   * Passenger requests a face data reset (re-enrollment).
+   * This creates a request that admins can see and approve.
+   */
+  @Post('me/face-reset')
+  requestFaceReset(@Request() req: any) {
+    const loginId = req.user?.loginId || req.user?.login_id;
+    return this.usersService.requestFaceReset(loginId);
+  }
+
+  /**
+   * Admin approves a face reset request.
+   * Clears the request flag and the existing face enrollment.
+   */
+  @Post(':loginId/face-reset/approve')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
+  approveFaceReset(@Param('loginId') loginId: string, @Request() req: any) {
+    const adminLoginId = req.user?.loginId || req.user?.login_id;
+    return this.usersService.approveFaceReset(loginId, adminLoginId);
+  }
 }

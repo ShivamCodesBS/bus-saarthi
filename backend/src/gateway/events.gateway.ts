@@ -234,6 +234,21 @@ export class EventsGateway
     });
   }
 
+  @OnEvent('bus.cancelled')
+  handleBusCancelled(payload: any) {
+    const { mergeEvent, cancelledRoute, cancelledStudentCount } = payload;
+    
+    this.server.to('admin_room').emit('bus_cancelled', payload);
+
+    // Broadcast to students/drivers on the cancelled route
+    this.server.to(`route_${mergeEvent.cancelledRouteId}`).emit('your_route_cancelled', {
+      mergeEventId: mergeEvent.id,
+      cancelledRouteId: mergeEvent.cancelledRouteId,
+      reason: mergeEvent.reason,
+      message: `Your bus (${cancelledRoute.busNumber}) has been cancelled today. No replacement bus is available.`,
+    });
+  }
+
   @OnEvent('sos.triggered')
   handleSosTriggered(payload: any) {
     this.logger.warn(
@@ -257,6 +272,9 @@ export class EventsGateway
     if (payload.route && payload.route !== 'unknown') {
       this.server.to(`route_${payload.route}`).emit('sos_cancelled', payload);
     }
+    // Deliver to the user's own sockets so the student's SOS button
+    // resets even if they are not in the route room.
+    this.server.to(`user_${payload.login_id}`).emit('sos_cancelled', payload);
   }
 
   @OnEvent('broadcast.created')

@@ -33,6 +33,7 @@ export class GrievancesController {
       body.category,
       body.realName,
       body.route,
+      body.isAnonymous,
     );
   }
 

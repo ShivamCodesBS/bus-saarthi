@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { CreateMergeDto } from './dto/create-merge.dto';
+import { CreateMergeDto, CreateBusCancelDto } from './dto/create-merge.dto';
 import {
   getISTMidnightUTC,
   getNextISTMidnightUTC,
@@ -284,7 +284,7 @@ export class MergeService {
     const merge = await this.prisma.mergeEvent.findFirst({
       where: {
         cancelledRouteId: routeId,
-        status: 'active',
+        status: { in: ['active', 'cancelled'] },
         createdAt: { gte: todayStart },
       },
     });
@@ -318,7 +318,7 @@ export class MergeService {
     return this.prisma.mergeEvent.findFirst({
       where: {
         cancelledRouteId,
-        status: 'active',
+        status: { in: ['active', 'cancelled'] },
         createdAt: { gte: todayStart },
       },
     });
@@ -483,6 +483,149 @@ export class MergeService {
     }
 
     return result.count;
+  }
+
+  /**
+   * Cancel a bus without merging (route is just cancelled, students don't get moved).
+   * This creates a mergeEvent with status 'cancelled' and no target route.
+   */
+  async cancelBus(dto: CreateBusCancelDto, initiatedBy: string) {
+    const cancelledRoute = await this.prisma.route.findUnique({
+      where: { routeId: dto.cancelled_route_id },
+    });
+
+    if (!cancelledRoute) {
+      throw new NotFoundException(
+        `Route ${dto.cancelled_route_id} not found`,
+      );
+    }
+
+    // Already cancelled check
+    const existingMerge = await this.findActiveMergeForCancelledRoute(
+      dto.cancelled_route_id,
+    );
+    if (existingMerge) {
+      throw new ConflictException(
+        `Route ${dto.cancelled_route_id} is already cancelled/merged today`,
+      );
+    }
+
+    const todayStart = getISTMidnightUTC();
+    const expiresAt = getNextISTMidnightUTC();
+
+    const cancelledStudentCount = await this.prisma.user.count({
+      where: { routeId: dto.cancelled_route_id, role: 'passenger' },
+    });
+
+    // Create a merge event with status 'cancelled' (no target route)
+    const mergeEvent = await this.prisma.mergeEvent.create({
+      data: {
+        cancelledRouteId: dto.cancelled_route_id,
+        targetRouteId: dto.cancelled_route_id, // Same route to indicate no merge
+        reason: dto.reason || 'bus_cancelled',
+        status: 'cancelled',
+        initiatedBy,
+        studentsMoved: 0,
+        cancelledBusNumber: cancelledRoute.busNumber,
+        targetBusNumber: cancelledRoute.busNumber,
+        cancelledRouteName: cancelledRoute.routeName,
+        targetRouteName: cancelledRoute.routeName,
+        notes: dto.notes || null,
+        expiresAt,
+      },
+    });
+
+    this.logger.log(
+      `Bus cancelled: ${cancelledRoute.routeName} (${cancelledRoute.busNumber}) | 0 students moved (cancelled only) | by ${initiatedBy}`,
+    );
+
+    // Notify students on cancelled route
+    await this.sendBusCancelNotifications(dto.cancelled_route_id, cancelledRoute);
+
+    // Auto-broadcast
+    const reasonText = (dto.reason || 'bus_cancelled').replace(/_/g, ' ');
+    await this.prisma.broadcast.create({
+      data: {
+        title: '🚌 Bus Cancelled Notice',
+        message: `${cancelledRoute.routeName} (Bus ${cancelledRoute.busNumber}) has been cancelled today due to ${reasonText}. No replacement bus is available.`,
+      },
+    });
+
+    // Emit events for real-time UI
+    this.eventEmitter.emit('bus.cancelled', {
+      mergeEvent,
+      cancelledRoute,
+      cancelledStudentCount,
+    });
+
+    return {
+      status: 'success',
+      message: `Bus ${cancelledRoute.busNumber} (${cancelledRoute.routeName}) cancelled. No replacement bus.`,
+      data: mergeEvent,
+      warning: 'No replacement bus - students cannot board any bus today.',
+    };
+  }
+
+  /**
+   * Send push notifications for bus cancellation (no replacement).
+   */
+  private async sendBusCancelNotifications(
+    cancelledRouteId: string,
+    cancelledRoute: any,
+  ) {
+    try {
+      const affectedStudents = await this.prisma.user.findMany({
+        where: { routeId: cancelledRouteId, role: 'passenger' },
+        select: { loginId: true, name: true },
+      });
+
+      for (const student of affectedStudents) {
+        await this.notificationsService
+          .sendPushNotification(student.loginId, {
+            title: '🚌 Bus Cancelled',
+            body: `Your bus (${cancelledRoute.routeName}, Bus ${cancelledRoute.busNumber}) is cancelled today. No replacement bus is available.`,
+            icon: '/icons/bus-192x192.png',
+            tag: 'bus-cancelled',
+            requireInteraction: true,
+          })
+          .catch((err) =>
+            this.logger.warn(
+              `Push failed for student ${student.loginId}: ${err.message}`,
+            ),
+          );
+      }
+
+      // Notify parents
+      const parentLinks = await this.prisma.parentChildLink.findMany({
+        where: {
+          childLoginId: {
+            in: affectedStudents.map((s) => s.loginId),
+          },
+        },
+      });
+
+      for (const link of parentLinks) {
+        await this.notificationsService
+          .sendPushNotification(link.parentLoginId, {
+            title: '🔔 Bus Cancelled for Your Child',
+            body: `Your child's bus (${cancelledRoute.routeName}, Bus ${cancelledRoute.busNumber}) is cancelled today. No replacement bus available.`,
+            icon: '/icons/bus-192x192.png',
+            tag: 'bus-cancelled-parent',
+            requireInteraction: true,
+          })
+          .catch((err) =>
+            this.logger.warn(
+              `Push failed for parent ${link.parentLoginId}: ${err.message}`,
+            ),
+          );
+      }
+
+      this.logger.log(
+        `Bus cancel notifications sent: ${affectedStudents.length} students, ${parentLinks.length} parents`,
+      );
+    } catch (err) {
+      this.logger.error('Failed to send bus cancel notifications:', err);
+    }
   }
 
   /**

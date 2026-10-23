@@ -253,6 +253,8 @@ async function main() {
         gradeClass: s.class,
         parentName: s.parent,
         parentPhone: s.parentPhone,
+        faceEnrolledAt: i < 8 ? new Date(Date.now() - (10 - i) * 86400 * 1000) : null,
+        awsFaceId: i < 8 ? `aws-face-${s.id}` : null,
       },
       create: {
         loginId: s.id,
@@ -265,6 +267,8 @@ async function main() {
         gradeClass: s.class,
         parentName: s.parent,
         parentPhone: s.parentPhone,
+        faceEnrolledAt: i < 8 ? new Date(Date.now() - (10 - i) * 86400 * 1000) : null,
+        awsFaceId: i < 8 ? `aws-face-${s.id}` : null,
       },
     });
 

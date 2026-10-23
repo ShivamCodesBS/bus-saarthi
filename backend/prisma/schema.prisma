@@ -39,6 +39,10 @@ model User {
   gradeClass        String?            @map("grade_class") @db.VarChar(50)
   faceEnrolledAt    DateTime?          @map("face_enrolled_at") @db.Timestamptz(6)
   awsFaceId         String?            @map("aws_face_id") @db.VarChar(100)
+  /// When the user requested a face data reset (re-enrollment).
+  faceResetRequestedAt DateTime?        @map("face_reset_requested_at") @db.Timestamptz(6)
+  /// The admin who approved/processed the face reset request.
+  faceResetRequestedBy String?          @map("face_reset_requested_by") @db.VarChar(50)
   createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
   wakeAlarm         Json?              @map("wake_alarm") @db.Json
@@ -131,7 +135,13 @@ model Grievance {
   /// Kept only as a historical snapshot; the live bus is resolved dynamically.
   busNumber     String?           @map("bus_number") @db.VarChar(30)
   text          String
+  /// Reporter's name. NULL when the complaint was raised anonymously — staff
+  /// (TI/Admin) still see the account's name, everyone else never does.
   realName      String?           @map("real_name") @db.VarChar(100)
+  /// True when the reporter asked to stay anonymous. Staff see the real name
+  /// plus this flag, so a complaint is visibly anonymous while still being
+  /// attributable internally.
+  isAnonymous   Boolean           @default(false) @map("is_anonymous")
   type          String?           @db.VarChar(50)
   mediaUrl      String?           @map("media_url")
   status        GrievanceStatus   @default(pending)
@@ -347,6 +357,7 @@ enum MergeStatus {
   active
   undone
   expired
+  cancelled
 }
 
 enum MergeReason {
@@ -355,4 +366,5 @@ enum MergeReason {
   driver_unavailable
   weather
   other
+  bus_cancelled
 }

@@ -137,4 +137,98 @@ class ApiService {
       return null;
     }
   }
+
+  /// Fetch route details including stops for map polyline
+  Future<Map<String, dynamic>?> fetchRoute(String routeId) async {
+    try {
+      final storage = const FlutterSecureStorage();
+      final token = await storage.read(key: 'jwt_token');
+
+      final response = await _dio.get(
+        '/api/routes/$routeId',
+        options: Options(headers: {
+          if (token != null) 'Authorization': 'Bearer $token',
+        }),
+      );
+
+      if (response.statusCode == 200 && response.data != null) {
+        final data = response.data;
+        if (data is Map && data['status'] == 'success') {
+          return data['data'] as Map<String, dynamic>;
+        }
+        return data as Map<String, dynamic>;
+      }
+      return null;
+    } catch (e) {
+      print('[ApiService] fetchRoute error: $e');
+      return null;
+    }
+  }
+
+  /// Fetch all active routes with assigned buses
+  Future<List<Map<String, dynamic>>> fetchRoutes() async {
+    try {
+      final storage = const FlutterSecureStorage();
+      final token = await storage.read(key: 'jwt_token');
+
+      final response = await _dio.get(
+        '/api/routes',
+        options: Options(headers: {
+          if (token != null) 'Authorization': 'Bearer $token',
+        }),
+      );
+
+      if (response.statusCode == 200 && response.data != null) {
+        final data = response.data;
+        if (data is Map && data['status'] == 'success') {
+          return List<Map<String, dynamic>>.from(data['data'] ?? []);
+        } else if (data is List) {
+          return List<Map<String, dynamic>>.from(data);
+        }
+      }
+      return [];
+    } catch (e) {
+      print('[ApiService] fetchRoutes error: $e');
+      return [];
+    }
+  }
+
+  /// Trigger emergency SOS alert
+  Future<bool> triggerSos() async {
+    try {
+      final storage = const FlutterSecureStorage();
+      final token = await storage.read(key: 'jwt_token');
+
+      final response = await _dio.post(
+        '/api/sos/trigger',
+        options: Options(headers: {
+          if (token != null) 'Authorization': 'Bearer $token',
+        }),
+      );
+      return response.statusCode == 200 || response.statusCode == 201;
+    } catch (e) {
+      print('[ApiService] triggerSos error: $e');
+      return false;
+    }
+  }
+
+  /// Cancel active SOS alert
+  Future<bool> cancelSos() async {
+    try {
+      final storage = const FlutterSecureStorage();
+      final token = await storage.read(key: 'jwt_token');
+
+      final response = await _dio.post(
+        '/api/sos/cancel',
+        data: {},
+        options: Options(headers: {
+          if (token != null) 'Authorization': 'Bearer $token',
+        }),
+      );
+      return response.statusCode == 200 || response.statusCode == 201;
+    } catch (e) {
+      print('[ApiService] cancelSos error: $e');
+      return false;
+    }
+  }
 }

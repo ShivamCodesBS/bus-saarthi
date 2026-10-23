@@ -118,35 +118,45 @@ export class UsersService {
   }
 
   async findAll() {
-    const users = await this.prisma.user.findMany({
-      select: {
-        id: true,
-        loginId: true,
-        name: true,
-        role: true,
-        routeId: true,
-        feeStatus: true,
-        phone: true,
-        email: true,
-        profilePic: true,
-        designation: true,
-        subject: true,
-        gradeClass: true,
-        lastLogin: true,
-        createdAt: true,
-        licenseNumber: true,
-        licenseExpiry: true,
-        experienceYears: true,
-        bloodGroup: true,
-        parentName: true,
-        parentPhone: true,
-        dob: true,
-        address: true,
-        awsFaceId: true,
-        faceEnrolledAt: true,
-      },
+    // Cache for 60 seconds since user lists don't change frequently
+    return this.cache.remember('users:all', 60, async () => {
+      const users = await this.prisma.user.findMany({
+        select: {
+          id: true,
+          loginId: true,
+          name: true,
+          role: true,
+          routeId: true,
+          feeStatus: true,
+          phone: true,
+          email: true,
+          profilePic: true,
+          designation: true,
+          subject: true,
+          gradeClass: true,
+          lastLogin: true,
+          createdAt: true,
+          licenseNumber: true,
+          licenseExpiry: true,
+          experienceYears: true,
+          bloodGroup: true,
+          parentName: true,
+          parentPhone: true,
+          dob: true,
+          address: true,
+          awsFaceId: true,
+          faceEnrolledAt: true,
+        },
+      });
+      return users.map((u) => ({
+        ...u,
+        login_id: u.loginId,
+        route_id: u.routeId,
+        fee_status: u.feeStatus,
+        face_enrolled_at: u.faceEnrolledAt,
+        aws_face_id: u.awsFaceId,
+      }));
     });
-    return users;
   }
 
   async create(body: CreateUserDto, actorRole: UserRole) {
@@ -211,6 +221,7 @@ export class UsersService {
       },
     });
 
+    await this.cache.delByPattern('users:*');
     await this.cache.del(`auth:user:${user.loginId}`);
     return { status: 'success', message: 'User created', user: this.sanitize(user) };
   }
@@ -232,46 +243,47 @@ export class UsersService {
       password = await bcrypt.hash(body.password, 10);
     }
 
-    const updatedUser = await this.prisma.user.update({
-      where: { loginId },
-      data: {
-        name: body.name,
-        role: body.role as UserRole,
-        routeId: body.route_id,
-        feeStatus: body.fee_status as FeeStatus,
-        phone: body.phone,
-        email: body.email,
-        designation: body.designation,
-        subject: body.subject,
-        profilePic: body.profile_pic,
-        wakeAlarm: body.wake_alarm,
-        locationLat: body.location_lat,
-        locationLng: body.location_lng,
-        licenseNumber: body.licenseNumber,
-        licenseExpiry: body.licenseExpiry
-          ? new Date(body.licenseExpiry)
-          : undefined,
-        experienceYears: body.experienceYears
-          ? Number(body.experienceYears)
-          : undefined,
-        bloodGroup: body.bloodGroup,
-        parentName: body.parentName,
-        parentPhone: body.parentPhone,
-        dob: body.dob ? new Date(body.dob) : undefined,
-        address: body.address,
-        gradeClass: body.gradeClass,
-        password: password,
-      },
-    });
+const updatedUser = await this.prisma.user.update({
+    where: { loginId },
+    data: {
+      name: body.name,
+      role: body.role as UserRole,
+      routeId: body.route_id,
+      feeStatus: body.fee_status as FeeStatus,
+      phone: body.phone,
+      email: body.email,
+      designation: body.designation,
+      subject: body.subject,
+      profilePic: body.profile_pic,
+      wakeAlarm: body.wake_alarm,
+      locationLat: body.location_lat,
+      locationLng: body.location_lng,
+      licenseNumber: body.licenseNumber,
+      licenseExpiry: body.licenseExpiry
+        ? new Date(body.licenseExpiry)
+        : undefined,
+      experienceYears: body.experienceYears
+        ? Number(body.experienceYears)
+        : undefined,
+      bloodGroup: body.bloodGroup,
+      parentName: body.parentName,
+      parentPhone: body.parentPhone,
+      dob: body.dob ? new Date(body.dob) : undefined,
+      address: body.address,
+      gradeClass: body.gradeClass,
+      password: password,
+    },
+  });
 
-    // The role may have changed — drop the cached identity.
-    await this.cache.del(`auth:user:${loginId}`);
+  // The role may have changed — drop the cached identity.
+  await this.cache.delByPattern('users:*');
+  await this.cache.del(`auth:user:${loginId}`);
 
-    return {
-      status: 'success',
-      message: 'User updated',
-      user: this.sanitize(updatedUser),
-    };
+  return {
+    status: 'success',
+    message: 'User updated',
+    user: this.sanitize(updatedUser),
+  };
   }
 
   async remove(loginId: string, actorRole: UserRole) {
@@ -293,6 +305,7 @@ export class UsersService {
     }
 
     await this.prisma.user.delete({ where: { loginId } });
+    await this.cache.delByPattern('users:*');
     await this.cache.del(`auth:user:${loginId}`);
     return { status: 'success', message: 'User deleted' };
   }
@@ -492,5 +505,44 @@ export class UsersService {
 
     // The cached alarm list now holds a stale "fired" flag.
     await this.cache.del('wake:alarms:active');
+  }
+
+  /**
+   * User requests a face data reset (re-enrollment).
+   * This notifies admins that the user wants to re-enroll their face.
+   */
+  async requestFaceReset(loginId: string) {
+    const user = await this.prisma.user.findUnique({ where: { loginId } });
+    if (!user) throw new NotFoundException(`User ${loginId} not found`);
+
+    await this.prisma.user.update({
+      where: { loginId },
+      data: { faceResetRequestedAt: new Date() },
+    });
+
+    await this.cache.delByPattern('users:*');
+    return { status: 'success', message: 'Face reset request submitted' };
+  }
+
+  /**
+   * Admin approves/clears a face reset request.
+   * Clears the request flag and the existing face enrollment so the user can re-enroll.
+   */
+  async approveFaceReset(loginId: string, adminLoginId: string) {
+    const user = await this.prisma.user.findUnique({ where: { loginId } });
+    if (!user) throw new NotFoundException(`User ${loginId} not found`);
+
+    await this.prisma.user.update({
+      where: { loginId },
+      data: {
+        faceResetRequestedAt: null,
+        faceResetRequestedBy: adminLoginId,
+        faceEnrolledAt: null,
+        awsFaceId: null,
+      },
+    });
+
+    await this.cache.delByPattern('users:*');
+    return { status: 'success', message: 'Face reset approved, user can now re-enroll' };
   }
 }

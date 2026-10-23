@@ -1,12 +1,13 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
-  Heart, MapPin, Bus, User, LogOut, Bell, Calendar, CheckCircle2,
-  XCircle, Clock, TrendingUp, BookOpen, Phone, Navigation,
+  MapPin, Bus, User, LogOut, Calendar, CheckCircle2,
+  XCircle, Clock, TrendingUp, Phone, Navigation,
   Gauge, Compass, AlertOctagon, Menu, X, Activity, ChevronLeft, ChevronRight,
   IndianRupee, Megaphone, Settings, Eye, ArrowLeft, GitMerge,
-  MessageSquareWarning, RotateCcw, Check, Wrench, Timer, ShieldAlert
+  MessageSquareWarning, RotateCcw, Check, Wrench, Timer, ShieldAlert,
+  Maximize2
 } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import axios from 'axios';
@@ -20,7 +21,8 @@ import {
   ResponsiveContainer, ReferenceLine
 } from 'recharts';
 import '../index.css';
-import { friendlyError, reportError } from '../lib/errors';
+import { friendlyError } from '../lib/errors';
+import { StatCardSkeleton, ComplaintSkeleton } from '../components/ui/skeleton';
 
 // Fix Leaflet default icon
 delete L.Icon.Default.prototype._getIconUrl;
@@ -36,18 +38,31 @@ const busIcon = new L.Icon({
   iconAnchor: [19, 19],
 });
 
-// -- Purple theme constants for Parent panel --
-const PURPLE = '#8b5cf6';
-const PURPLE_DARK = '#7c3aed';
-const PURPLE_LIGHT = 'rgba(139,92,246,0.12)';
-
-// -- Grievance lifecycle states, mirroring the backend enum --
-const GRIEVANCE_STATUS = {
-  pending: { label: 'Pending', bg: '#fff1f0', color: '#cf1322', Icon: ShieldAlert },
-  in_progress: { label: 'In Progress', bg: '#fff7e6', color: '#d46b08', Icon: Wrench },
-  resolved: { label: 'Awaiting Your Confirmation', bg: '#e6f4ff', color: '#0958d9', Icon: Timer },
-  reopened: { label: 'Reopened — Not Resolved', bg: '#fff1f0', color: '#cf1322', Icon: RotateCcw },
-  closed: { label: 'Closed — Confirmed', bg: '#e6fae6', color: '#28a745', Icon: CheckCircle2 },
+// STOP_COORDS from Home page for route polyline
+const STOP_COORDS = {
+  'Civil Lines': [28.3615, 79.4180],
+  'Rajendra Nagar': [28.3610, 79.4501],
+  'DD Puram': [28.3715, 79.4452],
+  'Pilibhit Bypass': [28.3842, 79.4310],
+  'Invertis University': [28.3180, 79.4670],
+  'labela chowk': [28.3500, 79.4200],
+  'police line': [28.3550, 79.4250],
+  'Chauki Chauraha': [28.3580, 79.4120],
+  'Satellite Bus Stand': [28.3440, 79.4420],
+  'Bareilly Mod': [28.2500, 79.5200],
+  'Shahjahanpur': [27.8805, 79.9140],
+  'Shahjahanpur Bus Stand': [27.8820, 79.9100],
+  'Roza Junction': [27.8350, 79.9200],
+  'Tilhar': [28.0200, 79.7300],
+  'Miranpur Katra': [28.1100, 79.6200],
+  'Badaun': [28.0300, 79.1200],
+  'Badaun Road': [28.2000, 79.2800],
+  'Ujhani': [28.0100, 79.0100],
+  'Dataganj': [27.9400, 79.3500],
+  'Pilibhit': [28.6300, 79.8000],
+  'Bisalpur': [28.3000, 79.8000],
+  'Nawabganj': [28.5400, 79.6300],
+  'Faridpur': [28.2100, 79.5400],
 };
 
 // Map auto-invalidate on resize
@@ -196,6 +211,7 @@ const ParentDashboard = () => {
 
   const [activeTab, setActiveTab] = useState('overview');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isMapExpanded, setIsMapExpanded] = useState(false);
 
   // Data states
   const [parentData, setParentData] = useState(null);
@@ -215,6 +231,52 @@ const ParentDashboard = () => {
   const [busLocation, setBusLocation] = useState([28.3180, 79.4670]);
   const [telemetry, setTelemetry] = useState(null);
   const [telemetryStale, setTelemetryStale] = useState(false);
+
+  // Dynamic Route Polyline based on routeInfo (same as student Home map)
+  const dynamicRoutePolyline = useMemo(() => {
+    if (!routeInfo || !routeInfo.stops) {
+      return [
+        [28.3180, 79.4670],
+        [28.3250, 79.4750],
+        [28.3320, 79.4800],
+        [28.3400, 79.4900],
+      ];
+    }
+    let stopsArray = [];
+    if (Array.isArray(routeInfo.stops)) {
+      stopsArray = routeInfo.stops;
+    } else {
+      try {
+        const parsed = JSON.parse(routeInfo.stops);
+        if (Array.isArray(parsed)) stopsArray = parsed;
+        else stopsArray = String(routeInfo.stops).split(',').map((s) => s.trim());
+      } catch {
+        stopsArray = String(routeInfo.stops).split(',').map((s) => s.trim());
+      }
+    }
+
+    const coords = stopsArray
+      .map((s) => {
+        const name = typeof s === 'object' && s !== null ? (s.name || s.stopName) : String(s).trim();
+        return STOP_COORDS[name];
+      })
+      .filter(Boolean);
+
+    if (coords.length > 0) {
+      const lastStop = typeof stopsArray[stopsArray.length - 1] === 'object'
+        ? (stopsArray[stopsArray.length - 1]?.name || '')
+        : String(stopsArray[stopsArray.length - 1]).trim();
+      if (lastStop !== 'Invertis University') {
+        coords.push(STOP_COORDS['Invertis University']);
+      }
+      return coords;
+    }
+
+    return [
+      [28.3180, 79.4670],
+      [28.3400, 79.4900],
+    ];
+  }, [routeInfo]);
 
   const [isLoading, setIsLoading] = useState(true);
   const pollingRef = useRef(null);
@@ -472,8 +534,8 @@ const ParentDashboard = () => {
         boxShadow: '0 4px 20px rgba(139,92,246,0.4)',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <div style={{ width: '40px', height: '40px', borderRadius: '12px', padding: '4px', backgroundColor: 'rgba(255,255,255,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
-            <img src="/logo.png" alt="Invertis Bus Saarthi" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+          <div style={{ height: '40px', padding: '4px 10px', borderRadius: '12px', backgroundColor: 'rgba(255,255,255,0.95)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
+            <img src="/logo.png" alt="Invertis University" style={{ height: '100%', width: 'auto', maxHeight: '32px', objectFit: 'contain' }} />
           </div>
           <div>
             <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, letterSpacing: '-0.3px' }}>Parent Dashboard</h1>
@@ -490,15 +552,17 @@ const ParentDashboard = () => {
         </div>
       </header>
 
-      {/* ========= SIDE MENU ========= */}
+      {/* ========= SIDE MENU (Mobile Only - Hamburger) ========= */}
       {isMenuOpen && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
         }} onClick={() => setIsMenuOpen(false)}>
           <div style={{
             position: 'absolute', right: 0, top: 0, bottom: 0, width: '240px',
             background: 'var(--card-bg)', boxShadow: '-8px 0 32px rgba(0,0,0,0.2)',
             padding: '1.5rem 1rem',
+            display: 'flex', flexDirection: 'column',
           }} onClick={e => e.stopPropagation()}>
             <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
               <div style={{ width: 60, height: 60, borderRadius: '50%', background: PURPLE_LIGHT, margin: '0 auto 0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -507,24 +571,26 @@ const ParentDashboard = () => {
               <p style={{ margin: 0, fontWeight: 700, color: 'var(--text-dark)' }}>{parentData?.name || user?.name}</p>
               <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-light)' }}>Parent Account</p>
             </div>
-            {[
-              { icon: <Bus size={18} />, label: 'Overview', tab: 'overview' },
-              { icon: <Calendar size={18} />, label: 'Attendance', tab: 'attendance' },
-              { icon: <MessageSquareWarning size={18} />, label: 'Complaints', tab: 'complaints' },
-              { icon: <Megaphone size={18} />, label: 'Announcements', tab: 'announcements' },
-              { icon: <Activity size={18} />, label: 'Speed Analytics', tab: 'analytics' },
-            ].map(item => (
-              <button key={item.tab} onClick={() => { setActiveTab(item.tab); setIsMenuOpen(false); }} style={{
-                width: '100%', display: 'flex', alignItems: 'center', gap: '0.75rem',
-                padding: '0.75rem 1rem', borderRadius: '10px', border: 'none', cursor: 'pointer',
-                background: activeTab === item.tab ? PURPLE_LIGHT : 'transparent',
-                color: activeTab === item.tab ? PURPLE : 'var(--text-dark)',
-                fontWeight: activeTab === item.tab ? 700 : 500, fontSize: '0.9rem',
-                marginBottom: '4px', textAlign: 'left',
-              }}>
-                {item.icon} {item.label}
-              </button>
-            ))}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+              {[
+                { icon: <Bus size={18} />, label: 'Overview', tab: 'overview' },
+                { icon: <Calendar size={18} />, label: 'Attendance', tab: 'attendance' },
+                { icon: <MessageSquareWarning size={18} />, label: 'Complaints', tab: 'complaints' },
+                { icon: <Megaphone size={18} />, label: 'Announcements', tab: 'announcements' },
+                { icon: <Activity size={18} />, label: 'Speed Analytics', tab: 'analytics' },
+              ].map(item => (
+                <button key={item.tab} onClick={() => { setActiveTab(item.tab); setIsMenuOpen(false); }} style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: '0.75rem',
+                  padding: '0.75rem 1rem', borderRadius: '10px', border: 'none', cursor: 'pointer',
+                  background: activeTab === item.tab ? PURPLE_LIGHT : 'transparent',
+                  color: activeTab === item.tab ? PURPLE : 'var(--text-dark)',
+                  fontWeight: activeTab === item.tab ? 700 : 500, fontSize: '0.9rem',
+                  marginBottom: '4px', textAlign: 'left',
+                }}>
+                  {item.icon} {item.label}
+                </button>
+              ))}
+            </div>
             <div style={{ borderTop: '1px solid var(--border-color)', marginTop: '1rem', paddingTop: '1rem' }}>
               <button onClick={() => { logout(); navigate('/login'); }} style={{
                 width: '100%', display: 'flex', alignItems: 'center', gap: '0.75rem',
@@ -539,7 +605,20 @@ const ParentDashboard = () => {
       )}
 
       {/* ========= CHILD INFO BANNER ========= */}
-      {child && (
+      {isLoading && !child ? (
+        <div style={{
+          background: 'var(--card-bg)', borderBottom: '1px solid var(--border-color)',
+          padding: '0.85rem 1.25rem',
+          display: 'flex', alignItems: 'center', gap: '1rem',
+        }}>
+          <div className="animate-pulse" style={{ width: 48, height: 48, borderRadius: '50%', backgroundColor: '#e9ecef' }} />
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+            <div className="animate-pulse" style={{ width: '140px', height: '16px', borderRadius: '4px', backgroundColor: '#e9ecef' }} />
+            <div className="animate-pulse" style={{ width: '90px', height: '12px', borderRadius: '4px', backgroundColor: '#e9ecef' }} />
+          </div>
+          <div className="animate-pulse" style={{ width: '80px', height: '28px', borderRadius: '20px', backgroundColor: '#e9ecef' }} />
+        </div>
+      ) : child && (
         <div style={{
           background: 'var(--card-bg)', borderBottom: '1px solid var(--border-color)',
           padding: '0.85rem 1.25rem',
@@ -582,10 +661,11 @@ const ParentDashboard = () => {
         </div>
       )}
 
-      {/* ========= TAB BAR ========= */}
+      {/* ========= TOP TABS (Desktop Only) ========= */}
       <div style={{
         background: 'var(--card-bg)', borderBottom: '1px solid var(--border-color)',
         display: 'flex', overflowX: 'auto', scrollbarWidth: 'none',
+        '@media (max-width: 768px)': { display: 'none' }
       }}>
         {[
           { id: 'overview', icon: <Bus size={16} />, label: 'Overview' },
@@ -639,36 +719,48 @@ const ParentDashboard = () => {
             )}
 
             {/* Today's Status Hero Card */}
-            <div style={{
-              background: child?.boardedToday
-                ? 'linear-gradient(135deg, #e6fae6 0%, #d4edda 100%)'
-                : 'linear-gradient(135deg, #fff1f0 0%, #ffe4e1 100%)',
-              borderRadius: '20px', padding: '1.5rem',
-              border: `2px solid ${child?.boardedToday ? '#28a74540' : '#cf132240'}`,
-              boxShadow: '0 4px 20px rgba(0,0,0,0.06)',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                <div style={{
-                  width: 56, height: 56, borderRadius: '50%',
-                  background: child?.boardedToday ? '#28a745' : '#cf1322',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  boxShadow: `0 4px 12px ${child?.boardedToday ? '#28a74540' : '#cf132240'}`,
-                }}>
-                  {child?.boardedToday ? <CheckCircle2 size={30} color="white" /> : <XCircle size={30} color="white" />}
-                </div>
-                <div>
-                  <p style={{ margin: 0, fontWeight: 800, fontSize: '1.15rem', color: child?.boardedToday ? '#155724' : '#721c24' }}>
-                    {child?.boardedToday ? 'Child Boarded the Bus' : 'Not Boarded Yet'}
-                  </p>
-                  <p style={{ margin: 0, fontSize: '0.82rem', color: child?.boardedToday ? '#28a745' : '#cf1322', marginTop: '2px' }}>
-                    {child?.boardedToday
-                      ? `Face recognized at ${formatTime(child.boardedAt)} today`
-                      : 'Not marked present on the bus yet today'
-                    }
-                  </p>
+            {isLoading && !child ? (
+              <div className="glass p-6 rounded-2xl flex flex-col gap-4">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  <div className="animate-pulse" style={{ width: 56, height: 56, borderRadius: '50%', backgroundColor: '#e9ecef' }} />
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                    <div className="animate-pulse" style={{ width: '180px', height: '18px', borderRadius: '4px', backgroundColor: '#e9ecef' }} />
+                    <div className="animate-pulse" style={{ width: '120px', height: '12px', borderRadius: '4px', backgroundColor: '#e9ecef' }} />
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div style={{
+                background: child?.boardedToday
+                  ? 'linear-gradient(135deg, #e6fae6 0%, #d4edda 100%)'
+                  : 'linear-gradient(135deg, #fff1f0 0%, #ffe4e1 100%)',
+                borderRadius: '20px', padding: '1.5rem',
+                border: `2px solid ${child?.boardedToday ? '#28a74540' : '#cf132240'}`,
+                boxShadow: '0 4px 20px rgba(0,0,0,0.06)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  <div style={{
+                    width: 56, height: 56, borderRadius: '50%',
+                    background: child?.boardedToday ? '#28a745' : '#cf1322',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    boxShadow: `0 4px 12px ${child?.boardedToday ? '#28a74540' : '#cf132240'}`,
+                  }}>
+                    {child?.boardedToday ? <CheckCircle2 size={30} color="white" /> : <XCircle size={30} color="white" />}
+                  </div>
+                  <div>
+                    <p style={{ margin: 0, fontWeight: 800, fontSize: '1.15rem', color: child?.boardedToday ? '#155724' : '#721c24' }}>
+                      {child?.boardedToday ? 'Child Boarded the Bus' : 'Not Boarded Yet'}
+                    </p>
+                    <p style={{ margin: 0, fontSize: '0.82rem', color: child?.boardedToday ? '#28a745' : '#cf1322', marginTop: '2px' }}>
+                      {child?.boardedToday
+                        ? `Face recognized at ${formatTime(child.boardedAt)} today`
+                        : 'Not marked present on the bus yet today'
+                      }
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Quick Stats */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem' }}>
@@ -708,26 +800,45 @@ const ParentDashboard = () => {
               <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <MapPin size={18} color={PURPLE} />
                 <span style={{ fontWeight: 700, color: 'var(--text-dark)', fontSize: '0.95rem' }}>Live Bus Location</span>
-                <span style={{
-                  marginLeft: 'auto', fontSize: '0.72rem', fontWeight: 600,
-                  background: telemetryStale || !telemetry ? '#fff1f0' : '#e6fae6',
-                  color: telemetryStale || !telemetry ? '#cf1322' : '#28a745',
-                  padding: '2px 8px', borderRadius: '10px',
-                }}>
-                  {telemetryStale || !telemetry ? '● No Signal' : '● Live'}
-                </span>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <span style={{
+                    fontSize: '0.72rem', fontWeight: 600,
+                    background: telemetryStale || !telemetry ? '#fff1f0' : '#e6fae6',
+                    color: telemetryStale || !telemetry ? '#cf1322' : '#28a745',
+                    padding: '2px 8px', borderRadius: '10px',
+                  }}>
+                    {telemetryStale || !telemetry ? '● No Signal' : '● Live'}
+                  </span>
+                  <button
+                    onClick={() => setIsMapExpanded(true)}
+                    style={{
+                      background: PURPLE_LIGHT, border: `1px solid ${PURPLE}`, color: PURPLE,
+                      padding: '4px 10px', borderRadius: '8px', fontSize: '0.72rem',
+                      fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px',
+                    }}
+                    title="Expand Map"
+                  >
+                    <Maximize2 size={14} /> Fullscreen
+                  </button>
+                </div>
               </div>
-              <div style={{ height: '240px' }}>
-                <MapContainer center={busLocation} zoom={14} style={{ height: '100%', width: '100%' }} attributionControl={false}>
-                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              <div style={{ height: '320px', position: 'relative' }}>
+                <MapContainer center={busLocation} zoom={14} style={{ height: '100%', width: '100%' }} attributionControl={false} zoomControl={true} scrollWheelZoom={true} dragging={true}>
+                  <MapResizer />
+                  <TileLayer
+                    url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
+                    attribution='&copy; Google Maps'
+                  />
                   <Marker position={busLocation} icon={busIcon}>
                     <Popup>
-                      🚌 Bus — Route {child?.routeId || '—'}
-                      {routeInfo?.busNumber && <><br />Bus No: {routeInfo.busNumber}</>}
-                      {telemetry && <><br />Speed: {Math.round(telemetry.speed)} km/h</>}
+                      <b>Bus {routeInfo?.busNumber || routeInfo?.bus_number || child?.routeId || 'UP 25 AB 1234'}</b><br />
+                      Speed: {telemetry && !telemetryStale ? Math.round(telemetry.speed) : 0} km/h
                     </Popup>
                   </Marker>
-                  <MapResizer />
+                  <Polyline positions={dynamicRoutePolyline} color="#0056b3" weight={5} opacity={0.8} />
+                  <Marker position={dynamicRoutePolyline[dynamicRoutePolyline.length - 1]}>
+                    <Popup>Destination</Popup>
+                  </Marker>
                 </MapContainer>
               </div>
             </div>
@@ -937,7 +1048,13 @@ const ParentDashboard = () => {
               {childGrievances.length} complaint{childGrievances.length === 1 ? '' : 's'} raised by your child
             </p>
 
-            {childGrievances.length === 0 && (
+            {isLoading ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {[1, 2].map((i) => (
+                  <ComplaintSkeleton key={i} style={{ opacity: 1 - i * 0.2 }} />
+                ))}
+              </div>
+            ) : childGrievances.length === 0 ? (
               <div style={{
                 background: 'var(--card-bg)', borderRadius: '20px', padding: '2.5rem',
                 textAlign: 'center', border: '1px solid var(--border-color)',
@@ -947,9 +1064,9 @@ const ParentDashboard = () => {
                   No complaints have been raised yet
                 </p>
               </div>
-            )}
+            ) : null}
 
-            {childGrievances.map((g) => {
+            {!isLoading && childGrievances.map((g) => {
               const meta = GRIEVANCE_STATUS[g.status] || GRIEVANCE_STATUS.pending;
               const { Icon } = meta;
               const busy = grievanceBusy.has(g.id);
@@ -992,6 +1109,27 @@ const ParentDashboard = () => {
                   <p style={{ margin: 0, color: 'var(--text-dark)', fontSize: '0.9rem', lineHeight: 1.5, overflowWrap: 'anywhere' }}>
                     {g.text}
                   </p>
+
+                  {/* Media Attachment */}
+                  {g.type === 'photo' && g.mediaUrl && (
+                    <div
+                      style={{ borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: '#f8f9fa', display: 'flex', justifyContent: 'center', cursor: 'zoom-in' }}
+                    >
+                      <img src={g.mediaUrl} alt="Complaint Attachment" style={{ width: '100%', height: 'auto', display: 'block', maxHeight: '400px', objectFit: 'contain' }} />
+                    </div>
+                  )}
+                  {g.type === 'video' && g.mediaUrl && (
+                    <div
+                      style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: 'black', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                    >
+                      <video src={g.mediaUrl} controls style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'contain' }} />
+                    </div>
+                  )}
+                  {g.type === 'audio' && g.mediaUrl && (
+                    <div style={{ marginTop: '0.5rem', padding: '1rem', backgroundColor: 'var(--bg-color)', borderRadius: '30px', border: '1px solid var(--border-color)' }}>
+                      <audio src={g.mediaUrl} controls style={{ width: '100%' }} />
+                    </div>
+                  )}
 
                   {g.adminResponse && (
                     <div style={{
@@ -1217,6 +1355,43 @@ const ParentDashboard = () => {
           </div>
         )}
       </div>
+
+      {/* EXPANDED MAP MODAL */}
+      {isMapExpanded && (
+        <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-md z-[100] flex flex-col animate-in fade-in duration-200">
+          <div className="p-4 md:px-6 flex justify-between items-center text-white shrink-0 shadow-md" style={{ background: PURPLE_DARK }}>
+            <h2 className="font-bold flex items-center gap-2 text-lg m-0">
+              <MapPin size={20} /> Full Screen Tracking — Route {child?.routeId || '—'} {routeInfo?.busNumber ? `(Bus ${routeInfo.busNumber})` : ''}
+            </h2>
+            <button
+              onClick={() => setIsMapExpanded(false)}
+              className="text-white hover:bg-white/20 p-2 rounded-full border-none bg-transparent cursor-pointer flex items-center justify-center transition-colors"
+              title="Close Fullscreen"
+            >
+              <X size={24} />
+            </button>
+          </div>
+          <div className="flex-1 z-0 relative">
+            <MapContainer center={busLocation} zoom={15} style={{ height: '100%', width: '100%' }} zoomControl={true} scrollWheelZoom={true} dragging={true}>
+              <MapResizer />
+              <TileLayer
+                url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
+                attribution='&copy; Google Maps'
+              />
+              <Marker position={busLocation} icon={busIcon}>
+                <Popup>
+                  <b>Bus {routeInfo?.busNumber || routeInfo?.bus_number || child?.routeId || 'UP 25 AB 1234'}</b><br />
+                  Speed: {telemetry && !telemetryStale ? Math.round(telemetry.speed) : 0} km/h
+                </Popup>
+              </Marker>
+              <Polyline positions={dynamicRoutePolyline} color="#0056b3" weight={6} />
+              <Marker position={dynamicRoutePolyline[dynamicRoutePolyline.length - 1]}>
+                <Popup>Destination</Popup>
+              </Marker>
+            </MapContainer>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

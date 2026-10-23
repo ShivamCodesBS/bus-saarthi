@@ -37,7 +37,7 @@ const HamburgerMenu = ({ isOpen, onClose }) => {
       >
         <div style={{ padding: '1.25rem 1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            <img src="/logo.png" alt="Invertis Bus Saarthi" style={{ width: '38px', height: '38px', objectFit: 'contain' }} />
+            <img src="/logo.png" alt="Invertis University" style={{ height: '32px', width: 'auto', objectFit: 'contain' }} />
             <span style={{ fontWeight: '800', fontSize: '1rem', color: 'var(--primary-blue)' }}>
               BUS <span style={{ color: 'var(--secondary-orange)' }}>SAARTHI</span>
             </span>

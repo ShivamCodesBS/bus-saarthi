@@ -11,15 +11,20 @@ class AppTheme {
   static const Color background    = Color(0xFFF3F4F6); // Grayish background
   static const Color surface       = Color(0xFFFFFFFF); // White cards on gray bg
   static const Color surfaceBorder = Color(0xFFE5E7EB); // Subtle border
-  static const Color successColor  = Color(0xFF22C55E);
-  static const Color warningColor  = Color(0xFFFBBF24);
-  static const Color dangerColor   = Color(0xFFEF4444);
+  static const Color success       = Color(0xFF22C55E);
+  static const Color warning       = Color(0xFFFBBF24);
+  static const Color danger        = Color(0xFFEF4444);
 
   // ── Legacy dark-theme aliases (kept for sensors widget compatibility) ──
   static const Color primaryColor     = Color(0xFF0F172A);
   static const Color accentColor      = orange;
   static const Color backgroundColor  = white;
   static const Color cardColor        = surface;
+  static const Color successColor     = success;
+  static const Color warningColor     = warning;
+  static const Color dangerColor      = danger;
+
+  // ... rest of the file
 
   // ── Light Theme (White + Black + Orange) ──────────────────
   static ThemeData get lightTheme {
@@ -33,7 +38,7 @@ class AppTheme {
       colorScheme: const ColorScheme.light(
         primary: orange,
         secondary: orangeLight,
-        error: dangerColor,
+        error: danger,
         background: background,
         surface: surface,
         onPrimary: white,

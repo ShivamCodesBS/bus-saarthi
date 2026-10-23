@@ -15,12 +15,22 @@ export class RoutesService {
   ) {}
 
   async findAll() {
-    const routes = await this.cache.remember('routes:all', 60, () =>
-      this.prisma.route.findMany({
+    const routes = await this.cache.remember('routes:all', 60, async () => {
+      const dbRoutes = await this.prisma.route.findMany({
         include: { bus: true },
         orderBy: { routeId: 'asc' },
-      }),
-    );
+      });
+      return dbRoutes.map((r) => {
+        const liveBus = r.bus?.busNumber || r.busNumber;
+        return {
+          ...r,
+          route_id: r.routeId,
+          route_name: r.routeName,
+          bus_number: liveBus,
+          busNumber: liveBus,
+        };
+      });
+    });
     return { status: 'success', data: routes };
   }
 
@@ -41,8 +51,13 @@ export class RoutesService {
       });
     }
 
+    const liveBus = route.bus?.busNumber || route.busNumber;
     return {
       ...route,
+      route_id: route.routeId,
+      route_name: route.routeName,
+      bus_number: liveBus,
+      busNumber: liveBus,
       driver,
     };
   }

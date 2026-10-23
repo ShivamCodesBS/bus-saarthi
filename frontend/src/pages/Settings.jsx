@@ -126,9 +126,20 @@ const Settings = () => {
     toast(next ? 'Dark mode on!' : 'Light mode on!', { icon: next ? '🌙' : '☀️' });
   };
 
-  const handleFaceReset = () => {
-    setFaceResetRequested(true);
-    toast.success('Request sent! Admin will contact you.');
+  const handleFaceReset = async () => {
+    const loginIdToUse = user?.loginId || user?.login_id || user?.id;
+    try {
+      await axios.post(`${BACKEND_URL}/api/users/${loginIdToUse}/face-reset`, {}, {
+        headers: { Authorization: `Bearer ${user?.token}` }
+      });
+      toast.success('Request sent! Admin will review and approve your face reset.');
+      // Refresh user data to show the pending state
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('user-data-changed'));
+      }
+    } catch (err) {
+      toast.error('Failed to send request. Please try again.');
+    }
   };
 
   const handleChangePassword = async (e) => {

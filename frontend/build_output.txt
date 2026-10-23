@@ -1,0 +1,28 @@
+vite v8.3.5 building client environment for production...
+transforming...
+✓ 2673 modules transformed.
+✗ Build failed in 600ms
+error during build:
+Build failed with 1 error:
+
+[31m[ILLEGAL_REASSIGNMENT] [0mUnexpected re-assignment of const variable `mapInstance`
+      [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/pages/Home.jsx:1167:13 [38;5;246m][0m
+      [38;5;246m│[0m
+ [38;5;246m 142 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249mc[0m[38;5;249mo[0m[38;5;249mn[0m[38;5;249ms[0m[38;5;249mt[0m[38;5;249m [0mmapInstance[38;5;249m [0m[38;5;249m=[0m[38;5;249m [0m[38;5;249mu[0m[38;5;249ms[0m[38;5;249me[0m[38;5;249mR[0m[38;5;249me[0m[38;5;249mf[0m[38;5;249m([0m[38;5;249mn[0m[38;5;249mu[0m[38;5;249ml[0m[38;5;249ml[0m[38;5;249m)[0m[38;5;249m;[0m
+ [38;5;240m     │[0m           ─────┬─────  
+ [38;5;240m     │[0m                ╰─────── `mapInstance` is declared here as const
+ [38;5;240m     │[0m 
+ [38;5;246m1167 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0mmapInstance[38;5;249m [0m[38;5;249m=[0m[38;5;249m [0m[38;5;249mm[0m[38;5;249ma[0m[38;5;249mp[0m[38;5;249m;[0m
+ [38;5;240m     │[0m                               ─────┬─────  
+ [38;5;240m     │[0m                                    ╰─────── `mapInstance` is re-assigned here
+[38;5;246m──────╯[0m
+
+    at aggregateBindingErrorsIntoJsError (file:///Users/shivamgupta/my%20repos/bus-saarthi/frontend/node_modules/rolldown/dist/shared/error-D0SD8_tL.mjs:49:18)
+    at unwrapBindingResult (file:///Users/shivamgupta/my%20repos/bus-saarthi/frontend/node_modules/rolldown/dist/shared/error-D0SD8_tL.mjs:19:128)
+    at #build (file:///Users/shivamgupta/my%20repos/bus-saarthi/frontend/node_modules/rolldown/dist/shared/rolldown-CMhwwZPA.mjs:145:34)
+    at async buildEnvironment (file:///Users/shivamgupta/my%20repos/bus-saarthi/frontend/node_modules/vite/dist/node/chunks/node.js:34849:66)
+    at async Object.build (file:///Users/shivamgupta/my%20repos/bus-saarthi/frontend/node_modules/vite/dist/node/chunks/node.js:35270:19)
+    at async Object.buildApp (file:///Users/shivamgupta/my%20repos/bus-saarthi/frontend/node_modules/vite/dist/node/chunks/node.js:35267:153)
+    at async CAC.<anonymous> (file:///Users/shivamgupta/my%20repos/bus-saarthi/frontend/node_modules/vite/dist/node/cli.js:790:3) {
+  errors: [Getter/Setter]
+}

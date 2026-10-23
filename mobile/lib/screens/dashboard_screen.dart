@@ -12,6 +12,7 @@ import 'widgets/camera_preview_widget.dart';
 import 'widgets/sensor_dashboard_widget.dart';
 import 'widgets/loading_overlay.dart';
 import 'settings_screen.dart';
+import 'login_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key, this.mode}) : super(key: key);
@@ -251,25 +252,73 @@ class _CameraSectionHeader extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
-          // Logo / Brand
+          // Invertis University Logo + Brand
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            height: 34,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: AppTheme.orange,
+              color: Colors.white,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Text(
-              'BUS SARTHI',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w900,
-                fontSize: 13,
-                letterSpacing: 1.5,
-              ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  'assets/images/logo.png',
+                  height: 26,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const Icon(Icons.school, color: AppTheme.orange, size: 20),
+                ),
+                const SizedBox(width: 6),
+                const Text(
+                  'BUS SARTHI',
+                  style: TextStyle(
+                    color: AppTheme.orange,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 11,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ],
             ),
           ),
 
           const Spacer(),
+
+          // Switch to Driver Phone button
+          GestureDetector(
+            onTap: () {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(builder: (_) => const LoginScreen()),
+              );
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.35),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.phone_android, size: 14, color: Colors.white),
+                  SizedBox(width: 4),
+                  Text(
+                    'Driver Phone',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(width: 10),
 
           // Connection badge
           _buildConnectionBadge(context),

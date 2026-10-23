@@ -4,6 +4,7 @@ import '../providers/auth_provider.dart';
 import '../core/theme.dart';
 import '../core/constants.dart';
 import 'login_screen.dart';
+import 'driver_dashboard_screen.dart';
 import 'dashboard_screen.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -31,7 +32,7 @@ class _SplashScreenState extends State<SplashScreen> {
     if (isLoggedIn) {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => const DashboardScreen()),
+        MaterialPageRoute(builder: (_) => const DriverDashboardScreen()),
       );
     } else if (AppConstants.appMode == AppConstants.modeBusDevice) {
       // The device fixed inside the bus has no user account. It identifies
@@ -61,8 +62,27 @@ class _SplashScreenState extends State<SplashScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Placeholder for Logo
-            Icon(Icons.directions_bus, size: 100, color: AppTheme.accentColor),
+            Container(
+              height: 70,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.2),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Image.asset(
+                'assets/images/logo.png',
+                height: 54,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => Icon(Icons.directions_bus, size: 54, color: AppTheme.accentColor),
+              ),
+            ),
             const SizedBox(height: 24),
             const Text(
               'INVERTIS BUS SAARTHI',

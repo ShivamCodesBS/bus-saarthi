@@ -1,6 +1,6 @@
 import toast from 'react-hot-toast';
 import { useState, useEffect, useRef } from 'react';
-import { Bus, Menu, MapPin, Phone, User, Maximize2, X, Compass, Activity, Navigation, Wind, AlertOctagon, Bell, AlarmClock, Users, Home as HomeIcon, Settings, LogOut, MessageSquare, GitMerge } from 'lucide-react';
+import { Bus, Menu, MapPin, Phone, User, Maximize2, X, Compass, Activity, Navigation, Wind, AlertOctagon, Bell, AlarmClock, Users, Home as HomeIcon, Settings, LogOut, MessageSquare, GitMerge, Trash2 } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -15,11 +15,10 @@ import { BACKEND_URL, SOCKET_URL } from '../config';
 import { useNavigate } from 'react-router-dom';
 
 import '../index.css';
-import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { friendlyError, reportError } from '../lib/errors';
+import { friendlyError } from '../lib/errors';
 
 // Fix for default marker icon in react-leaflet
 delete L.Icon.Default.prototype._getIconUrl;
@@ -159,9 +158,17 @@ const Home = () => {
 
   // Initial Bus Location (Example: Near Invertis University, Bareilly)
   const [busLocation, setBusLocation] = useState([28.3180, 79.4670]);
+  const [mapCenter, setMapCenter] = useState([28.3180, 79.4670]);
+  const [mapZoom, setMapZoom] = useState(15);
+  const [isLive, setIsLive] = useState(false);
+  const [autoFollow, setAutoFollow] = useState(true);
+  const telemetryTimeoutRef = useRef(null);
+  const mapInstance = useRef(null);
 
-  // Dynamic Effective Route ID: Switches instantly to newRouteId when merged
-  const effectiveRouteId = mergeInfo?.newRouteId || user?.routeId || user?.route_id || '4';
+  // Dynamic Effective Route ID: Switches instantly to newRouteId when merged, or keeps original if cancelled
+  const effectiveRouteId = mergeInfo?.isCancelled 
+    ? (user?.routeId || user?.route_id || '4')
+    : (mergeInfo?.newRouteId || user?.routeId || user?.route_id || '4');
 
   // Connect to Socket.IO for real-time telemetry updates and fetch initial status
   useEffect(() => {
@@ -174,15 +181,28 @@ const Home = () => {
         const res = await axios.get(`${BACKEND_URL}/api/merge/check/${homeRouteId}`, authHeaders);
         if (res.data.status === 'success' && res.data.data?.isCancelled && res.data.data?.merge) {
           const m = res.data.data.merge;
-          setMergeInfo({
-            newRouteId: m.targetRouteId,
-            newBusNumber: m.targetBusNumber,
-            newRouteName: m.targetRouteName,
-            reason: m.reason,
-            cancelledBusNumber: m.cancelledBusNumber,
-            cancelledRouteName: m.cancelledRouteName,
-            message: `Your bus (${m.cancelledBusNumber || m.cancelledRouteId}) is cancelled today. Please board Bus ${m.targetBusNumber} (${m.targetRouteName}).`
-          });
+          if (m.status === 'cancelled') {
+            // Bus cancelled, no replacement
+            setMergeInfo({
+              isCancelled: true,
+              cancelledRouteId: m.cancelledRouteId,
+              cancelledBusNumber: m.cancelledBusNumber,
+              cancelledRouteName: m.cancelledRouteName,
+              reason: m.reason,
+              message: m.notes || `Your bus (${m.cancelledBusNumber || m.cancelledRouteId}) is cancelled today. No replacement bus is available.`
+            });
+          } else {
+            // Normal merge
+            setMergeInfo({
+              newRouteId: m.targetRouteId,
+              newBusNumber: m.targetBusNumber,
+              newRouteName: m.targetRouteName,
+              reason: m.reason,
+              cancelledBusNumber: m.cancelledBusNumber,
+              cancelledRouteName: m.cancelledRouteName,
+              message: `Your bus (${m.cancelledBusNumber || m.cancelledRouteId}) is cancelled today. Please board Bus ${m.targetBusNumber} (${m.targetRouteName}).`
+            });
+          }
         } else {
           setMergeInfo(null);
         }
@@ -273,6 +293,10 @@ const Home = () => {
       if (data.route_id && String(data.route_id) !== String(effectiveRouteId)) return;
       if (data.location && data.location.lat && data.location.lng) {
         setBusLocation([data.location.lat, data.location.lng]);
+        setIsLive(true);
+        if (autoFollow) {
+          setMapCenter([data.location.lat, data.location.lng]);
+        }
       }
       setTelemetry({
         speed: data.speed || 0,
@@ -281,9 +305,10 @@ const Home = () => {
         lastUpdated: new Date().toISOString()
       });
 
-      if (telemetryTimeout) clearTimeout(telemetryTimeout);
-      telemetryTimeout = setTimeout(() => {
+      if (telemetryTimeoutRef.current) clearTimeout(telemetryTimeoutRef.current);
+      telemetryTimeoutRef.current = setTimeout(() => {
         setTelemetry(null);
+        setIsLive(false);
       }, 5000);
     });
 
@@ -339,6 +364,17 @@ const Home = () => {
       }
     });
 
+    // Listen for bus cancelled event (no replacement bus)
+    socket.on('your_route_cancelled', (data) => {
+      setMergeInfo({
+        isCancelled: true,
+        message: data.message,
+        cancelledRouteId: data.cancelledRouteId,
+        reason: data.reason,
+      });
+      toast.error(`🚌 BUS CANCELLED: ${data.message}`, { duration: 15000 });
+    });
+
     // Listen for wake alarm trigger from server
     socket.on('wake_alarm_trigger', (data) => {
       toast(`🚌 Bus is ${data.distanceKm}km away! Get ready!`, {
@@ -358,6 +394,17 @@ const Home = () => {
         oscillator.start();
         oscillator.stop(audioCtx.currentTime + 1.5);
       } catch(e) { console.warn('Audio play failed', e); }
+    });
+
+    // Listen for SOS cancelled event (from admin or self-cancel)
+    socket.on('sos_cancelled', (data) => {
+      if (data.login_id === (user?.loginId || user?.login_id)) {
+        setSosActive(false);
+        setSosTimer(null);
+        if (sosTimeoutRef.current) clearTimeout(sosTimeoutRef.current);
+        if (sosIntervalRef.current) clearInterval(sosIntervalRef.current);
+        toast.success('SOS alert has been cancelled.', { duration: 5000 });
+      }
     });
 
     return () => {
@@ -488,12 +535,12 @@ const Home = () => {
       {/* HEADER */}
       <header className="flex justify-between items-center px-4 py-3 md:px-6 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800 z-50 sticky top-0 shadow-sm">
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-white dark:bg-slate-800 p-1 shadow-md border border-slate-100 dark:border-slate-700/60 flex items-center justify-center shrink-0">
-            <img src="/logo.png" alt="Invertis Bus Saarthi" className="w-full h-full object-contain filter drop-shadow-sm" />
+          <div className="h-10 md:h-12 px-2.5 py-1 rounded-xl bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700/60 flex items-center justify-center shrink-0">
+            <img src="/logo.png" alt="Invertis University" className="h-full w-auto max-h-8 md:max-h-9 object-contain filter drop-shadow-sm" />
           </div>
           <div>
             <h1 className="text-lg md:text-xl font-extrabold text-blue-700 dark:text-blue-400 tracking-tight leading-tight">
-              INVERTIS <span className="text-orange-500">BUS<br className="block sm:hidden" /> SAARTHI</span>
+              BUS <span className="text-orange-500">SAARTHI</span>
             </h1>
             <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{t('welcome')}, {translateName(user?.name) || 'Passenger'}</p>
           </div>
@@ -681,21 +728,41 @@ const Home = () => {
           <div className="p-5 rounded-3xl bg-gradient-to-r from-red-600 via-orange-600 to-amber-600 text-white shadow-xl shadow-orange-500/20 border-2 border-white/20 animate-fade-in flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3.5">
               <div className="p-3 bg-white/20 rounded-2xl backdrop-blur-md shrink-0">
-                <GitMerge size={26} className="text-white" />
+                {mergeInfo.isCancelled ? (
+                  <Trash2 size={26} className="text-white" />
+                ) : (
+                  <GitMerge size={26} className="text-white" />
+                )}
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="bg-white text-red-600 font-black text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider">Bus Changed Today</span>
-                  <h3 className="font-bold text-base m-0">Board Bus {mergeInfo.newBusNumber} ({mergeInfo.newRouteName})</h3>
+                  {mergeInfo.isCancelled ? (
+                    <span className="bg-white text-red-600 font-black text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider">Bus Cancelled Today</span>
+                  ) : (
+                    <span className="bg-white text-red-600 font-black text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider">Bus Changed Today</span>
+                  )}
+                  {mergeInfo.isCancelled ? (
+                    <h3 className="font-bold text-base m-0">Bus {mergeInfo.cancelledBusNumber} ({mergeInfo.cancelledRouteName}) is cancelled</h3>
+                  ) : (
+                    <h3 className="font-bold text-base m-0">Board Bus {mergeInfo.newBusNumber} ({mergeInfo.newRouteName})</h3>
+                  )}
                 </div>
                 <p className="text-xs text-white/90 m-0 mt-1">
-                  Your regular bus ({mergeInfo.cancelledBusNumber || 'assigned'}) was merged today. Your face recognition & attendance are eligible on <strong>Bus {mergeInfo.newBusNumber}</strong>.
+                  {mergeInfo.isCancelled
+                    ? `Your bus (${mergeInfo.cancelledBusNumber || 'assigned'}) has been cancelled today. ${mergeInfo.message || 'No replacement bus is available.'}`
+                    : `Your regular bus (${mergeInfo.cancelledBusNumber || 'assigned'}) was merged today. Your face recognition & attendance are eligible on <strong>Bus ${mergeInfo.newBusNumber}</strong>.`}
                 </p>
               </div>
             </div>
             <div className="bg-black/20 px-3.5 py-2 rounded-xl text-center shrink-0 w-full sm:w-auto">
-              <span className="text-[10px] uppercase font-bold text-orange-200 block">Tracking Active</span>
-              <span className="font-extrabold text-sm text-white">Route {mergeInfo.newRouteId}</span>
+              <span className="text-[10px] uppercase font-bold text-orange-200 block">
+                {mergeInfo.isCancelled ? 'No Service Today' : 'Tracking Active'}
+              </span>
+              <span className="font-extrabold text-sm text-white">
+                {mergeInfo.isCancelled
+                  ? `Route ${mergeInfo.cancelledRouteId}`
+                  : `Route ${mergeInfo.newRouteId}`}
+              </span>
             </div>
           </div>
         )}
@@ -972,23 +1039,77 @@ const Home = () => {
               </div>
 
               <div className="flex-1 relative z-0">
-                <MapContainer center={busLocation} zoom={14} style={{ height: '100%', width: '100%' }} zoomControl={false}>
+                {/* Status indicator */}
+                <div className="absolute top-3 left-3 right-3 z-10 flex justify-between items-start pointer-events-none">
+                  <div className="pointer-events-auto">
+                    <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-white/90 backdrop-blur-sm shadow-lg border ${
+                      isLive ? 'border-green-200 text-green-700' : 'border-orange-200 text-orange-700'
+                    }`}>
+                      <span className={`w-2 h-2 rounded-full ${isLive ? 'bg-green-500 animate-pulse' : 'bg-orange-500'}`} />
+                      {isLive ? 'LIVE' : 'OFFLINE'}
+                    </div>
+                  </div>
+                  <div className="pointer-events-auto ml-auto">
+                    <button
+                      onClick={() => {
+                        setAutoFollow(true);
+                        setMapCenter(busLocation);
+                        setMapZoom(16);
+                      }}
+                      title="Recenter on bus"
+                      className="p-2 rounded-full bg-white/90 backdrop-blur-sm shadow-lg border border-slate-200 hover:bg-slate-50 transition-all"
+                    >
+                      <div className="w-8 h-8 flex items-center justify-center">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-blue-600">
+                          <circle cx="12" cy="12" r="3" />
+                          <path d="M12 2v2M12 20v2M2 12h2M20 12h2" />
+                        </svg>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+
+                <MapContainer 
+                  center={mapCenter} 
+                  zoom={mapZoom} 
+                  style={{ height: '100%', width: '100%' }} 
+                  zoomControl={false}
+                  whenCreated={(map) => { mapInstance.current = map; }}
+                >
                   <MapResizer />
                   <TileLayer
                     url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
                     attribution='&copy; Google Maps'
                   />
+                  
+                  {/* Bus Marker */}
                   <Marker position={busLocation} icon={busIcon}>
                     <Popup>
-                      <b>Bus {routeInfo?.bus_number || 'UP 25 AB 1234'}</b><br />
-                      Speed: {telemetry ? telemetry.speed.toFixed(0) : 0} km/h
+                      <b>Bus {routeInfo?.busNumber || routeInfo?.bus_number || 'UP 25 AB 1234'}</b><br />
+                      Speed: {telemetry ? telemetry.speed.toFixed(0) : 0} km/h<br />
+                      {isLive ? '🟢 Live' : '🟠 Offline'}
                     </Popup>
                   </Marker>
-                  <Polyline positions={dynamicRoutePolyline} color="#0056b3" weight={5} opacity={0.8} />
-                  <Marker position={dynamicRoutePolyline[dynamicRoutePolyline.length - 1]}>
-                    <Popup>Destination</Popup>
-                  </Marker>
                 </MapContainer>
+
+                {/* Auto-follow toggle */}
+                <div className="absolute bottom-3 right-3 z-10 pointer-events-auto">
+                  <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-white/90 backdrop-blur-sm shadow-lg border border-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={autoFollow}
+                      onChange={(e) => {
+                        setAutoFollow(e.target.checked);
+                        if (e.target.checked) {
+                          setMapCenter(busLocation);
+                          setMapZoom(16);
+                        }
+                      }}
+                      className="w-4 h-4 accent-blue-600 cursor-pointer"
+                    />
+                    <span>Auto-follow bus</span>
+                  </label>
+                </div>
               </div>
             </Card>
           </div>
@@ -1022,7 +1143,7 @@ const Home = () => {
                 attribution='&copy; Google Maps'
               />
               <Marker position={busLocation} icon={busIcon}>
-                <Popup><b>Bus {routeInfo?.bus_number || 'UP 25 AB 1234'}</b><br />Speed: {telemetry ? telemetry.speed.toFixed(0) : 0} km/h</Popup>
+                <Popup><b>Bus {routeInfo?.busNumber || routeInfo?.bus_number || 'UP 25 AB 1234'}</b><br />Speed: {telemetry ? telemetry.speed.toFixed(0) : 0} km/h</Popup>
               </Marker>
               <Polyline positions={dynamicRoutePolyline} color="#0056b3" weight={6} />
               <Marker position={dynamicRoutePolyline[dynamicRoutePolyline.length - 1]}>

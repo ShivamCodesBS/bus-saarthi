@@ -16,3 +16,16 @@ export class CreateMergeDto {
   @IsString()
   notes?: string;
 }
+
+export class CreateBusCancelDto {
+  @IsString()
+  cancelled_route_id: string;
+
+  @IsOptional()
+  @IsEnum(MergeReason)
+  reason?: MergeReason;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}

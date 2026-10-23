@@ -43,6 +43,7 @@ export class GrievancesService {
     category?: string,
     realName?: string,
     routeId?: string,
+    isAnonymous?: boolean,
   ) {
     const user = await this.prisma.user.findUnique({
       where: { loginId },
@@ -62,7 +63,9 @@ export class GrievancesService {
     }
 
     const route = await this.resolveBusForRoute(effectiveRoute);
-    const resolvedName = realName || user?.name || 'Anonymous';
+    // Store the user's actual name internally so staff can see it, but honor
+    // the anonymous flag for visibility to other passengers.
+    const resolvedName = user?.name || 'Anonymous Passenger';
 
     const grievance = await this.prisma.grievance.create({
       data: {
@@ -74,6 +77,7 @@ export class GrievancesService {
         mediaUrl,
         category,
         realName: resolvedName,
+        isAnonymous: isAnonymous ?? false,
         status: GrievanceStatus.pending,
       },
     });
@@ -107,6 +111,13 @@ export class GrievancesService {
     options: { status?: string; route?: string; onlyMine?: boolean } = {},
   ) {
     const staff = isStaff(role);
+    
+    // Build cache key based on query parameters
+    const cacheKey = `grievances:${loginId}:${role}:${JSON.stringify(options)}`;
+
+    // Try cache first
+    const cached = await this.cache.get<any[]>(cacheKey);
+    if (cached) return cached;
 
     const where: any = {};
     if (!staff || options.onlyMine) {
@@ -154,17 +165,20 @@ export class GrievancesService {
     const visible = grievances.map((g) => {
       const { user, ...rest } = g;
       const mine = g.loginId === loginId;
+      // Staff see the real name AND the anonymous flag; non-staff see
+      // "Anonymous Passenger" and the anonymous flag is hidden.
       return {
         ...rest,
-        // A reporter always sees their own name; everyone else sees it only if
-        // they are staff. Everyone else sees "Anonymous Passenger".
         realName: staff || mine ? g.realName : null,
+        isAnonymous: staff || mine ? g.isAnonymous : false,
         authorDisplay: staff || mine ? g.realName : 'Anonymous Passenger',
         isMine: mine,
         hasUpvotedLocally: upvotedIds.has(g.id),
       };
     });
 
+    // Cache for 30 seconds
+    await this.cache.set(cacheKey, visible, 30);
     return visible;
   }
 
@@ -185,6 +199,7 @@ export class GrievancesService {
     return {
       ...rest,
       realName: staff || mine ? grievance.realName : null,
+      isAnonymous: staff || mine ? grievance.isAnonymous : false,
       authorDisplay: staff || mine ? grievance.realName : 'Anonymous Passenger',
       isMine: mine,
     };

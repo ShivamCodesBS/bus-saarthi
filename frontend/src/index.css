@@ -379,8 +379,14 @@ html, body, #root {
   to { transform: translateY(0); opacity: 1; }
 }
 
+@keyframes slideDown {
+  from { transform: translateY(-10px); opacity: 0; max-height: 0; }
+  to { transform: translateY(0); opacity: 1; max-height: 500px; }
+}
+
 .animate-fade-in { animation: fadeIn 0.5s ease-out forwards; opacity: 0; }
 .animate-slide-up { animation: slideUp 0.6s ease-out forwards; opacity: 0; }
+.animate-slide-down { animation: slideDown 0.4s ease-out forwards; }
 
 /* Animation Delays for Staggering */
 .delay-100 { animation-delay: 100ms; }
