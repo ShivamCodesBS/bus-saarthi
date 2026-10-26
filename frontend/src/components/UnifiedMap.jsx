@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
+import { createPortal } from 'react-dom';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, Tooltip, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { 
@@ -30,6 +31,44 @@ const destinationIcon = new L.Icon({
   iconAnchor: [14, 28],
   popupAnchor: [0, -28],
 });
+
+// Small marker for the OTHER buses of the fleet (the selected bus gets the
+// large busIcon above).
+const otherBusIcon = new L.DivIcon({
+  className: 'other-bus-marker',
+  html: `<div style="width:26px;height:26px;border-radius:50%;background:#3b82f6;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;font-size:13px;line-height:1">🚌</div>`,
+  iconSize: [26, 26],
+  iconAnchor: [13, 13],
+});
+
+/**
+ * Google-Maps-style "lock on bus" control — a circular crosshair button that
+ * fills blue while following. Replaces the checkbox pill, which read like a
+ * form control rather than a map control.
+ */
+const LockOnBusButton = ({ active, onToggle, size = 40 }) => (
+  <button
+    onClick={() => onToggle(!active)}
+    title={active ? 'Following the bus — click to unlock' : 'Lock on bus'}
+    aria-pressed={active}
+    style={{
+      width: size,
+      height: size,
+      borderRadius: '50%',
+      border: 'none',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: active ? '#3b82f6' : 'rgba(255,255,255,0.95)',
+      boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
+      transition: 'all 0.2s',
+      flexShrink: 0,
+    }}
+  >
+    <Crosshair size={Math.round(size * 0.5)} color={active ? 'white' : '#3b82f6'} />
+  </button>
+);
 
 // STOP_COORDS for route polyline
 const STOP_COORDS = {
@@ -144,6 +183,10 @@ const UnifiedMap = ({
   // is exactly how the admin/TI map containers are built — so the floor
   // below is what actually keeps the map visible there.
   minHeight = '320px',
+  // Other buses of the fleet: [{ id, position: [lat,lng], label, live }]
+  // Rendered as small markers; clicking one asks the parent to switch.
+  buses = [],
+  onSelectBus = null,
   className = '',
   style = {},
   busLabel = 'Bus',
@@ -391,8 +434,10 @@ const UnifiedMap = ({
         minZoom={3}
       />
       
-      {/* Route Polyline */}
-      {showRoutePolyline && dynamicRoutePolyline.length > 1 && (
+      {/* Route Polyline — only while the bus is live. When offline the bus
+          sits at its last-known/default point and a line "from the bus"
+          reads as a rendering bug rather than a route. */}
+      {showRoutePolyline && isLive && dynamicRoutePolyline.length > 1 && (
         <Polyline 
           positions={dynamicRoutePolyline} 
           color="#0056b3" 
@@ -402,9 +447,25 @@ const UnifiedMap = ({
           lineJoin="round"
         />
       )}
+
+      {/* Other buses of the fleet — click one to track it */}
+      {buses.map((bus) => (
+        <Marker
+          key={bus.id}
+          position={bus.position}
+          icon={otherBusIcon}
+          eventHandlers={{
+            click: () => { if (onSelectBus) onSelectBus(bus.id); },
+          }}
+        >
+          <Tooltip direction="top" offset={[0, -14]} opacity={1}>
+            {bus.label}{bus.live === false ? ' (offline)' : ''}
+          </Tooltip>
+        </Marker>
+      ))}
       
       {/* Destination Marker */}
-      {showDestinationMarker && dynamicRoutePolyline.length > 0 && (
+      {showDestinationMarker && isLive && dynamicRoutePolyline.length > 0 && (
         <Marker position={dynamicRoutePolyline[dynamicRoutePolyline.length - 1]} icon={destinationIcon}>
           <Popup>
             <div style={{ textAlign: 'center' }}>
@@ -473,8 +534,8 @@ const UnifiedMap = ({
       pointerEvents: 'none',
       zIndex: 500,
     }}>
-      {/* Top-left: GPS Status */}
-      <div style={{ position: 'absolute', top: '12px', left: '12px', pointerEvents: 'auto' }}>
+      {/* Top-left: GPS Status (fullscreen header shows its own badge) */}
+      <div style={{ position: 'absolute', top: '12px', left: '12px', pointerEvents: 'auto', display: isFullscreen ? 'none' : 'block' }}>
         <div 
           style={{
             display: 'inline-flex',
@@ -597,8 +658,9 @@ const UnifiedMap = ({
         )}
       </div>
       
-      {/* Top-right: Fullscreen button */}
-      {showFullscreenButton && (
+      {/* Top-right: Fullscreen button (normal mode only — the fullscreen
+          header has its own exit button) */}
+      {showFullscreenButton && !isFullscreen && (
         <div style={{ position: 'absolute', top: '12px', right: '12px', pointerEvents: 'auto' }}>
           <button
             onClick={() => toggleFullscreen(!isFullscreen)}
@@ -626,9 +688,10 @@ const UnifiedMap = ({
         </div>
       )}
       
-      {/* Bottom-right: Recenter & Auto-follow */}
+      {/* Bottom-right: Recenter & Lock (normal mode only; fullscreen has its
+          own footer controls — rendering both showed two of each) */}
       <div style={{ position: 'absolute', bottom: '12px', right: '12px', pointerEvents: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-end' }}>
-        {showRecenterButton && (
+        {showRecenterButton && !isFullscreen && (
           <button
             onClick={recenterMap}
             title="Recenter on bus"
@@ -654,31 +717,8 @@ const UnifiedMap = ({
           </button>
         )}
         
-        {showAutoFollowToggle && (
-          <label style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '6px 12px',
-            borderRadius: '24px',
-            fontSize: '0.7rem',
-            fontWeight: 700,
-            background: 'rgba(255,255,255,0.95)',
-            backdropFilter: 'blur(8px)',
-            boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
-            border: '1px solid rgba(0,0,0,0.08)',
-            cursor: 'pointer',
-            color: '#1a1a2e',
-            whiteSpace: 'nowrap',
-          }}>
-            <input
-              type="checkbox"
-              checked={autoFollow}
-              onChange={(e) => handleAutoFollowChange(e.target.checked)}
-              style={{ accentColor: '#3b82f6', cursor: 'pointer', width: '16px', height: '16px' }}
-            />
-            <span style={{ letterSpacing: '0.3px' }}>Lock on Bus</span>
-          </label>
+        {showAutoFollowToggle && !isFullscreen && (
+          <LockOnBusButton active={autoFollow} onToggle={handleAutoFollowChange} />
         )}
       </div>
       
@@ -798,29 +838,7 @@ const UnifiedMap = ({
       zIndex: 1000,
       pointerEvents: 'auto',
     }}>
-      <label style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '8px',
-        padding: '8px 16px',
-        borderRadius: '28px',
-        fontSize: '0.75rem',
-        fontWeight: 700,
-        background: 'rgba(255,255,255,0.95)',
-        boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
-        border: '1px solid rgba(0,0,0,0.1)',
-        cursor: 'pointer',
-        color: '#1a1a2e',
-        whiteSpace: 'nowrap',
-      }}>
-        <input
-          type="checkbox"
-          checked={autoFollow}
-          onChange={(e) => handleAutoFollowChange(e.target.checked)}
-          style={{ accentColor: '#3b82f6', cursor: 'pointer', width: '18px', height: '18px' }}
-        />
-        <span>Lock on Bus</span>
-      </label>
+      <LockOnBusButton active={autoFollow} onToggle={handleAutoFollowChange} size={44} />
     </div>
   ) : null;
   
@@ -857,7 +875,7 @@ const UnifiedMap = ({
     </div>
   ) : null;
 
-  return (
+  const mapUi = (
     <div 
       style={containerStyle}
       className={className}
@@ -873,10 +891,13 @@ const UnifiedMap = ({
         borderRadius: isFullscreen ? '0' : '16px',
         overflow: 'hidden'
       }}>
+        {/* Absolute fill: percentage heights nested inside auto-height cards
+            resolve to zero, but an absolutely-positioned child stretches to
+            the host's real box regardless. */}
         <MapContainer
           center={isFullscreen ? busLocation : mapCenter}
           zoom={isFullscreen ? 15 : mapZoom}
-          style={{ height: '100%', width: '100%' }}
+          style={{ position: 'absolute', inset: 0, height: '100%', width: '100%' }}
           zoomControl={true}
           scrollWheelZoom={true}
           dragging={true}
@@ -906,6 +927,14 @@ const UnifiedMap = ({
       `}</style>
     </div>
   );
+
+  // Fullscreen renders through a portal on document.body — the dashboard
+  // cards use backdrop-filter, which makes them the containing block for
+  // fixed children and kept the "fullscreen" map trapped inside the card.
+  if (isFullscreen && typeof document !== 'undefined') {
+    return createPortal(mapUi, document.body);
+  }
+  return mapUi;
 };
 
 export default UnifiedMap;

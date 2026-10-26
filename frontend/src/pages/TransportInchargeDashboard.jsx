@@ -54,6 +54,8 @@ const TransportInchargeDashboard = () => {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [sosAlerts, setSosAlerts] = useState([]);
+  // Last known position of every bus for the fleet map.
+  const [busPositions, setBusPositions] = useState({});
   const [liveAttendance, setLiveAttendance] = useState([]);
   const [usersList, setUsersList] = useState([]);
   const [grievances, setGrievances] = useState([]);
@@ -296,6 +298,17 @@ const TransportInchargeDashboard = () => {
     });
 
     socket.on('live_telemetry', (data) => {
+      // Track every bus for the fleet view, then handle the selected one.
+      if (data.route_id && data.location?.lat && data.location?.lng) {
+        setBusPositions((prev) => ({
+          ...prev,
+          [String(data.route_id)]: {
+            lat: data.location.lat,
+            lng: data.location.lng,
+            updatedAt: data.timestamp || new Date().toISOString(),
+          },
+        }));
+      }
       if (data.route_id && String(data.route_id) !== String(selectedRouteRef.current)) return;
       if (data.location && data.location.lat && data.location.lng) {
         setBusLocation([data.location.lat, data.location.lng]);
@@ -341,6 +354,15 @@ const TransportInchargeDashboard = () => {
     setSocketInstance(socket);
     return () => socket.disconnect();
   }, [user?.token]);
+
+  // The TI tracks the whole fleet: join a room per route.
+  useEffect(() => {
+    if (!socketInstance || routesList.length === 0) return;
+    routesList.forEach((r) => {
+      const id = String(r.routeId || r.route_id);
+      if (id) socketInstance.emit('join_route', { route_id: id });
+    });
+  }, [socketInstance, routesList]);
 
   useEffect(() => {
     if (socketInstance) {
@@ -729,6 +751,26 @@ const TransportInchargeDashboard = () => {
     }
   };
 
+  // Fleet markers for the map: every bus EXCEPT the tracked one.
+  const fleetBuses = useMemo(() => {
+    const now = Date.now();
+    return Object.entries(busPositions)
+      .map(([routeId, pos]) => {
+        const route = routesList.find(
+          (r) => String(r.routeId || r.route_id) === String(routeId),
+        );
+        const name = route?.routeName || route?.route_name || `Route ${routeId}`;
+        const busNo = route?.busNumber || route?.bus_number;
+        return {
+          id: String(routeId),
+          position: [pos.lat, pos.lng],
+          label: `Route ${routeId} · ${name}${busNo ? ` (Bus ${busNo})` : ''}`,
+          live: now - new Date(pos.updatedAt).getTime() < 15000,
+        };
+      })
+      .filter((b) => b.id !== String(selectedRoute));
+  }, [busPositions, routesList, selectedRoute]);
+
   // Modal accessibility: background scroll locks, Lenis pauses, Escape closes.
   useModalA11y(showUserModal, () => setShowUserModal(false));
   useModalA11y(showRouteModal, () => setShowRouteModal(false));
@@ -1005,6 +1047,8 @@ const TransportInchargeDashboard = () => {
                   initialZoom={14}
                   height="100%"
                   minHeight="400px"
+                  buses={fleetBuses}
+                  onSelectBus={(id) => setSelectedRoute(String(id))}
                   busLabel={`Bus ${routesList.find(r => String(r.routeId || r.route_id) === String(selectedRoute))?.busNumber || routesList.find(r => String(r.routeId || r.route_id) === String(selectedRoute))?.bus_number || selectedRoute}`}
                   showFullscreenButton={true}
                   showAutoFollowToggle={true}

@@ -68,6 +68,9 @@ const AdminDashboard = () => {
 
   // State for Data
   const [sosAlerts, setSosAlerts] = useState([]);
+  // Last known position of EVERY bus (routeId -> fix), so the map can show
+  // the whole fleet, not just the selected route.
+  const [busPositions, setBusPositions] = useState({});
   const [liveAttendance, setLiveAttendance] = useState([]);
   const [usersList, setUsersList] = useState([]);
   const [grievances, setGrievances] = useState([]);
@@ -294,9 +297,20 @@ const AdminDashboard = () => {
     });
 
     socket.on('live_telemetry', (data) => {
+      // Track every bus for the fleet view, then handle the selected one.
+      if (data.route_id && data.location?.lat && data.location?.lng) {
+        setBusPositions((prev) => ({
+          ...prev,
+          [String(data.route_id)]: {
+            lat: data.location.lat,
+            lng: data.location.lng,
+            updatedAt: data.timestamp || new Date().toISOString(),
+          },
+        }));
+      }
       // Only process telemetry for the currently selected route
       if (data.route_id && String(data.route_id) !== String(selectedRouteRef.current)) return;
-      
+
       if (data.location && data.location.lat && data.location.lng) {
         const newLocation = [data.location.lat, data.location.lng];
         setBusLocation(newLocation);
@@ -360,15 +374,25 @@ const AdminDashboard = () => {
       // Leave the previous route room before joining the new one, otherwise
       // the server keeps broadcasting telemetry for stale routes to this
       // socket and the room membership grows without bound.
-      socketInstance.emit('unsubscribe_route', {
-        route_id: previousRouteRef.current,
-      });
+      if (previousRouteRef.current != null) {
+        socketInstance.emit('unsubscribe_route', { route_id: previousRouteRef.current });
+      }
       socketInstance.emit('join_route', { route_id: selectedRoute });
       previousRouteRef.current = selectedRoute;
       setIsBusActive(false);
       setBusTelemetry(null);
     }
   }, [selectedRoute, socketInstance]);
+
+  // The admin tracks the WHOLE fleet: join a room per route so every bus's
+  // telemetry reaches the fleet map.
+  useEffect(() => {
+    if (!socketInstance || routesList.length === 0) return;
+    routesList.forEach((r) => {
+      const id = String(r.routeId || r.route_id);
+      if (id) socketInstance.emit('join_route', { route_id: id });
+    });
+  }, [socketInstance, routesList]);
 
   // Stale-while-revalidate hooks for each data type - fast cached load, then live update
   const {
@@ -1000,6 +1024,27 @@ const AdminDashboard = () => {
     }
   };
 
+  // Fleet markers for the map: every bus EXCEPT the one being tracked
+  // (the tracked bus gets the large marker).
+  const fleetBuses = useMemo(() => {
+    const now = Date.now();
+    return Object.entries(busPositions)
+      .map(([routeId, pos]) => {
+        const route = routesList.find(
+          (r) => String(r.routeId || r.route_id) === String(routeId),
+        );
+        const name = route?.routeName || route?.route_name || `Route ${routeId}`;
+        const busNo = route?.busNumber || route?.bus_number || route?.bus?.busNumber;
+        return {
+          id: String(routeId),
+          position: [pos.lat, pos.lng],
+          label: `Route ${routeId} · ${name}${busNo ? ` (Bus ${busNo})` : ''}`,
+          live: now - new Date(pos.updatedAt).getTime() < 15000,
+        };
+      })
+      .filter((b) => b.id !== String(selectedRoute));
+  }, [busPositions, routesList, selectedRoute]);
+
   // Modal accessibility: the background stops scrolling, the Lenis
   // smooth-scroller pauses, and Escape closes the open popup.
   useModalA11y(showUserModal, () => setShowUserModal(false));
@@ -1266,6 +1311,11 @@ const AdminDashboard = () => {
                   showTelemetryPanel={true}
                   showRoutePolyline={true}
                   showDestinationMarker={true}
+                  buses={fleetBuses}
+                  onSelectBus={(id) => {
+                    setSelectedRoute(String(id));
+                    toast.success(`Now tracking ${fleetBuses.find((b) => b.id === String(id))?.label || `Route ${id}`}`);
+                  }}
                 />
               </div>
 
