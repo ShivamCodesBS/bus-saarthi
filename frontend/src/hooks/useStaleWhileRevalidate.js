@@ -54,7 +54,21 @@ export function useStaleWhileRevalidate(url, options = {}) {
         signal,
       });
 
-      const result = Array.isArray(response.data) ? response.data : (response.data?.data || []);
+      // Handle different response formats:
+      // - Array: use directly
+      // - Object with .data property: use .data
+      // - Object without .data (direct object): use the object itself
+      let result;
+      if (Array.isArray(response.data)) {
+        result = response.data;
+      } else if (response.data && typeof response.data === 'object' && 'data' in response.data) {
+        result = response.data.data;
+      } else if (response.data && typeof response.data === 'object') {
+        // Direct object response (e.g., /api/users/me returns user object directly)
+        result = response.data;
+      } else {
+        result = [];
+      }
       
       // Update cache with fresh data
       dataCache.set(cacheKey, {
