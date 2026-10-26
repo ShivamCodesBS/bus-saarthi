@@ -117,14 +117,28 @@ export function useStaleWhileRevalidate(url, options = {}) {
         fetchFresh(abortControllerRef.current.signal).catch(() => {});
       }
     } else if (!skip) {
-      // No cache - fetch immediately
+      // No cache - fetch immediately AND AWAIT IT
       abortControllerRef.current = new AbortController();
-      fetchFresh(abortControllerRef.current.signal)
-        .then(() => {})
-        .catch(() => {})
-        .finally(() => {
-          if (mountedRef.current) setIsLoading(false);
-        });
+      let cancelled = false;
+      
+      const loadInitial = async () => {
+        try {
+          await fetchFresh(abortControllerRef.current.signal);
+        } catch (err) {
+          // Ignore abort/cancel errors
+          if (err.name === 'AbortError' || err.name === 'CanceledError' || cancelled) return;
+        } finally {
+          if (mountedRef.current && !cancelled) {
+            setIsLoading(false);
+          }
+        }
+      };
+      
+      loadInitial();
+      
+      return () => {
+        cancelled = true;
+      };
     }
     
     return () => {

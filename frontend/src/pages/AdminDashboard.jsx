@@ -8,7 +8,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import axios from 'axios';
-import { BACKEND_URL } from '../config';
+import { BACKEND_URL, SOCKET_URL } from '../config';
 import '../index.css';
 import HamburgerMenu from '../components/HamburgerMenu';
 import Papa from 'papaparse';
@@ -317,14 +317,22 @@ const AdminDashboard = () => {
   }, [notifications, seenIds, showNotifications]);
 
   useEffect(() => {
+    if (!user?.token) {
+      console.warn('No token available, skipping WebSocket connection');
+      return;
+    }
     // Connect WebSockets
-    const socket = io(BACKEND_URL, {
-      transports: ['websocket', 'polling']
+    const socket = io(SOCKET_URL, {
+      transports: ['websocket', 'polling'],
+      auth: { token: user.token },
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
     });
 
     socket.on('connect', () => {
       console.log('Admin connected to socket server');
-      socket.emit('join_admin', { token: tokenRef.current });
+      socket.emit('join_admin', { token: user.token });
     });
 
     socket.on('connect_error', (err) => {

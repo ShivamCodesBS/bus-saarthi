@@ -96,6 +96,8 @@ const Profile = () => {
   const { t } = useLang();
   const fileInputRef = useRef(null);
 
+  const [isUploading, setIsUploading] = useState(false);
+
   const loginId = user?.loginId || user?.login_id || user?.id;
   const role = user?.role || 'passenger';
   const roleMeta = ROLE_META[role] || ROLE_META.passenger;
