@@ -957,7 +957,7 @@ const Home = () => {
           </div>
 
           {/* RIGHT COLUMN: Real Leaflet Map */}
-          <div className={`lg:col-span-6 xl:col-span-7 flex-col min-h-[450px] h-full ${showMap ? 'flex animate-in slide-in-from-right-8 fade-in duration-500' : 'hidden'}`}>
+          <div className={`lg:col-span-6 xl:col-span-7 h-[480px] xl:h-[620px] ${showMap ? 'flex animate-in slide-in-from-right-8 fade-in duration-500' : 'hidden'}`}>
             <Card className="rounded-3xl border-4 border-blue-500/20 shadow-lg overflow-hidden flex-1 relative flex flex-col bg-slate-100 dark:bg-slate-800">
               <div className="bg-blue-600/95 backdrop-blur-md text-white p-3 px-5 flex justify-between items-center z-10 shrink-0">
                 <h3 className="font-bold flex items-center gap-2 text-sm">
@@ -979,7 +979,7 @@ const Home = () => {
                   showFullscreenButton={true}
                   showAutoFollowToggle={true}
                   showRecenterButton={true}
-                  showTelemetryPanel={true}
+                  showTelemetryPanel={false}
                   showRoutePolyline={true}
                   showDestinationMarker={true}
                 />

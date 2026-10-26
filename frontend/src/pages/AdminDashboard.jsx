@@ -20,6 +20,7 @@ import WebRTCPlayer from '../components/WebRTCPlayer';
 import { ComplaintSkeleton, RouteSkeleton, UserRowSkeleton, StatCardSkeleton } from '../components/ui/skeleton';
 import { useStaleWhileRevalidate } from '../hooks/useStaleWhileRevalidate';
 import { useModalA11y } from '../hooks/useModalA11y';
+import { useTripStatus } from '../hooks/useTripStatus';
 import UnifiedMap from '../components/UnifiedMap';
 
 // Grievance lifecycle states, mirroring the backend enum.
@@ -1024,6 +1025,10 @@ const AdminDashboard = () => {
     }
   };
 
+  // Honest trip status: offline / active / moving, with a grace period so
+  // a red light does not flip the card back and forth.
+  const tripStatus = useTripStatus(busTelemetry);
+
   // Fleet markers for the map: every bus EXCEPT the one being tracked
   // (the tracked bus gets the large marker).
   const fleetBuses = useMemo(() => {
@@ -1353,13 +1358,21 @@ const AdminDashboard = () => {
                     </div>
 
                     <div className="glass p-6 rounded-2xl flex items-center gap-4 flex-1">
-                      <div className={`${isBusActive ? 'bg-green-50 text-green-600 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400'} p-4 rounded-xl shrink-0`}>
-                        {isBusActive ? <CheckCircle2 size={28} /> : <AlertOctagon size={28} />}
+                      <div className={`${
+                        tripStatus === 'moving' ? 'bg-green-50 text-green-600 dark:bg-green-900/30 dark:text-green-400'
+                          : tripStatus === 'active' ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400'
+                          : 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400'
+                      } p-4 rounded-xl shrink-0`}>
+                        {tripStatus === 'offline' ? <AlertOctagon size={28} /> : <CheckCircle2 size={28} />}
                       </div>
                       <div className="min-w-0">
                         <p className="text-slate-500 dark:text-slate-400 text-sm font-semibold m-0 truncate">Route Status</p>
-                        <h3 className={`text-xl md:text-2xl font-bold m-0 truncate ${isBusActive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                          {isBusActive ? 'Active & Running' : 'Inactive'}
+                        <h3 className={`text-xl md:text-2xl font-bold m-0 truncate ${
+                          tripStatus === 'moving' ? 'text-green-600 dark:text-green-400'
+                            : tripStatus === 'active' ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-red-600 dark:text-red-400'
+                        }`}>
+                          {tripStatus === 'moving' ? 'Active & Running' : tripStatus === 'active' ? 'Active' : 'Inactive'}
                         </h3>
                       </div>
                     </div>

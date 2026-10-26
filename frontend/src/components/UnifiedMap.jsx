@@ -16,12 +16,21 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-// Custom Bus Icon
-const busIcon = new L.Icon({
-  iconUrl: 'https://cdn-icons-png.flaticon.com/512/3448/3448339.png',
-  iconSize: [38, 38],
-  iconAnchor: [19, 19],
-  popupAnchor: [0, -19],
+// Bus marker: a white badge with a navigation arrow that rotates with the
+// live heading (built per heading — a static PNG could not show direction).
+const busDirectionIcon = (heading) => new L.DivIcon({
+  className: 'bus-direction-marker',
+  html: `
+    <div style="position:relative;width:42px;height:42px;">
+      <div style="position:absolute;inset:0;border-radius:50%;background:white;border:3px solid #3b82f6;box-shadow:0 3px 10px rgba(0,0,0,0.35);"></div>
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transform:rotate(${Number(heading) || 0}deg);transition:transform 0.4s ease;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="#3b82f6"><path d="M12 2 L19 21 L12 17 L5 21 Z"/></svg>
+      </div>
+      <div style="position:absolute;right:-4px;bottom:-4px;width:18px;height:18px;border-radius:50%;background:white;box-shadow:0 1px 4px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;font-size:10px;line-height:1;">🚌</div>
+    </div>`,
+  iconSize: [42, 42],
+  iconAnchor: [21, 21],
+  popupAnchor: [0, -21],
 });
 
 // Destination Icon
@@ -200,6 +209,8 @@ const UnifiedMap = ({
   const [mapZoom, setMapZoom] = useState(initialZoom);
   const [telemetryStale, setTelemetryStale] = useState(false);
   const [lastTelemetryUpdate, setLastTelemetryUpdate] = useState(null);
+  // Telemetry panel can collapse to a compact speed chip.
+  const [telemetryMinimized, setTelemetryMinimized] = useState(false);
   
   const mapInstance = useRef(null);
   const autoFollowRef = useRef(true);
@@ -377,6 +388,34 @@ const UnifiedMap = ({
   }, [onMapClick]);
   
   // GPS Status badge
+  // Motion state with a grace period: GPS speed flickers to 0 at signals,
+  // so the badge holds "MOVING" for a few seconds before settling on
+  // "ACTIVE" instead of flapping between the two.
+  const [tripState, setTripState] = useState('offline'); // offline | active | moving
+  const tripTelemetryRef = useRef(telemetry);
+  tripTelemetryRef.current = telemetry;
+  const lastMovingAtRef = useRef(0);
+
+  useEffect(() => {
+    const evaluate = () => {
+      const t = tripTelemetryRef.current;
+      if (!t?.lastUpdated) return setTripState('offline');
+      const age = Date.now() - new Date(t.lastUpdated).getTime();
+      if (age > 10000) return setTripState('offline');
+      if ((t.speed || 0) > 3) {
+        lastMovingAtRef.current = Date.now();
+        setTripState('moving');
+      } else if (lastMovingAtRef.current && Date.now() - lastMovingAtRef.current < 8000) {
+        setTripState('moving');
+      } else {
+        setTripState('active');
+      }
+    };
+    evaluate();
+    const timer = setInterval(evaluate, 2000);
+    return () => clearInterval(timer);
+  }, []);
+
   const getGPSStatus = () => {
     if (!telemetry || telemetryStale) {
       return { 
@@ -389,13 +428,23 @@ const UnifiedMap = ({
       };
     }
     const lastUpdate = formatLastUpdate(lastTelemetryUpdate);
-    return { 
-      status: 'live', 
-      label: 'LIVE', 
-      color: '#28a745', 
-      bg: '#e6fae6',
-      icon: '🟢',
-      tooltip: `Live GPS • Last update: ${lastUpdate}`
+    if (tripState === 'moving') {
+      return {
+        status: 'live',
+        label: 'MOVING',
+        color: '#28a745',
+        bg: '#e6fae6',
+        icon: '🟢',
+        tooltip: `Bus is moving • Last update: ${lastUpdate}`,
+      };
+    }
+    return {
+      status: 'live',
+      label: 'ACTIVE',
+      color: '#d46b08',
+      bg: '#fff7e6',
+      icon: '🟠',
+      tooltip: `Bus is live and standing • Last update: ${lastUpdate}`,
     };
   };
   
@@ -405,6 +454,10 @@ const UnifiedMap = ({
     height,
     minHeight: isFullscreen ? undefined : minHeight,
     width: '100%',
+    // Flex column + flex:1 host below: the map fills whatever height the
+    // embedding card resolves to instead of only its minimum.
+    display: 'flex',
+    flexDirection: 'column',
     borderRadius: isFullscreen ? '0' : '16px',
     ...style
   };
@@ -434,10 +487,12 @@ const UnifiedMap = ({
         minZoom={3}
       />
       
-      {/* Route Polyline — only while the bus is live. When offline the bus
-          sits at its last-known/default point and a line "from the bus"
-          reads as a rendering bug rather than a route. */}
-      {showRoutePolyline && isLive && dynamicRoutePolyline.length > 1 && (
+      {/* Route Polyline — only while the bus is actively reporting. When
+          offline the bus sits at its last-known/default point and a line
+          "from the bus" reads as a rendering bug rather than a route.
+          Uses the internal motion state, not the parent's isLive flag,
+          which some pages never reset. */}
+      {showRoutePolyline && tripState !== 'offline' && dynamicRoutePolyline.length > 1 && (
         <Polyline 
           positions={dynamicRoutePolyline} 
           color="#0056b3" 
@@ -464,8 +519,8 @@ const UnifiedMap = ({
         </Marker>
       ))}
       
-      {/* Destination Marker */}
-      {showDestinationMarker && isLive && dynamicRoutePolyline.length > 0 && (
+      {/* Destination Marker — same live gating as the polyline */}
+      {showDestinationMarker && tripState !== 'offline' && dynamicRoutePolyline.length > 0 && (
         <Marker position={dynamicRoutePolyline[dynamicRoutePolyline.length - 1]} icon={destinationIcon}>
           <Popup>
             <div style={{ textAlign: 'center' }}>
@@ -477,7 +532,7 @@ const UnifiedMap = ({
       )}
       
       {/* Bus Marker with live telemetry popup */}
-      <Marker position={busLocation} icon={busIcon}>
+      <Marker position={busLocation} icon={busDirectionIcon(telemetry?.heading)}>
         <Popup
           minWidth={180}
           maxWidth={240}
@@ -568,7 +623,7 @@ const UnifiedMap = ({
           )}
         </div>
         
-        {/* Telemetry Panel */}
+        {/* Telemetry Panel — collapsible to a compact speed chip */}
         {showTelemetryPanel && telemetry && !telemetryStale && (
           <div style={{
             marginTop: '8px',
@@ -581,6 +636,28 @@ const UnifiedMap = ({
             minWidth: '160px',
             pointerEvents: 'auto',
           }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '2px' }}>
+              <button
+                onClick={() => setTelemetryMinimized((m) => !m)}
+                title={telemetryMinimized ? 'Expand telemetry' : 'Minimize telemetry'}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  padding: '2px', borderRadius: '6px', color: '#666',
+                  display: 'flex', alignItems: 'center',
+                }}
+              >
+                {telemetryMinimized ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
+              </button>
+            </div>
+            {telemetryMinimized ? (
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '5px' }}>
+                <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#1a1a2e', fontVariantNumeric: 'tabular-nums' }}>
+                  {Math.round(telemetry.speed)}
+                </span>
+                <span style={{ fontSize: '0.62rem', fontWeight: 600, color: '#666' }}>km/h</span>
+                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#3b82f6' }}>{getHeadingLabel(telemetry.heading)}</span>
+              </div>
+            ) : (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
               <div>
                 <div style={{ 
@@ -654,10 +731,11 @@ const UnifiedMap = ({
                 </div>
               </div>
             </div>
+            )}
           </div>
         )}
       </div>
-      
+
       {/* Top-right: Fullscreen button (normal mode only — the fullscreen
           header has its own exit button) */}
       {showFullscreenButton && !isFullscreen && (
@@ -688,9 +766,41 @@ const UnifiedMap = ({
         </div>
       )}
       
-      {/* Bottom-right: Recenter & Lock (normal mode only; fullscreen has its
-          own footer controls — rendering both showed two of each) */}
-      <div style={{ position: 'absolute', bottom: '12px', right: '12px', pointerEvents: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-end' }}>
+      {/* Bottom-right: Zoom / Recenter / Lock. Leaflet's default zoom sat
+          top-left UNDER the LIVE badge and telemetry panel — custom buttons
+          in this stack remove the overlap. Raised in fullscreen so it does
+          not sit on the footer lock. */}
+      <div style={{ position: 'absolute', bottom: isFullscreen ? '76px' : '12px', right: '12px', pointerEvents: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-end' }}>
+        {[
+          { label: '+', title: 'Zoom in', action: () => mapInstance.current?.zoomIn() },
+          { label: '−', title: 'Zoom out', action: () => mapInstance.current?.zoomOut() },
+        ].map((btn) => (
+          <button
+            key={btn.label}
+            onClick={btn.action}
+            title={btn.title}
+            style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '12px',
+              background: 'rgba(255,255,255,0.95)',
+              backdropFilter: 'blur(8px)',
+              boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
+              border: '1px solid rgba(0,0,0,0.08)',
+              cursor: 'pointer',
+              fontSize: '1.25rem',
+              fontWeight: 700,
+              color: '#1a1a2e',
+              lineHeight: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              userSelect: 'none',
+            }}
+          >
+            {btn.label}
+          </button>
+        ))}
         {showRecenterButton && !isFullscreen && (
           <button
             onClick={recenterMap}
@@ -884,8 +994,8 @@ const UnifiedMap = ({
     >
       {fullscreenHeader}
       <div style={{
-        height: isFullscreen ? '100%' : height,
-        minHeight: isFullscreen ? undefined : minHeight,
+        flex: 1,
+        minHeight: isFullscreen ? 0 : minHeight,
         width: '100%',
         position: 'relative',
         borderRadius: isFullscreen ? '0' : '16px',
@@ -898,7 +1008,7 @@ const UnifiedMap = ({
           center={isFullscreen ? busLocation : mapCenter}
           zoom={isFullscreen ? 15 : mapZoom}
           style={{ position: 'absolute', inset: 0, height: '100%', width: '100%' }}
-          zoomControl={true}
+          zoomControl={false}
           scrollWheelZoom={true}
           dragging={true}
           attributionControl={true}
