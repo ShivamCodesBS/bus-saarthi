@@ -6,6 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { CacheService } from '../cache/cache.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CreateMergeDto, CreateBusCancelDto } from './dto/create-merge.dto';
 import {
@@ -20,6 +21,7 @@ export class MergeService {
 
   constructor(
     private prisma: PrismaService,
+    private cache: CacheService,
     private eventEmitter: EventEmitter2,
     private notificationsService: NotificationsService,
   ) {}
@@ -164,6 +166,8 @@ export class MergeService {
       },
     });
 
+    await this.invalidateMergeCaches();
+
     return {
       status: 'success',
       message: `Merged ${cancelledRoute.routeName} into ${targetRoute.routeName}`,
@@ -173,6 +177,11 @@ export class MergeService {
         ? `⚠️ Target bus may be overcrowded (${projectedTotal}/${targetCapacity})`
         : null,
     };
+  }
+
+  private async invalidateMergeCaches() {
+    await this.cache.delByPattern('merges:*');
+    await this.cache.del('attendance:today:all');
   }
 
   /**
@@ -232,6 +241,8 @@ export class MergeService {
       },
     });
 
+    await this.invalidateMergeCaches();
+
     return {
       status: 'success',
       message: `Merge undone. ${merge.cancelledRouteName} restored.`,
@@ -241,38 +252,45 @@ export class MergeService {
 
   /**
    * Get all active merges for today.
+   * Cached for 10 seconds since this is polled by the dashboard.
    */
   async getActiveMerges() {
-    const todayStart = getISTMidnightUTC();
-    return this.prisma.mergeEvent.findMany({
-      where: {
-        status: 'active',
-        createdAt: { gte: todayStart },
-      },
-      orderBy: { createdAt: 'desc' },
+    return this.cache.remember('merges:active', 10, async () => {
+      const todayStart = getISTMidnightUTC();
+      return this.prisma.mergeEvent.findMany({
+        where: {
+          status: 'active',
+          createdAt: { gte: todayStart },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
     });
   }
 
   /**
    * Get merge history with optional date filtering.
+   * Cached for 30 seconds since history doesn't change often.
    */
   async getMergeHistory(fromDate?: string, toDate?: string) {
-    const where: any = {};
+    const cacheKey = `merges:history:${fromDate || 'all'}:${toDate || 'all'}`;
+    return this.cache.remember(cacheKey, 30, async () => {
+      const where: any = {};
 
-    if (fromDate) {
-      where.createdAt = { gte: new Date(`${fromDate}T00:00:00+05:30`) };
-    }
-    if (toDate) {
-      where.createdAt = {
-        ...where.createdAt,
-        lte: new Date(`${toDate}T23:59:59+05:30`),
-      };
-    }
+      if (fromDate) {
+        where.createdAt = { gte: new Date(`${fromDate}T00:00:00+05:30`) };
+      }
+      if (toDate) {
+        where.createdAt = {
+          ...where.createdAt,
+          lte: new Date(`${toDate}T23:59:59+05:30`),
+        };
+      }
 
-    return this.prisma.mergeEvent.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: 100,
+      return this.prisma.mergeEvent.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      });
     });
   }
 
@@ -345,95 +363,97 @@ export class MergeService {
    * The previous implementation ran one `attendance.count` and one
    * `user.count` per route, plus a merge lookup per candidate target — an
    * N×M query storm on every dashboard load. It is now three grouped
-   * queries total.
+   * queries total. Cached for 60 seconds since it's a heavy query.
    */
   async getMergeSuggestions() {
-    const todayStart = getISTMidnightUTC();
-    const routes = await this.prisma.route.findMany();
-    if (routes.length === 0) return [];
+    return this.cache.remember('merges:suggestions', 60, async () => {
+      const todayStart = getISTMidnightUTC();
+      const routes = await this.prisma.route.findMany();
+      if (routes.length === 0) return [];
 
-    // 1. Which routes are cancelled today?
-    const activeMerges = await this.prisma.mergeEvent.findMany({
-      where: { status: 'active', createdAt: { gte: todayStart } },
-      select: { cancelledRouteId: true },
-    });
-    const cancelledRouteIds = new Set(
-      activeMerges.map((m) => String(m.cancelledRouteId)),
-    );
+      // 1. Which routes are cancelled today?
+      const activeMerges = await this.prisma.mergeEvent.findMany({
+        where: { status: 'active', createdAt: { gte: todayStart } },
+        select: { cancelledRouteId: true },
+      });
+      const cancelledRouteIds = new Set(
+        activeMerges.map((m) => String(m.cancelledRouteId)),
+      );
 
-    // 2. Today's attendance counts, grouped by route.
-    const attendanceByRoute = await this.prisma.attendance.groupBy({
-      by: ['routeId'],
-      where: { timestamp: { gte: todayStart } },
-      _count: { _all: true },
-    });
-    const attendanceMap = new Map(
-      attendanceByRoute.map((a) => [String(a.routeId), a._count._all]),
-    );
+      // 2. Today's attendance counts, grouped by route.
+      const attendanceByRoute = await this.prisma.attendance.groupBy({
+        by: ['routeId'],
+        where: { timestamp: { gte: todayStart } },
+        _count: { _all: true },
+      });
+      const attendanceMap = new Map(
+        attendanceByRoute.map((a) => [String(a.routeId), a._count._all]),
+      );
 
-    // 3. Student counts per route, grouped.
-    const studentsByRoute = await this.prisma.user.groupBy({
-      by: ['routeId'],
-      where: { role: 'passenger' },
-      _count: { _all: true },
-    });
-    const studentMap = new Map(
-      studentsByRoute.map((s) => [String(s.routeId), s._count._all]),
-    );
+      // 3. Student counts per route, grouped.
+      const studentsByRoute = await this.prisma.user.groupBy({
+        by: ['routeId'],
+        where: { role: 'passenger' },
+        _count: { _all: true },
+      });
+      const studentMap = new Map(
+        studentsByRoute.map((s) => [String(s.routeId), s._count._all]),
+      );
 
-    const suggestions: any[] = [];
+      const suggestions: any[] = [];
 
-    for (const route of routes) {
-      if (cancelledRouteIds.has(String(route.routeId))) continue;
+      for (const route of routes) {
+        if (cancelledRouteIds.has(String(route.routeId))) continue;
 
-      const attendanceCount = attendanceMap.get(String(route.routeId)) ?? 0;
-      const totalStudents = studentMap.get(String(route.routeId)) ?? 0;
+        const attendanceCount = attendanceMap.get(String(route.routeId)) ?? 0;
+        const totalStudents = studentMap.get(String(route.routeId)) ?? 0;
 
-      // Suggest a merge when very few students have marked attendance today
-      // but students are still assigned to this route.
-      if (totalStudents > 0 && attendanceCount < 5) {
-        const sameCityRoutes = routes.filter(
-          (r) =>
-            r.city === route.city &&
-            String(r.routeId) !== String(route.routeId) &&
-            !cancelledRouteIds.has(String(r.routeId)),
-        );
+        // Suggest a merge when very few students have marked attendance today
+        // but students are still assigned to this route.
+        if (totalStudents > 0 && attendanceCount < 5) {
+          const sameCityRoutes = routes.filter(
+            (r) =>
+              r.city === route.city &&
+              String(r.routeId) !== String(route.routeId) &&
+              !cancelledRouteIds.has(String(r.routeId)),
+          );
 
-        let bestTarget: any = null;
-        let maxAvailable = 0;
+          let bestTarget: any = null;
+          let maxAvailable = 0;
 
-        for (const target of sameCityRoutes) {
-          const targetAttendance =
-            attendanceMap.get(String(target.routeId)) ?? 0;
-          const available =
-            (target.seatingCapacity || 50) - targetAttendance;
-          if (available > maxAvailable) {
-            maxAvailable = available;
-            bestTarget = {
-              ...target,
-              currentAttendance: targetAttendance,
-            };
+          for (const target of sameCityRoutes) {
+            const targetAttendance =
+              attendanceMap.get(String(target.routeId)) ?? 0;
+            const available =
+              (target.seatingCapacity || 50) - targetAttendance;
+            if (available > maxAvailable) {
+              maxAvailable = available;
+              bestTarget = {
+                ...target,
+                currentAttendance: targetAttendance,
+              };
+            }
+          }
+
+          if (bestTarget) {
+            suggestions.push({
+              cancelledRoute: {
+                ...route,
+                currentAttendance: attendanceCount,
+                totalStudents,
+              },
+              targetRoute: bestTarget,
+              availableSeats: maxAvailable,
+              // Flat aliases so the UI does not have to reach into nested objects.
+              studentCount: totalStudents,
+              currentAttendance: attendanceCount,
+            });
           }
         }
-
-        if (bestTarget) {
-          suggestions.push({
-            cancelledRoute: {
-              ...route,
-              currentAttendance: attendanceCount,
-              totalStudents,
-            },
-            targetRoute: bestTarget,
-            availableSeats: maxAvailable,
-            // Flat aliases so the UI does not have to reach into nested objects.
-            studentCount: totalStudents,
-            currentAttendance: attendanceCount,
-          });
-        }
       }
-    }
 
-    return suggestions;
+      return suggestions;
+    });
   }
 
   /**

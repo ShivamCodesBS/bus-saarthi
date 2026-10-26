@@ -171,6 +171,69 @@ export function StatCardSkeleton({ className, ...props }) {
 }
 
 /**
+ * Profile page skeleton - matches the identity card + details layout
+ */
+export function ProfileSkeleton({ className, ...props }) {
+  return (
+    <div className={cn("space-y-4", className)} {...props}>
+      {/* Identity card skeleton */}
+      <div className="glass p-glass animate-slide-up" style={{ borderRadius: '18px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.9rem', textAlign: 'center' }}>
+        <SkeletonBase className="w-24 h-24 rounded-full" style={{ width: '96px', height: '96px', borderRadius: '50%' }} />
+        <div style={{ width: '80%' }}>
+          <SkeletonBase className="h-6 w-full" style={{ height: '24px', borderRadius: '4px' }} />
+          <SkeletonBase className="h-4 w-3/4 mt-2" style={{ height: '16px', width: '75%', borderRadius: '4px', marginTop: '8px' }} />
+        </div>
+        <SkeletonBase className="h-8 w-48 mt-2" style={{ height: '32px', width: '192px', borderRadius: '9999px', marginTop: '8px' }} />
+      </div>
+
+      {/* Details sections skeleton */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="glass" style={{ borderRadius: '18px', padding: '1.25rem' }}>
+            <SkeletonBase className="h-4 w-32 mb-4" style={{ height: '16px', width: '128px', borderRadius: '4px' }} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {[1, 2, 3].map((j) => (
+                <div key={j} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.7rem', padding: '0.6rem 0' }}>
+                  <SkeletonBase className="w-8 h-8 rounded" style={{ width: '32px', height: '32px', borderRadius: '9px' }} />
+                  <div style={{ minWidth: 0 }}>
+                    <SkeletonBase className="h-3 w-20" style={{ height: '12px', width: '80px', borderRadius: '4px' }} />
+                    <SkeletonBase className="h-5 w-40 mt-1" style={{ height: '20px', width: '160px', borderRadius: '4px', marginTop: '4px' }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Attendance grid skeleton (7-day grid)
+ */
+export function AttendanceGridSkeleton({ className, ...props }) {
+  return (
+    <div className={cn("space-y-4", className)} {...props}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem', marginBottom: '0.9rem' }}>
+        <SkeletonBase className="h-10 w-24" style={{ fontSize: '1.9rem', fontWeight: '800', width: '96px', height: '40px', borderRadius: '4px' }} />
+        <SkeletonBase className="h-5 w-40" style={{ fontSize: '0.82rem', width: '160px', height: '20px', borderRadius: '4px' }} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: '0.4rem' }}>
+        {[1, 2, 3, 4, 5, 6, 7].map((i) => (
+          <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem', minWidth: 0 }}>
+            <SkeletonBase className="h-3 w-full" style={{ fontSize: '0.68rem', width: '100%', height: '12px', borderRadius: '4px' }} />
+            <SkeletonBase className="w-8 h-8 rounded-xl" style={{ width: '32px', height: '32px', borderRadius: '12px', aspectRatio: '1', maxWidth: '38px' }} />
+            <SkeletonBase className="h-3 w-full" style={{ fontSize: '0.62rem', width: '100%', height: '12px', borderRadius: '4px' }} />
+          </div>
+        ))}
+      </div>
+      <SkeletonBase className="h-4 w-3/4 mt-4" style={{ fontSize: '0.76rem', width: '75%', height: '16px', borderRadius: '4px', marginTop: '16px' }} />
+    </div>
+  );
+}
+
+/**
  * Generic skeleton with customizable lines
  */
 export function GenericSkeleton({ lines = 3, className, ...props }) {

@@ -543,6 +543,7 @@ const AdminDashboard = () => {
 
   const {
     data: sosData,
+    isLoading: sosLoading,
     refetch: refetchSos,
     setToken: setSosToken,
   } = useStaleWhileRevalidate('/api/sos/active', {
@@ -565,8 +566,10 @@ const AdminDashboard = () => {
     }
   }, [user?.token, setRoutesToken, setGrievancesToken, setUsersToken, setAttendanceToken, setActiveMergesToken, setMergeSuggestionsToken, setMergeHistoryToken, setSosToken]);
 
-  // Combined loading state
-  const combinedLoading = routesLoading || grievancesLoading || usersLoading || attendanceLoading;
+  // Combined loading state - only true if NO cached data exists (initial load)
+  // If data exists but is stale, we show the cached data and fetch in background
+  const hasCachedData = routesData || grievancesData || usersData || attendanceData || activeMergesData || mergeSuggestionsData || mergeHistoryData || sosData;
+  const combinedLoading = !hasCachedData && (routesLoading || grievancesLoading || usersLoading || attendanceLoading || sosLoading);
 
   const handleLogout = () => {
     logout();
@@ -1711,17 +1714,6 @@ const AdminDashboard = () => {
                               <span style={{ backgroundColor: '#e6fae6', color: '#28a745', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 'bold' }}>Yes</span>
                             ) : (
                               <span style={{ backgroundColor: '#fff1f0', color: '#cf1322', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 'bold' }}>No</span>
-                            )}
-                          </td>
-                        )}
-                        {userFilter === 'passenger' && (
-                          <td style={{ padding: '1rem', textAlign: 'center' }}>
-                            {u.faceResetRequestedAt || u.face_reset_requested_at ? (
-                              <span style={{ backgroundColor: '#fff3cd', color: '#856404', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold', border: '1px solid #ffeeba' }}>
-                                🔄 Reset Requested
-                              </span>
-                            ) : (
-                              <span style={{ color: 'var(--text-light)', fontSize: '0.75rem' }}>—</span>
                             )}
                           </td>
                         )}
@@ -3022,9 +3014,6 @@ const AdminDashboard = () => {
               )}
               <div className="flex flex-col sm:flex-row gap-4 mt-4">
                 <button type="button" onClick={() => setShowUserModal(false)} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', background: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Cancel</button>
-                {editingUser && (editingUser.faceEnrolledAt || editingUser.face_enrolled_at || editingUser.aws_face_id || editingUser.awsFaceId) && (
-                  <button type="button" onClick={() => handleRemoveFace(editingUser.login_id || editingUser.loginId)} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '1px solid #cf1322', background: '#fff1f0', color: '#cf1322', cursor: 'pointer', fontWeight: 'bold' }}>Remove Face</button>
-                )}
                 {editingUser && (editingUser.faceResetRequestedAt || editingUser.face_reset_requested_at) && (
                   <button type="button" onClick={async () => {
                     const loginId = editingUser.login_id || editingUser.loginId;
