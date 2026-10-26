@@ -34,9 +34,15 @@ async function bootstrap() {
       if (!origin || allowedOrigins.has(origin)) {
         return callback(null, true);
       }
-      // Allow any *.vercel.app deployment for testing
-      if (origin.endsWith('.vercel.app')) {
-        return callback(null, true);
+      // Allow any *.vercel.app deployment for testing — matched on the
+      // hostname so "evil-vercel-app.com" cannot sneak through endsWith.
+      try {
+        const host = new URL(origin).hostname;
+        if (host.endsWith('.vercel.app')) {
+          return callback(null, true);
+        }
+      } catch {
+        /* unparseable origin — rejected below */
       }
       // Allow local network during dev
       if (
@@ -45,8 +51,9 @@ async function bootstrap() {
       ) {
         return callback(null, true);
       }
-      // Reject everything else
-      callback(new Error(`Origin ${origin} is not allowed by CORS`), false);
+      // Reject without throwing — throwing produced a bare 500 with no CORS
+      // headers, which browsers report as an opaque network error.
+      callback(null, false);
     },
     credentials: true,
   });
@@ -86,6 +93,10 @@ async function bootstrap() {
   const port = process.env.PORT || 5000;
   await app.listen(port, '0.0.0.0');
   console.log(`Worker ${process.pid} is listening on port ${port}`);
+
+  // SIGTERM (deploys, restarts) must close Prisma/Redis pools cleanly —
+  // without this every deploy logged pool-timeout noise on the way down.
+  app.enableShutdownHooks();
 }
 
 bootstrap();

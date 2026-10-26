@@ -39,6 +39,13 @@ export function useStaleWhileRevalidate(url, options = {}) {
   const abortControllerRef = useRef(null);
   const mountedRef = useRef(true);
 
+  // onData is usually an inline arrow, so its identity changes every render.
+  // Keeping it in a ref keeps fetchFresh (and therefore the initial-load
+  // effect below) stable — otherwise every re-render aborted and re-issued
+  // the in-flight request.
+  const onDataRef = useRef(onData);
+  useEffect(() => { onDataRef.current = onData; }, [onData]);
+
   // Set token from outside (auth context)
   const setToken = useCallback((token) => {
     tokenRef.current = token;
@@ -80,9 +87,9 @@ export function useStaleWhileRevalidate(url, options = {}) {
         setData(result);
         setIsStale(false);
         setError(null);
-        if (onData) onData(result);
+        if (onDataRef.current) onDataRef.current(result);
       }
-      
+
       return result;
     } catch (err) {
       if (err.name === 'AbortError' || err.name === 'CanceledError') {
@@ -93,7 +100,7 @@ export function useStaleWhileRevalidate(url, options = {}) {
       }
       throw err;
     }
-  }, [url, cacheKey, onData]);
+  }, [url, cacheKey]);
 
   const refetch = useCallback(async () => {
     // Cancel any in-flight request
@@ -118,7 +125,8 @@ export function useStaleWhileRevalidate(url, options = {}) {
   // Initial load - show cached data immediately, then fetch fresh
   useEffect(() => {
     mountedRef.current = true;
-    
+    let cancelled = false;
+
     // Check cache first
     const cached = dataCache.get(cacheKey);
     if (cached && !skip) {
@@ -126,7 +134,7 @@ export function useStaleWhileRevalidate(url, options = {}) {
       setData(cached.data);
       setIsStale(isExpired);
       setIsLoading(false);
-      
+
       // If stale, fetch fresh in background
       if (isExpired) {
         // Don't await - fire and forget for background refresh
@@ -136,8 +144,7 @@ export function useStaleWhileRevalidate(url, options = {}) {
     } else if (!skip) {
       // No cache - fetch immediately AND AWAIT IT
       abortControllerRef.current = new AbortController();
-      let cancelled = false;
-      
+
       const loadInitial = async () => {
         try {
           await fetchFresh(abortControllerRef.current.signal);
@@ -150,15 +157,12 @@ export function useStaleWhileRevalidate(url, options = {}) {
           }
         }
       };
-      
+
       loadInitial();
-      
-      return () => {
-        cancelled = true;
-      };
     }
-    
+
     return () => {
+      cancelled = true;
       mountedRef.current = false;
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();

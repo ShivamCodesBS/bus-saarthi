@@ -15,20 +15,12 @@ export class SosService {
   ) {}
 
   async trigger(loginId: string) {
-    // Cooldown logic (1 minute). Redis is used when available so the cooldown
-    // holds across every running instance of the backend; the in-process map
-    // is the fallback for single-instance deployments.
+    // Cooldown logic (1 minute). SET NX EX is atomic — the old get-then-set
+    // let two rapid triggers race past the check together.
     const cooldownKey = `sos:cooldown:${loginId}`;
-    const inCooldown = await this.cache.getRaw(cooldownKey);
-    if (inCooldown) {
-      throw new BadRequestException(
-        'SOS alert already triggered recently. Please wait.',
-      );
-    }
+    const acquired = await this.cache.setIfNotExists(cooldownKey, 60);
 
-    if (this.cache.isAvailable) {
-      await this.cache.setEx(cooldownKey, 60, 'true');
-    } else {
+    if (!this.cache.isAvailable) {
       const now = Date.now();
       const lastTrigger = this.inMemoryCooldown.get(loginId);
       if (lastTrigger && now - lastTrigger < 60000) {
@@ -37,6 +29,10 @@ export class SosService {
         );
       }
       this.inMemoryCooldown.set(loginId, now);
+    } else if (!acquired) {
+      throw new BadRequestException(
+        'SOS alert already triggered recently. Please wait.',
+      );
     }
 
     const user = await this.prisma.user.findUnique({ where: { loginId } });
@@ -91,8 +87,13 @@ export class SosService {
     this.inMemoryCooldown.delete(loginId);
 
     try {
+      // Only the user's still-active alerts (last 12h window) — the old
+      // unscoped deleteMany erased their entire SOS history.
       await this.prisma.sosAlert.deleteMany({
-        where: { loginId },
+        where: {
+          loginId,
+          time: { gte: new Date(Date.now() - 12 * 60 * 60 * 1000) },
+        },
       });
     } catch (e) {
       this.logger.warn(

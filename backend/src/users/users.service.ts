@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
-import { UserRole, FeeStatus } from '@prisma/client';
+import { Prisma, UserRole, FeeStatus } from '@prisma/client';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { CacheService } from '../cache/cache.service';
@@ -376,6 +376,8 @@ const updatedUser = await this.prisma.user.update({
       }
     }
 
+    // Otherwise CSV-imported users stay invisible in cached lists.
+    await this.cache.delByPattern('users:*');
     return { status: 'success', results };
   }
 
@@ -483,7 +485,10 @@ const updatedUser = await this.prisma.user.update({
     return this.cache.remember('wake:alarms:active', 30, async () => {
       const allUsers = await this.prisma.user.findMany({
         select: { loginId: true, wakeAlarm: true, routeId: true },
-        where: { wakeAlarm: { not: undefined } },
+        // `{ not: undefined }` used to be passed here — Prisma strips it, so
+        // the query matched every user. Only rows that actually carry an
+        // alarm JSON can be active alarms.
+        where: { NOT: { wakeAlarm: { equals: Prisma.AnyNull } } },
       });
 
       return allUsers.filter((u) => {
@@ -531,6 +536,41 @@ const updatedUser = await this.prisma.user.update({
 
     await this.cache.delByPattern('users:*');
     return { status: 'success', message: 'Face reset request submitted' };
+  }
+
+  /**
+   * Staff view of pending face-reset requests. The Settings page sets
+   * `faceResetRequestedAt`; this is what the admin/transport-incharge panels
+   * show so they can approve with the requester's details at hand.
+   */
+  async findPendingFaceResetRequests() {
+    const users = await this.prisma.user.findMany({
+      where: { faceResetRequestedAt: { not: null } },
+      select: {
+        loginId: true,
+        name: true,
+        role: true,
+        phone: true,
+        feeStatus: true,
+        routeId: true,
+        route: { select: { routeName: true, busNumber: true } },
+        faceEnrolledAt: true,
+        faceResetRequestedAt: true,
+      },
+      orderBy: { faceResetRequestedAt: 'asc' },
+    });
+    return users.map((u) => ({
+      login_id: u.loginId,
+      name: u.name,
+      role: u.role,
+      phone: u.phone,
+      fee_status: u.feeStatus,
+      route_id: u.routeId,
+      route_name: u.route?.routeName || null,
+      bus_number: u.route?.busNumber || null,
+      face_enrolled_at: u.faceEnrolledAt,
+      requested_at: u.faceResetRequestedAt,
+    }));
   }
 
   /**

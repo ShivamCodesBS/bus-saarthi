@@ -10,6 +10,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { CacheService } from '../cache/cache.service';
 import { isStaff } from '../common/roles';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Cron, CronExpression } from '@nestjs/schedule';
 
 /** How long a complainant has to confirm (or reject) a resolution. */
 export const RESOLUTION_WINDOW_HOURS = 48;
@@ -52,12 +53,8 @@ export class GrievancesService {
       select: { routeId: true, name: true, role: true },
     });
 
-    // The route comes from the user's assignment, not from the client. If the
-    // client sends a route, it must match the user's own assignment.
-    let effectiveRoute = user?.routeId ?? null;
-    if (routeId && effectiveRoute && String(routeId) !== String(effectiveRoute)) {
-      effectiveRoute = effectiveRoute;
-    }
+    // The route comes from the user's assignment, not from the client.
+    const effectiveRoute = user?.routeId ?? null;
     if (!effectiveRoute) {
       throw new BadRequestException(
         'You are not allocated to a bus route yet, so a grievance cannot be filed against a route.',
@@ -89,8 +86,10 @@ export class GrievancesService {
     // Emit real-time event for connected clients on the same route and staff
     this.eventEmitter.emit('grievance.created', grievance);
 
-    // Notify staff that a new grievance is waiting.
-    await this.notifyStaffOfNewGrievance(grievance, resolvedName, route?.routeName);
+    // Notify staff without blocking the submitter's request — the fan-out
+    // (DB lookup + insert + push per staff member) used to run inline and
+    // made filing a complaint feel slow.
+    void this.notifyStaffOfNewGrievance(grievance, resolvedName, route?.routeName);
 
     return {
       status: 'success',
@@ -173,6 +172,9 @@ export class GrievancesService {
       where,
       orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
       include: { user: { select: { name: true, role: true } } },
+      // Bound the query — the table grows forever and the full scan was
+      // re-run by every cache miss.
+      take: 200,
     });
 
     // A closed complaint must never outrank a live one, however high its
@@ -210,18 +212,21 @@ export class GrievancesService {
       linkedChildIds = new Set(links.map((l) => l.childLoginId));
     }
 
-    // Non-staff must never receive the reporter's identity unless it's their own or their child's.
+    // Non-staff must never receive identity data beyond what the reporter
+    // consented to: anonymous reporters appear as "Anonymous Passenger",
+    // while a reporter who opted to show their name does show it.
     const visible = grievances.map((g) => {
       const { user, ...rest } = g;
       const isMyChild = linkedChildIds.has(g.loginId);
       const mine = g.loginId === loginId || isMyChild;
+      const canSeeName = staff || mine || !g.isAnonymous;
       return {
         ...rest,
-        realName: staff || mine ? g.realName : null,
+        realName: canSeeName ? g.realName : null,
         isAnonymous: staff || mine ? g.isAnonymous : false,
         authorDisplay: staff || mine
           ? (isMyChild ? `${g.realName} (Your Child)` : (g.realName || 'Passenger'))
-          : 'Anonymous Passenger',
+          : (g.isAnonymous ? 'Anonymous Passenger' : (g.realName || 'Passenger')),
         isMine: mine,
         isChild: isMyChild,
         hasUpvotedLocally: upvotedIds.has(g.id),
@@ -268,11 +273,14 @@ export class GrievancesService {
     }
 
     const { user, ...rest } = grievance;
+    const canSeeName = staff || mine || !grievance.isAnonymous;
     return {
       ...rest,
-      realName: staff || mine ? grievance.realName : null,
+      realName: canSeeName ? grievance.realName : null,
       isAnonymous: staff || mine ? grievance.isAnonymous : false,
-      authorDisplay: staff || mine ? grievance.realName : 'Anonymous Passenger',
+      authorDisplay: staff || mine
+        ? grievance.realName
+        : (grievance.isAnonymous ? 'Anonymous Passenger' : (grievance.realName || 'Passenger')),
       isMine: mine,
     };
   }
@@ -452,7 +460,7 @@ export class GrievancesService {
 
     await this.cache.delByPattern('grievances:*');
     this.eventEmitter.emit('grievance.updated', updated);
-    await this.notifyStaff(
+    void this.notifyStaff(
       grievance.loginId,
       updated.id,
       {
@@ -513,7 +521,7 @@ export class GrievancesService {
 
     await this.cache.delByPattern('grievances:*');
     this.eventEmitter.emit('grievance.updated', updated);
-    await this.notifyStaff(
+    void this.notifyStaff(
       grievance.loginId,
       updated.id,
       {
@@ -552,6 +560,7 @@ export class GrievancesService {
     });
 
     await this.cache.delByPattern('grievances:*');
+    this.eventEmitter.emit('grievance.updated', updated);
     await this.notifyComplainant(updated, {
       title: '⏳ More time granted on your complaint',
       body: `The transport team needs ${hours} more hour(s) to resolve your complaint.`,
@@ -585,6 +594,11 @@ export class GrievancesService {
     }
   }
 
+  /**
+   * Fan out a notification to every staff member. Notifications are
+   * delivered concurrently (one insert + push per staff member used to run
+   * strictly sequentially, which stalled every mutation).
+   */
   private async notifyStaff(
     complainantLoginId: string,
     grievanceId: string,
@@ -599,9 +613,13 @@ export class GrievancesService {
         },
         select: { loginId: true },
       });
-      for (const s of staff) {
-        await this.notificationsService.notifyUser(s.loginId, grievanceId, payload);
-      }
+      await Promise.all(
+        staff.map((s) =>
+          this.notificationsService
+            .notifyUser(s.loginId, grievanceId, payload)
+            .catch(() => {}),
+        ),
+      );
     } catch {
       /* ignore */
     }
@@ -621,15 +639,60 @@ export class GrievancesService {
         },
         select: { loginId: true },
       });
-      for (const s of staff) {
-        await this.notificationsService.notifyUser(s.loginId, grievance.id, {
-          title: '📣 New grievance raised',
-          body: `A new complaint was filed for ${routeName ?? `Route ${grievance.route}`}.`,
-          type: 'grievance_new',
-        });
-      }
+      await Promise.all(
+        staff.map((s) =>
+          this.notificationsService
+            .notifyUser(s.loginId, grievance.id, {
+              title: '📣 New grievance raised',
+              body: `A new complaint was filed for ${routeName ?? `Route ${grievance.route}`}.`,
+              type: 'grievance_new',
+            })
+            .catch(() => {}),
+        ),
+      );
     } catch {
       /* ignore */
+    }
+  }
+
+  /**
+   * Every hour, follow up on resolutions whose confirmation window has
+   * lapsed. Complaints only ever close when the complainant confirms, so
+   * this nudge reminds them the fix is waiting — and tells staff the window
+   * lapsed. `dueAt` is cleared so the nudge fires exactly once.
+   */
+  @Cron(CronExpression.EVERY_HOUR)
+  async escalateLapsedResolutions() {
+    try {
+      const lapsed = await this.prisma.grievance.findMany({
+        where: {
+          status: GrievanceStatus.resolved,
+          dueAt: { not: null, lt: new Date() },
+        },
+        take: 50,
+      });
+
+      for (const g of lapsed) {
+        await this.prisma.grievance.update({
+          where: { id: g.id },
+          data: { dueAt: null, priority: g.priority + 1 },
+        });
+        await this.cache.delByPattern('grievances:*');
+
+        void this.notifyComplainant(g, {
+          title: '⏰ Still there? Your complaint awaits confirmation',
+          body: 'The transport team marked this complaint as fixed. Please confirm it is resolved, or tell us what is still wrong.',
+          type: 'grievance_confirmation_reminder',
+        });
+        void this.notifyStaff(g.loginId, g.id, {
+          title: '⌛ Confirmation window lapsed',
+          body: `A complaint from ${g.realName || g.loginId} (Route ${g.route}) was marked fixed but has not been confirmed yet.`,
+          type: 'grievance_window_lapsed',
+        });
+        this.eventEmitter.emit('grievance.updated', { ...g, dueAt: null });
+      }
+    } catch (err) {
+      // Cron must never crash the process.
     }
   }
 }

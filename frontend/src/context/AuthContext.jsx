@@ -106,7 +106,12 @@ export const AuthProvider = ({ children }) => {
   // Listen for real-time profile updates across devices
   useEffect(() => {
     if (!user) return;
-    const socket = io(BACKEND_URL, { transports: ['websocket', 'polling'] });
+    // The auth token lets the gateway auto-join `user_<login_id>` — that
+    // room is what carries profile_update / personal notifications.
+    const socket = io(BACKEND_URL, {
+      transports: ['websocket', 'polling'],
+      auth: { token: user.token },
+    });
     
     socket.on('connect_error', (err) => {
       console.warn('Socket connection error (Auth):', err.message);
@@ -146,6 +151,22 @@ export const AuthProvider = ({ children }) => {
   };
 
   /**
+   * Merge partial profile changes (name, phone, profile_pic, …) into the
+   * signed-in user without a re-login. Used when the user edits their own
+   * account — the header, menus, and every page reading the auth context
+   * would otherwise show the old values until the next full login.
+   */
+  const updateUser = (partial) => {
+    if (!partial) return;
+    setUser((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, ...partial };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
+
+  /**
    * Sign out. The other tabs are told by the `storage` event, so a session
    * cannot survive in a tab that is still open.
    */
@@ -155,7 +176,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, loading }}>
+    <AuthContext.Provider value={{ user, login, logout, updateUser, loading }}>
       {!loading && children}
     </AuthContext.Provider>
   );

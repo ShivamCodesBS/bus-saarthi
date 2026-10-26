@@ -58,7 +58,8 @@ const STOP_COORDS = {
   'Faridpur': [28.2100, 79.5400],
 };
 
-// Map auto-invalidate on resize
+// Map setup: invalidate size on resize/container changes and hand the map
+// instance back to the parent exactly once.
 const MapResizer = ({ onMapReady }) => {
   const map = useMap();
   useEffect(() => {
@@ -68,10 +69,10 @@ const MapResizer = ({ onMapReady }) => {
     const container = map.getContainer();
     if (container) ro.observe(container);
     if (onMapReady) onMapReady(map);
-    return () => { 
-      clearTimeout(t1); 
-      clearTimeout(t2); 
-      if (container) ro.unobserve(container); 
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      if (container) ro.unobserve(container);
     };
   }, [map, onMapReady]);
   return null;
@@ -233,14 +234,16 @@ const UnifiedMap = ({
   // Auto-follow logic with smooth animation
   useEffect(() => {
     if (autoFollowRef.current && mapInstance.current && busLocation) {
+      // Never yank the map while the user is actively panning/zooming.
+      if (isUserInteractingRef.current) return;
       const map = mapInstance.current;
       const currentCenter = map.getCenter();
       const distance = currentCenter.distanceTo(L.latLng(busLocation));
-      
+
       // Only animate if bus moved significantly (>50 meters)
       if (distance > 50) {
-        map.setView(busLocation, map.getZoom(), { 
-          animate: true, 
+        map.setView(busLocation, map.getZoom(), {
+          animate: true,
           duration: 1.5,
           easeLinearity: 0.25
         });
@@ -299,6 +302,15 @@ const UnifiedMap = ({
       mapInstance.current.setView(busLocation, 16, { animate: true, duration: 1.5 });
     }
   }, [busLocation]);
+
+  // Stable one-time map setup. `whenCreated` no longer exists in
+  // react-leaflet v4+, so the instance arrives through MapResizer instead.
+  // The interaction listeners stop the auto-follow from yanking the map
+  // back while the user pans/zooms.
+  const handleMapReady = useCallback((map) => {
+    mapInstance.current = map;
+    handleMapInteraction(map);
+  }, [handleMapInteraction]);
   
   const handleAutoFollowChange = useCallback((enabled) => {
     setAutoFollow(enabled);
@@ -364,7 +376,7 @@ const UnifiedMap = ({
   
   const renderMapContent = () => (
     <>
-      <MapResizer onMapReady={(map) => { mapInstance.current = map; }} />
+      <MapResizer onMapReady={handleMapReady} />
       
       {/* Tile Layer - Google Maps */}
       <TileLayer
@@ -855,18 +867,14 @@ const UnifiedMap = ({
         borderRadius: isFullscreen ? '0' : '16px',
         overflow: 'hidden'
       }}>
-        <MapContainer 
-          center={isFullscreen ? busLocation : mapCenter} 
-          zoom={isFullscreen ? 15 : mapZoom} 
-          style={{ height: '100%', width: '100%' }} 
+        <MapContainer
+          center={isFullscreen ? busLocation : mapCenter}
+          zoom={isFullscreen ? 15 : mapZoom}
+          style={{ height: '100%', width: '100%' }}
           zoomControl={true}
           scrollWheelZoom={true}
           dragging={true}
           attributionControl={true}
-          whenCreated={(map) => { 
-            mapInstance.current = map;
-            handleMapInteraction(map);
-          }}
           onClick={handleMapClick}
         >
           {renderMapContent()}
@@ -877,7 +885,7 @@ const UnifiedMap = ({
       </div>
       
       {/* Animation keyframes for pulse */}
-      <style jsx global>{`
+      <style>{`
         @keyframes pulse {
           0%, 100% { opacity: 1; transform: scale(1); }
           50% { opacity: 0.5; transform: scale(1.2); }

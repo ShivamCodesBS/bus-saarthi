@@ -149,6 +149,17 @@ export class UsersController {
   }
 
   /**
+   * Pending face-reset requests for the admin / transport-incharge panels.
+   * Declared before `:loginId` so "face-reset-requests" is not parsed as one.
+   */
+  @Get('face-reset-requests')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
+  listFaceResetRequests() {
+    return this.usersService.findPendingFaceResetRequests();
+  }
+
+  /**
    * Admin approves a face reset request.
    * Clears the request flag and the existing face enrollment.
    */

@@ -10,13 +10,16 @@ import '../index.css';
 import HamburgerMenu from '../components/HamburgerMenu';
 import Papa from 'papaparse';
 import { sanitizePayload, normalizeFeeStatus, USER_PAYLOAD_KEYS, formatSosTime } from '../lib/utils';
+import { friendlyError } from '../lib/errors';
 import UserAvatar from '../components/UserAvatar';
 import BusPicker from '../components/BusPicker';
 import MediaViewer from '../components/MediaViewer';
 import NotificationBell from '../components/NotificationBell';
+import FaceResetRequests from '../components/FaceResetRequests';
 import WebRTCPlayer from '../components/WebRTCPlayer';
 import { ComplaintSkeleton, RouteSkeleton, UserRowSkeleton, StatCardSkeleton } from '../components/ui/skeleton';
 import { useStaleWhileRevalidate } from '../hooks/useStaleWhileRevalidate';
+import { useModalA11y } from '../hooks/useModalA11y';
 import UnifiedMap from '../components/UnifiedMap';
 
 // Grievance lifecycle states, mirroring the backend enum.
@@ -56,7 +59,7 @@ const formatTime = (createdAtStr) => {
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
-  const { logout, user } = useAuth();
+  const { logout, user, updateUser } = useAuth();
 
   // State for Navigation
   const [activeTab, setActiveTab] = useState('overview');
@@ -210,15 +213,6 @@ const AdminDashboard = () => {
     return Array.from(seenPassengers.values());
   }, [attendanceLogs, liveAttendance, usersList]);
 
-  // Flag unread notifications in an effect rather than during render.
-  useEffect(() => {
-    if (showNotifications) return;
-    const hasNew = notifications.some((n) => !seenIds.includes(n.id));
-    if (hasNew) {
-      setTimeout(() => setHasUnread(true), 0);
-    }
-  }, [notifications, seenIds, showNotifications]);
-
   useEffect(() => {
     if (!user?.token) {
       console.warn('No token available, skipping WebSocket connection');
@@ -334,6 +328,18 @@ const AdminDashboard = () => {
       if (mergeEvent) {
         setActiveMerges(prev => prev.filter(m => m.id !== mergeEvent.id));
       }
+    });
+
+    // A plain cancellation (no replacement bus) arrives with status
+    // 'cancelled' — it belongs in the same Active Merges list.
+    socket.on('bus_cancelled', (data) => {
+      const mergeEvent = data.mergeEvent || data.merge;
+      if (!mergeEvent) return;
+      toast.error(`Bus Cancelled: ${mergeEvent.cancelledRouteName || 'Route'} has no replacement bus today`, { id: 'admin_bus_cancelled' });
+      setActiveMerges(prev => {
+        if (prev.some(m => m.id === mergeEvent.id)) return prev;
+        return [mergeEvent, ...prev];
+      });
     });
 
     setSocketInstance(socket);
@@ -614,6 +620,9 @@ const AdminDashboard = () => {
       target_route_id: String(targetId),
       reason: 'low_attendance',
       notes: 'Auto-suggested merge due to low attendance',
+      // The form may have been left in cancel mode — a quick merge must
+      // never execute as a cancellation.
+      mode: 'merge',
     });
     setActiveTab('merge');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -749,6 +758,20 @@ const AdminDashboard = () => {
         if (!payload.password) delete payload.password;
         await axios.put(`${BACKEND_URL}/api/users/${editingUser.login_id || editingUser.loginId}`, payload, authHeaders);
         toast.success("User updated successfully!");
+        // Editing your own account: refresh the auth context immediately so
+        // the header, menus, and profile pages show the new values (the
+        // socket broadcast is the backup path for other devices).
+        const selfLoginId = user?.login_id || user?.loginId;
+        if (selfLoginId && (editingUser.login_id || editingUser.loginId) === selfLoginId) {
+          updateUser({
+            name: payload.name ?? user.name,
+            phone: payload.phone ?? user.phone,
+            email: payload.email ?? user.email,
+            bloodGroup: payload.bloodGroup ?? user.bloodGroup,
+            address: payload.address ?? user.address,
+            dob: payload.dob ?? user.dob,
+          });
+        }
       } else {
         await axios.post(`${BACKEND_URL}/api/users`, payload, authHeaders);
         toast.success("User created successfully!");
@@ -965,7 +988,7 @@ const AdminDashboard = () => {
         title: 'Admin Notice',
         message: broadcastMessage,
         sender: user?.name || 'Admin'
-      });
+      }, { headers: { Authorization: `Bearer ${user?.token}` } });
       toast.success('Global Broadcast sent to all passengers!');
       setBroadcastMessage('');
     } catch (err) {
@@ -974,6 +997,15 @@ const AdminDashboard = () => {
       setIsBroadcasting(false);
     }
   };
+
+  // Modal accessibility: the background stops scrolling, the Lenis
+  // smooth-scroller pauses, and Escape closes the open popup.
+  useModalA11y(showUserModal, () => setShowUserModal(false));
+  useModalA11y(showBulkUploadModal, () => { setShowBulkUploadModal(false); setBulkUploadData([]); setBulkUploadErrors([]); });
+  useModalA11y(showRouteModal, () => setShowRouteModal(false));
+  useModalA11y(showRouteComplaintsModal, () => setShowRouteComplaintsModal(false));
+  useModalA11y(!!viewingUser, () => setViewingUser(null));
+  useModalA11y(!!viewingRouteDetails, () => setViewingRouteDetails(null));
 
   return (
     <div className="min-h-screen flex flex-col relative">
@@ -1462,6 +1494,9 @@ const AdminDashboard = () => {
                 </button>
               </div>
             </div>
+
+            {/* Face reset requests raised from user Settings pages */}
+            <FaceResetRequests user={user} onChanged={refetchUsers} />
 
             {/* Sub-Tabs for filtering Passengers, Drivers, Admins, Transport Incharges */}
             <div className="flex flex-wrap gap-3 mb-6">
@@ -2197,10 +2232,11 @@ const AdminDashboard = () => {
                   <button
                     type="submit"
                     disabled={isMerging || !mergeFormData.cancelled_route_id || (mergeFormData.mode === 'merge' && !mergeFormData.target_route_id)}
-                    className="mt-2 w-full py-3 px-4 disabled:opacity-50 text-white rounded-xl font-bold transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 cursor-pointer border-none
-                      {mergeFormData.mode === 'merge'
+                    className={`mt-2 w-full py-3 px-4 disabled:opacity-50 text-white rounded-xl font-bold transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 cursor-pointer border-none ${
+                      mergeFormData.mode === 'merge'
                         ? 'bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700'
-                        : 'bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700'}"
+                        : 'bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700'
+                    }`}
                   >
                     {mergeFormData.mode === 'merge' ? <GitMerge size={18} /> : <Trash2 size={18} />}
                     {isMerging ? 'Executing...' : (mergeFormData.mode === 'merge' ? 'Execute Bus Merge & Notify Passengers' : 'Cancel Bus & Notify Passengers')}
@@ -2345,7 +2381,7 @@ const AdminDashboard = () => {
               <button onClick={() => setShowRouteComplaintsModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={24} color="var(--text-dark)" /></button>
             </div>
 
-            <div style={{ padding: '1.5rem', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div data-lenis-prevent="true" style={{ padding: '1.5rem', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               {grievances.filter(g => String(g.route) === String(selectedRoute) && g.status === 'pending').length === 0 ? (
                 <p style={{ textAlign: 'center', color: 'var(--text-light)', marginTop: '2rem' }}>No pending complaints for this route! ðŸŽ‰</p>
               ) : (
@@ -2397,7 +2433,7 @@ const AdminDashboard = () => {
 
       {/* View Route Details Modal (Eye Button) */}
       {viewingRouteDetails && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
           <div className="animate-slide-up glass p-glass" data-lenis-prevent="true" style={{ width: '100%', maxWidth: '600px', borderRadius: '20px', backgroundColor: 'var(--card-bg)', maxHeight: '90vh', overflowY: 'auto' }}>
             <div className="flex justify-between items-center mb-6 border-b border-slate-200 dark:border-slate-700 pb-4">
               <h2 className="text-xl sm:text-2xl font-bold text-slate-800 dark:text-slate-100 m-0">Vehicle & Route Details</h2>
@@ -2461,8 +2497,8 @@ const AdminDashboard = () => {
 
       {/* View User Details Modal (Eye Button) */}
       {viewingUser && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="animate-slide-up glass p-glass" style={{ width: '100%', maxWidth: '600px', borderRadius: '20px', backgroundColor: 'var(--card-bg)', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+          <div className="animate-slide-up glass p-glass" data-lenis-prevent="true" style={{ width: '100%', maxWidth: '600px', borderRadius: '20px', backgroundColor: 'var(--card-bg)', maxHeight: '90vh', overflowY: 'auto' }}>
             <div className="flex justify-between items-center mb-6 border-b border-slate-200 dark:border-slate-700 pb-4">
               <h2 className="text-xl sm:text-2xl font-bold text-slate-800 dark:text-slate-100 m-0">User Profile</h2>
               <button onClick={() => setViewingUser(null)} className="text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 bg-transparent border-none cursor-pointer"><X size={24} /></button>
@@ -2636,7 +2672,7 @@ const AdminDashboard = () => {
 
       {/* Bulk Upload Modal */}
       {showBulkUploadModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
           <div className="animate-slide-up glass p-glass" data-lenis-prevent="true" style={{ width: '100%', maxWidth: '800px', borderRadius: '20px', backgroundColor: 'var(--card-bg)', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl sm:text-2xl font-bold text-slate-800 dark:text-slate-100 m-0 flex items-center gap-2">
@@ -2713,7 +2749,7 @@ const AdminDashboard = () => {
 
       {/* Add/Edit User Modal */}
       {showUserModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
           <div className="animate-slide-up glass p-glass" data-lenis-prevent="true" style={{ width: '100%', maxWidth: '500px', maxHeight: '90vh', overflowY: 'auto', borderRadius: '20px', backgroundColor: 'var(--card-bg)' }}>
             <h2 style={{ marginBottom: '1.5rem', color: 'var(--text-dark)' }}>{editingUser ? 'Edit User' : 'Add New User'}</h2>
             <form onSubmit={handleSaveUser} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -2727,12 +2763,23 @@ const AdminDashboard = () => {
               </div>
               <div>
                 <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Password {editingUser && '(Leave blank to keep current)'}</label>
-                <input required={!editingUser} type="text" value={userFormData.password} onChange={e => setUserFormData({ ...userFormData, password: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
+                <input required={!editingUser} type="password" autoComplete="new-password" value={userFormData.password} onChange={e => setUserFormData({ ...userFormData, password: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
               </div>
               <div className="flex flex-col sm:flex-row gap-4">
                 <div style={{ flex: 1 }}>
                   <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Role</label>
-                  <select value={userFormData.role} onChange={e => setUserFormData({ ...userFormData, role: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }}>
+                  <select value={userFormData.role} onChange={e => {
+                    const role = e.target.value;
+                    setUserFormData(prev => ({
+                      ...prev,
+                      role,
+                      // Only passengers and drivers belong to a route —
+                      // dropping the role used to silently keep the stale
+                      // route assignment in the payload.
+                      route_id: (role === 'passenger' || role === 'driver') ? prev.route_id : '',
+                      fee_status: role === 'passenger' ? prev.fee_status : 'paid',
+                    }));
+                  }} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }}>
                     <option value="passenger">Student / Passenger</option>
                     <option value="teacher">Teacher / Staff</option>
                     <option value="parent">Parent</option>
@@ -2741,15 +2788,18 @@ const AdminDashboard = () => {
                     <option value="admin">Admin</option>
                   </select>
                 </div>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Route</label>
-                  <select value={userFormData.route_id} onChange={e => setUserFormData({ ...userFormData, route_id: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: 'var(--card-bg)' }}>
-                    {routesList.map(r => (
-                      <option key={r.routeId || r.route_id} value={r.routeId || r.route_id}>Route {r.routeId || r.route_id} - {r.routeName || r.route_name} (Bus: {r.busNumber || r.bus_number})</option>
-                    ))}
-                    {routesList.length === 0 && <option value="">No Routes Found</option>}
-                  </select>
-                </div>
+                {(userFormData.role === 'passenger' || userFormData.role === 'driver') && (
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Route {userFormData.role === 'passenger' ? '' : '(Optional)'}</label>
+                    <select value={userFormData.route_id} onChange={e => setUserFormData({ ...userFormData, route_id: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: 'var(--card-bg)' }}>
+                      {userFormData.role === 'driver' && <option value="">Not Assigned</option>}
+                      {routesList.map(r => (
+                        <option key={r.routeId || r.route_id} value={r.routeId || r.route_id}>Route {r.routeId || r.route_id} - {r.routeName || r.route_name} (Bus: {r.busNumber || r.bus_number})</option>
+                      ))}
+                      {routesList.length === 0 && <option value="">No Routes Found</option>}
+                    </select>
+                  </div>
+                )}
               </div>
               {userFormData.role === 'teacher' && (
                 <div>
@@ -2891,7 +2941,7 @@ const AdminDashboard = () => {
 
       {/* Add/Edit Route Modal */}
       {showRouteModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
           <div className="animate-slide-up glass p-glass" data-lenis-prevent="true" style={{ width: '100%', maxWidth: '500px', maxHeight: '90vh', overflowY: 'auto', borderRadius: '20px', backgroundColor: 'var(--card-bg)' }}>
             <h2 style={{ marginBottom: '1.5rem', color: 'var(--text-dark)' }}>{editingRoute ? 'Edit Route' : 'Add New Route'}</h2>
             <form onSubmit={handleSaveRoute} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>

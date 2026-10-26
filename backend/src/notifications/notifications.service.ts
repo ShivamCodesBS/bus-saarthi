@@ -67,8 +67,9 @@ export class NotificationsService {
     grievanceId: string | null,
     payload: { title: string; body: string; type: string },
   ) {
+    let created: { id: string; createdAt: Date } | null = null;
     try {
-      await this.prisma.notification.create({
+      created = await this.prisma.notification.create({
         data: {
           loginId,
           title: payload.title,
@@ -76,25 +77,31 @@ export class NotificationsService {
           type: payload.type,
           grievanceId: grievanceId ?? null,
         },
+        select: { id: true, createdAt: true },
       });
     } catch (err: any) {
       this.logger.warn(`Failed to store notification: ${err?.message}`);
     }
 
-    // Real-time delivery to an open browser tab.
+    // Real-time delivery to the user's open tabs. The payload carries the
+    // row's id/created_at so the client can render and mark it read.
     this.eventEmitter.emit('notification.created', {
       login_id: loginId,
+      id: created?.id,
+      created_at: created?.createdAt,
       ...payload,
     });
 
-    await this.sendPushNotification(loginId, {
+    // Push is fire-and-forget — a slow/broken push provider must not stall
+    // whatever the user is waiting on.
+    void this.sendPushNotification(loginId, {
       title: payload.title,
       body: payload.body,
       icon: '/icons/bus-192x192.png',
       badge: '/icons/bus-72x72.png',
       tag: payload.type,
       data: { grievanceId, type: payload.type },
-    });
+    }).catch(() => {});
 
     return { status: 'success' };
   }

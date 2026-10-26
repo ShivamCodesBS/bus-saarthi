@@ -150,7 +150,10 @@ export class MergeService {
     });
 
     // ── Step 6: Send push notifications ───────────────────
-    await this.sendMergeNotifications(
+    // Fire-and-forget: this fans out one push per student and per parent,
+    // which took tens of seconds for a full route and blew the request
+    // timeout while the merge itself had already succeeded.
+    void this.sendMergeNotifications(
       dto.cancelled_route_id,
       dto.target_route_id,
       cancelledRoute,
@@ -182,10 +185,16 @@ export class MergeService {
   private async invalidateMergeCaches() {
     await this.cache.delByPattern('merges:*');
     await this.cache.del('attendance:today:all');
+    // A merge moves boardings between routes — per-route attendance and
+    // crowd-status caches must not keep serving the pre-merge picture.
+    await this.cache.delByPattern('attendance:today:route:*');
+    await this.cache.delByPattern('route_status:*');
   }
 
   /**
    * Undo/reverse a merge — restores everything back to original.
+   * Also undoes a plain cancellation (status 'cancelled') so the
+   * "Undo Cancellation" button in the dashboard actually works.
    */
   async undoMerge(mergeId: string, undoneBy: string) {
     const merge = await this.prisma.mergeEvent.findUnique({
@@ -195,7 +204,7 @@ export class MergeService {
     if (!merge) {
       throw new NotFoundException('Merge event not found');
     }
-    if (merge.status !== 'active') {
+    if (merge.status !== 'active' && merge.status !== 'cancelled') {
       throw new BadRequestException(
         `Cannot undo merge with status "${merge.status}"`,
       );
@@ -251,15 +260,23 @@ export class MergeService {
   }
 
   /**
-   * Get all active merges for today.
-   * Cached for 10 seconds since this is polled by the dashboard.
+   * Get all active merges AND cancellations for today.
+   *
+   * Cancellations are stored with status 'cancelled', so filtering by
+   * 'active' alone hid them from the staff "Active Merges Today" list while
+   * students still saw the cancellation through checkRoute — the two sides
+   * of the story disagreed. They must always match.
    */
   async getActiveMerges() {
+    // Self-heal: if the midnight cron missed (e.g. the instance was asleep
+    // on a free tier), flip yesterday's events to 'expired' before reading.
+    await this.expireActiveMerges();
+
     return this.cache.remember('merges:active', 10, async () => {
       const todayStart = getISTMidnightUTC();
       return this.prisma.mergeEvent.findMany({
         where: {
-          status: 'active',
+          status: { in: ['active', 'cancelled'] },
           createdAt: { gte: todayStart },
         },
         orderBy: { createdAt: 'desc' },
@@ -500,21 +517,23 @@ export class MergeService {
   }
 
   /**
-   * Expire all active merges (called by midnight cron job).
+   * Expire all of today's finished merge events (called by the midnight cron
+   * and lazily from getActiveMerges). Cancellations expire too — they used to
+   * stay 'cancelled' forever.
    */
   async expireActiveMerges() {
     const result = await this.prisma.mergeEvent.updateMany({
       where: {
-        status: 'active',
+        status: { in: ['active', 'cancelled'] },
         expiresAt: { lte: new Date() },
       },
       data: { status: 'expired' },
     });
 
     if (result.count > 0) {
-      this.logger.log(
-        `Auto-expired ${result.count} merge events at midnight`,
-      );
+      // Any list that might hold the now-stale events must refresh.
+      await this.cache.delByPattern('merges:*');
+      this.logger.log(`Auto-expired ${result.count} merge events`);
     }
 
     return result.count;
@@ -574,8 +593,9 @@ export class MergeService {
       `Bus cancelled: ${cancelledRoute.routeName} (${cancelledRoute.busNumber}) | 0 students moved (cancelled only) | by ${initiatedBy}`,
     );
 
-    // Notify students on cancelled route
-    await this.sendBusCancelNotifications(dto.cancelled_route_id, cancelledRoute);
+    // Notify students on cancelled route (fire-and-forget — same reason as
+    // the merge fan-out above).
+    void this.sendBusCancelNotifications(dto.cancelled_route_id, cancelledRoute);
 
     // Auto-broadcast
     const reasonText = (dto.reason || 'bus_cancelled').replace(/_/g, ' ');

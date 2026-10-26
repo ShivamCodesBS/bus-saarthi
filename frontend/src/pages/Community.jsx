@@ -30,6 +30,7 @@ import axios from 'axios';
 import { io } from 'socket.io-client';
 import { BACKEND_URL, SOCKET_URL } from '../config';
 import { friendlyError, reportError } from '../lib/errors';
+import { useModalA11y } from '../hooks/useModalA11y';
 import BusPicker from '../components/BusPicker';
 import MediaViewer from '../components/MediaViewer';
 import { ComplaintSkeleton, MyComplaintSkeleton } from '../components/ui/skeleton';
@@ -302,11 +303,15 @@ const Community = () => {
     socket.on('new_grievance', (newG) => {
       const userLoginId = user?.login_id || user?.loginId;
       const isMine = newG.loginId === userLoginId;
+      // Route-room payloads are masked by the gateway (no realName/loginId),
+      // so fall back to the authorDisplay the backend computed.
       const formatted = {
         ...newG,
         isMine,
         realName: isMine || isAdmin ? newG.realName : null,
-        authorDisplay: isMine || isAdmin ? newG.realName : (newG.isAnonymous ? 'Anonymous Passenger' : (newG.realName || 'Passenger')),
+        authorDisplay: isMine || isAdmin
+          ? newG.realName
+          : newG.authorDisplay || (newG.isAnonymous ? 'Anonymous Passenger' : 'Passenger'),
       };
       setComplaints((prev) => {
         if (prev.some((c) => c.id === formatted.id)) return prev;
@@ -640,12 +645,15 @@ const Community = () => {
    * complainant confirms — it does NOT disappear from the queue.
    */
   const handleResolve = async (id) => {
-    const response = await axios.patch(
-      `${BACKEND_URL}/api/grievance/${id}/resolve`,
-      {},
-      { headers: { Authorization: `Bearer ${token}` } },
-    );
-setComplaints((prev) =>
+    if (busyIds.has(id)) return;
+    setBusyIds((prev) => new Set([...prev, id]));
+    try {
+      const response = await axios.patch(
+        `${BACKEND_URL}/api/grievance/${id}/resolve`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      setComplaints((prev) =>
         prev.map((c) =>
           c.id === id
             ? { ...c, status: 'resolved', dueAt: response.data?.data?.dueAt }
@@ -657,6 +665,15 @@ setComplaints((prev) =>
       toast.success(
         'Marked as fixed. It stays open until the complainant confirms it.',
       );
+    } catch (err) {
+      toast.error(friendlyError(err, 'We could not update the complaint. Please try again.'));
+    } finally {
+      setBusyIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
   };
 
   const handleStart = async (id) => {
@@ -792,6 +809,11 @@ setComplaints((prev) =>
       </span>
     );
   };
+
+  // Modal accessibility: background scroll locks, Lenis pauses, Escape closes.
+  useModalA11y(!!detailId, () => setDetailId(null));
+  useModalA11y(showModal, () => setShowModal(false));
+  useModalA11y(!!mediaOpen, () => setMediaOpen(null));
 
   return (
     <div className="min-h-screen flex flex-col relative">
@@ -2260,6 +2282,7 @@ filteredComplaints.map((comp) => {
             <div
               className="modal-sheet"
               onClick={(e) => e.stopPropagation()}
+              data-lenis-prevent="true"
               style={{
                 backgroundColor: 'var(--card-bg)',
                 width: '100%',
@@ -2898,7 +2921,7 @@ filteredComplaints.map((comp) => {
           }}
         >
           <div
-            className="animate-slide-up p-glass"
+            className="animate-slide-up p-glass" data-lenis-prevent="true"
             style={{
               backgroundColor: 'var(--card-bg)',
               width: '100%',

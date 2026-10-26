@@ -8,6 +8,7 @@ import axios from 'axios';
 import { BACKEND_URL } from '../config';
 import '../index.css';
 import { friendlyError, reportError } from '../lib/errors';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 // --- Toggle Switch Component ---
 const Toggle = ({ value, onChange, color = 'var(--secondary-orange)' }) => (
@@ -127,9 +128,8 @@ const Settings = () => {
   };
 
   const handleFaceReset = async () => {
-    const loginIdToUse = user?.loginId || user?.login_id || user?.id;
     try {
-      await axios.post(`${BACKEND_URL}/api/users/${loginIdToUse}/face-reset`, {}, {
+      await axios.post(`${BACKEND_URL}/api/users/me/face-reset`, {}, {
         headers: { Authorization: `Bearer ${user?.token}` }
       });
       toast.success('Request sent! Admin will review and approve your face reset.');
@@ -195,6 +195,10 @@ const Settings = () => {
     boxShadow: 'var(--shadow)',
     border: '1px solid var(--border-color)',
   };
+
+  // Modal accessibility for the password and language popups.
+  useModalA11y(showPasswordModal, () => setShowPasswordModal(false));
+  useModalA11y(showLangModal, () => setShowLangModal(false));
 
   return (
     <div className="min-h-screen" style={{ transition: 'background 0.3s' }}>

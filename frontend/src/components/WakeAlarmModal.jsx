@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useModalA11y } from '../hooks/useModalA11y';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -61,6 +62,9 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
   const [thresholdKm, setThresholdKm] = useState(2);
   const [isCustomThreshold, setIsCustomThreshold] = useState(false);
   const [customValue, setCustomValue] = useState('');
+
+  // Lock the page behind the alarm setup and allow Escape to cancel.
+  useModalA11y(true, onClose);
   const [loading, setLoading] = useState(false);
   const [gpsStatus, setGpsStatus] = useState('idle'); // 'idle' | 'loading' | 'success' | 'error'
 

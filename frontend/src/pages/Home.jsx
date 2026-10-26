@@ -16,37 +16,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { friendlyError } from '../lib/errors';
+import { STOP_COORDS } from '../lib/stopCoords';
+import { useModalA11y } from '../hooks/useModalA11y';
 import UnifiedMap from '../components/UnifiedMap';
-
-const STOP_COORDS = {
-  // Bareilly Core
-  'Civil Lines': [28.3615, 79.4180],
-  'Rajendra Nagar': [28.3610, 79.4501],
-  'DD Puram': [28.3715, 79.4452],
-  'Pilibhit Bypass': [28.3842, 79.4310],
-  'Invertis University': [28.3180, 79.4670],
-  'labela chowk': [28.3500, 79.4200],
-  'police line': [28.3550, 79.4250],
-  'Chauki Chauraha': [28.3580, 79.4120],
-  'Satellite Bus Stand': [28.3440, 79.4420],
-  'Bareilly Mod': [28.2500, 79.5200],
-  // Shahjahanpur Hubs
-  'Shahjahanpur': [27.8805, 79.9140],
-  'Shahjahanpur Bus Stand': [27.8820, 79.9100],
-  'Roza Junction': [27.8350, 79.9200],
-  'Tilhar': [28.0200, 79.7300],
-  'Miranpur Katra': [28.1100, 79.6200],
-  // Badaun Hubs
-  'Badaun': [28.0300, 79.1200],
-  'Badaun Road': [28.2000, 79.2800],
-  'Ujhani': [28.0100, 79.0100],
-  'Dataganj': [27.9400, 79.3500],
-  // Pilibhit & Others
-  'Pilibhit': [28.6300, 79.8000],
-  'Bisalpur': [28.3000, 79.8000],
-  'Nawabganj': [28.5400, 79.6300],
-  'Faridpur': [28.2100, 79.5400],
-};
 
 const Home = () => {
   const navigate = useNavigate();
@@ -95,6 +67,34 @@ const Home = () => {
 
   const sosTimeoutRef = useRef(null);
   const sosIntervalRef = useRef(null);
+
+  const [showMap, setShowMap] = useState(false);
+  const [crowdStatus, setCrowdStatus] = useState({ filled: 0, total: 50, status: 'Loading...' });
+
+  // Real Data State
+  const [routeInfo, setRouteInfo] = useState(null);
+  const [driverInfo, setDriverInfo] = useState(null);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [hasUnread, setHasUnread] = useState(false);
+  const [seenIds, setSeenIds] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('passenger_seen_notif_ids') || '[]'); }
+    catch { return []; }
+  });
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+
+  // Global Broadcast State
+  const [notices, setNotices] = useState([]);
+  const [activeBroadcast, setActiveBroadcast] = useState(null);
+
+  // Merge & Cancellation State (When student's bus is merged)
+  const [mergeInfo, setMergeInfo] = useState(null);
+
+  // Initial Bus Location (Example: Near Invertis University, Bareilly)
+  const [busLocation, setBusLocation] = useState([28.3180, 79.4670]);
+  const [mapCenter, setMapCenter] = useState([28.3180, 79.4670]);
+  const [isLive, setIsLive] = useState(false);
+  const [autoFollow, setAutoFollow] = useState(true);
+  const telemetryTimeoutRef = useRef(null);
 
   // Dynamic Effective Route ID: Switches instantly to newRouteId when merged, or keeps original if cancelled
   const effectiveRouteId = mergeInfo?.isCancelled 
@@ -207,6 +207,7 @@ const Home = () => {
     // Socket.io connection for live data
     const socket = io(SOCKET_URL, {
       transports: ['websocket', 'polling'],
+      auth: { token: user?.token },
       reconnection: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000
@@ -340,7 +341,7 @@ const Home = () => {
 
     return () => {
       clearInterval(crowdInterval);
-      if (telemetryTimeout) clearTimeout(telemetryTimeout);
+      if (telemetryTimeoutRef.current) clearTimeout(telemetryTimeoutRef.current);
       setTimeout(() => socket.disconnect(), 500);
     };
   }, [user, effectiveRouteId]);
@@ -460,6 +461,9 @@ const Home = () => {
     ];
   })();
 
+  // The global broadcast popup is modal — lock the page behind it.
+  useModalA11y(!!activeBroadcast, acknowledgeBroadcast);
+
   return (
     <div className="min-h-screen w-full flex flex-col bg-transparent text-slate-900 dark:text-slate-50 transition-colors duration-300">
       
@@ -576,7 +580,7 @@ const Home = () => {
                           <X size={18} className="text-slate-500 dark:text-slate-400" />
                         </button>
                       </div>
-                      <div className="flex flex-col gap-3 max-h-[350px] overflow-y-auto hide-scrollbar">
+                      <div className="flex flex-col gap-3 max-h-[350px] overflow-y-auto hide-scrollbar" data-lenis-prevent="true">
                     {allNotifications.length > 0 ? (
                       allNotifications.map(notification => (
                         <div key={notification.id} className={`p-3 border rounded-xl flex gap-3 items-start ${notification.bg}`}>

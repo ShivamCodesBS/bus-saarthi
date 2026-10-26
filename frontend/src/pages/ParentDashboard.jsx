@@ -19,6 +19,7 @@ import {
 } from 'recharts';
 import '../index.css';
 import { friendlyError } from '../lib/errors';
+import { STOP_COORDS } from '../lib/stopCoords';
 import { StatCardSkeleton, ComplaintSkeleton } from '../components/ui/skeleton';
 import UnifiedMap from '../components/UnifiedMap';
 
@@ -396,37 +397,33 @@ const ParentDashboard = () => {
     }
   }, [user?.token]);
 
-  // Polling for telemetry (every 3-5 seconds)
-  const fetchTelemetry = useCallback(async (routeId) => {
-    if (!routeId) return;
-    try {
-      const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'], reconnection: true });
-      socket.on('connect', () => {
-        socket.emit('join_route', { route_id: routeId });
+  // Live telemetry socket for the child's (possibly merged) route
+  const connectTelemetry = useCallback((routeId, token) => {
+    if (!routeId) return null;
+    const socket = io(SOCKET_URL, {
+      transports: ['websocket', 'polling'],
+      auth: { token },
+      reconnection: true,
+    });
+    socket.on('connect', () => {
+      socket.emit('join_route', { route_id: routeId });
+    });
+    socket.on('live_telemetry', (data) => {
+      if (data.location?.lat && data.location?.lng) {
+        setBusLocation([data.location.lat, data.location.lng]);
+      }
+      setTelemetry({
+        speed: data.speed || 0,
+        heading: data.heading || 0,
+        comfort: data.comfort || 'Smooth',
+        lastUpdated: new Date().toISOString(),
       });
-      socket.on('live_telemetry', (data) => {
-        if (data.location?.lat && data.location?.lng) {
-          const newLoc = [data.location.lat, data.location.lng];
-          setBusLocation(newLoc);
-          if (autoFollowRef.current && mapInstance.current) {
-            mapInstance.current.setView(newLoc, mapInstance.current.getZoom(), { animate: true });
-          }
-        }
-        setTelemetry({
-          speed: data.speed || 0,
-          heading: data.heading || 0,
-          comfort: data.comfort || 'Smooth',
-          lastUpdated: new Date().toISOString(),
-        });
-        setTelemetryStale(false);
-        // Mark stale after 5s of no update
-        clearTimeout(staleTimerRef.current);
-        staleTimerRef.current = setTimeout(() => setTelemetryStale(true), 5000);
-      });
-      return socket;
-    } catch (err) {
-      console.error('Telemetry error', err);
-    }
+      setTelemetryStale(false);
+      // Mark stale after 5s of no update
+      clearTimeout(staleTimerRef.current);
+      staleTimerRef.current = setTimeout(() => setTelemetryStale(true), 5000);
+    });
+    return socket;
   }, []);
 
   useEffect(() => {
@@ -438,13 +435,12 @@ const ParentDashboard = () => {
   useEffect(() => {
     const routeToTrack = childMergeInfo?.activeRouteId || child?.routeId;
     if (!routeToTrack) return;
-    let socket;
-    fetchTelemetry(routeToTrack).then(s => { socket = s; });
+    const socket = connectTelemetry(routeToTrack, user?.token);
     return () => {
       clearTimeout(staleTimerRef.current);
       if (socket) socket.disconnect();
     };
-  }, [child?.routeId, childMergeInfo]);
+  }, [child?.routeId, childMergeInfo, connectTelemetry, user?.token]);
 
   useEffect(() => {
     const routeToAnalyze = childMergeInfo?.activeRouteId || child?.routeId;
@@ -596,7 +592,6 @@ const ParentDashboard = () => {
       <div style={{
         background: 'var(--card-bg)', borderBottom: '1px solid var(--border-color)',
         display: 'flex', overflowX: 'auto', scrollbarWidth: 'none',
-        '@media (max-width: 768px)': { display: 'none' }
       }}>
         {[
           { id: 'overview', icon: <Bus size={16} />, label: 'Overview' },

@@ -1,10 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Bell, X, Check, Clock, AlertTriangle, MessageSquare, CheckCircle2, Eye, GitMerge } from 'lucide-react';
 import { useNotifications } from '../hooks/useNotifications';
 
 const NotificationBell = ({ user, token }) => {
-  const navigate = useNavigate();
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef(null);
   const buttonRef = useRef(null);
@@ -169,7 +167,7 @@ const NotificationBell = ({ user, token }) => {
           </div>
 
           {/* Notifications List */}
-          <div className="max-h-[450px] overflow-y-auto">
+          <div className="max-h-[450px] overflow-y-auto" data-lenis-prevent="true">
             {isLoading ? (
               <div className="p-6 text-center text-slate-500">
                 <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
@@ -209,7 +207,7 @@ const NotificationBell = ({ user, token }) => {
                           </span>
                         </div>
                         <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 line-clamp-2">
-                          {notification.message}
+                          {notification.body || notification.message}
                         </p>
                         {!notification.read && (
                           <div className="flex items-center gap-2 mt-2">
@@ -239,10 +237,10 @@ const NotificationBell = ({ user, token }) => {
           {notifications.length > 0 && (
             <div className="p-3 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
               <button
-                onClick={() => navigate('/notifications')}
+                onClick={markAllAsRead}
                 className="w-full text-center text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
               >
-                View all notifications
+                Mark all as read
               </button>
             </div>
           )}

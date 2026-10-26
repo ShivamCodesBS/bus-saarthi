@@ -13,9 +13,11 @@ import UserAvatar from '../components/UserAvatar';
 import Papa from 'papaparse';
 import { sanitizePayload, normalizeFeeStatus, USER_PAYLOAD_KEYS, formatSosTime } from '../lib/utils';
 import { friendlyError } from '../lib/errors';
+import FaceResetRequests from '../components/FaceResetRequests';
 import { ComplaintSkeleton, RouteSkeleton, UserRowSkeleton } from '../components/ui/skeleton';
 import UnifiedMap from '../components/UnifiedMap';
 import { useStaleWhileRevalidate } from '../hooks/useStaleWhileRevalidate';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 
 // Grievance lifecycle states, mirroring the backend enum.
@@ -311,12 +313,29 @@ const TransportInchargeDashboard = () => {
 
     socket.on('merge_executed', (data) => {
       toast.success(`Bus Merge Active: ${data.cancelledRoute?.routeName || 'Route'} merged into ${data.targetRoute?.routeName || 'Route'}`, { id: 'merge_exec' });
-      setActiveMerges(prev => [data.mergeEvent, ...prev.filter(m => m.id !== data.mergeEvent?.id)]);
+      if (data.mergeEvent) {
+        setActiveMerges(prev => [data.mergeEvent, ...prev.filter(m => m.id !== data.mergeEvent?.id)]);
+      }
     });
 
     socket.on('merge_undone', (data) => {
-      toast.success(`Bus Merge Restored: ${data.merge?.cancelledRouteName || 'Route'} is active again`, { id: 'merge_undone' });
-      setActiveMerges(prev => prev.filter(m => m.id !== data.merge?.id));
+      toast.success(`Bus Merge Restored: ${data.mergeEvent?.cancelledRouteName || data.merge?.cancelledRouteName || 'Route'} is active again`, { id: 'merge_undone' });
+      const undone = data.mergeEvent || data.merge;
+      if (undone) {
+        setActiveMerges(prev => prev.filter(m => m.id !== undone.id));
+      }
+    });
+
+    // A plain cancellation (no replacement bus) arrives with status
+    // 'cancelled' — it belongs in the same Active Merges list.
+    socket.on('bus_cancelled', (data) => {
+      const mergeEvent = data.mergeEvent || data.merge;
+      if (!mergeEvent) return;
+      toast.error(`Bus Cancelled: ${mergeEvent.cancelledRouteName || 'Route'} has no replacement bus today`, { id: 'ti_bus_cancelled' });
+      setActiveMerges(prev => {
+        if (prev.some(m => m.id === mergeEvent.id)) return prev;
+        return [mergeEvent, ...prev];
+      });
     });
 
     setSocketInstance(socket);
@@ -710,6 +729,14 @@ const TransportInchargeDashboard = () => {
     }
   };
 
+  // Modal accessibility: background scroll locks, Lenis pauses, Escape closes.
+  useModalA11y(showUserModal, () => setShowUserModal(false));
+  useModalA11y(showRouteModal, () => setShowRouteModal(false));
+  useModalA11y(showBulkUploadModal, () => { setShowBulkUploadModal(false); setBulkUploadData([]); setBulkUploadErrors([]); });
+  useModalA11y(!!viewingUser, () => setViewingUser(null));
+  useModalA11y(!!viewingRouteDetails, () => setViewingRouteDetails(null));
+  useModalA11y(!!fullScreenMedia, () => setFullScreenMedia(null));
+
   return (
     <div className="min-h-screen flex flex-col relative">
       {/* Header */}
@@ -777,7 +804,7 @@ const TransportInchargeDashboard = () => {
                           <X size={20} style={{ color: 'var(--text-light)' }} />
                         </button>
                       </div>
-                      <div className="flex flex-col gap-3 max-h-[350px] overflow-y-auto hide-scrollbar">
+                      <div className="flex flex-col gap-3 max-h-[350px] overflow-y-auto hide-scrollbar" data-lenis-prevent="true">
                         {allNotifications.length > 0 ? (
                           allNotifications.map(notification => (
                             <div key={notification.id} className="p-3 rounded-xl flex gap-3 items-start" style={{ backgroundColor: notification.bg, border: `1px solid ${notification.borderColor}` }}>
@@ -1484,7 +1511,10 @@ const TransportInchargeDashboard = () => {
                 </button>
               </div>
             </div>
-            
+
+            {/* Face reset requests raised from user Settings pages */}
+            <FaceResetRequests user={user} onChanged={refetchUsers} />
+
             <div className="flex flex-wrap gap-3 mb-6">
               <button onClick={() => setUserFilter('passenger')} style={{ padding: '0.5rem 1.5rem', backgroundColor: userFilter === 'passenger' ? 'var(--primary-blue)' : '#f0f0f0', color: userFilter === 'passenger' ? 'white' : 'var(--text-dark)', borderRadius: '8px', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Passengers</button>
               <button onClick={() => setUserFilter('driver')} style={{ padding: '0.5rem 1.5rem', backgroundColor: userFilter === 'driver' ? '#28a745' : '#f0f0f0', color: userFilter === 'driver' ? 'white' : 'var(--text-dark)', borderRadius: '8px', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Drivers</button>
@@ -1497,7 +1527,8 @@ const TransportInchargeDashboard = () => {
                 ))}
               </div>
             ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '560px' }}>
                 <thead>
                   <tr style={{ backgroundColor: 'var(--bg-color)', textAlign: 'left' }}>
                     <th style={{ padding: '1rem' }}>Name</th>
@@ -1546,6 +1577,7 @@ const TransportInchargeDashboard = () => {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         )}
@@ -1704,7 +1736,7 @@ const TransportInchargeDashboard = () => {
       
       {/* View Route Details Modal */}
       {viewingRouteDetails && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
           <div className="animate-slide-up glass p-glass" data-lenis-prevent="true" style={{ width: '100%', maxWidth: '600px', borderRadius: '20px', backgroundColor: 'var(--card-bg)', maxHeight: '90vh', overflowY: 'auto' }}>
             <div className="flex justify-between items-center mb-6 border-b border-slate-200 dark:border-slate-700 pb-4">
               <h2 className="text-xl sm:text-2xl font-bold text-slate-800 dark:text-slate-100 m-0">Vehicle & Route Details</h2>
@@ -1768,7 +1800,7 @@ const TransportInchargeDashboard = () => {
 
       {/* View User Details Modal */}
       {viewingUser && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
           <div className="animate-slide-up glass p-glass" style={{ width: '100%', maxWidth: '600px', borderRadius: '20px', backgroundColor: 'var(--card-bg)', maxHeight: '90vh', overflowY: 'auto' }}>
             <div className="flex justify-between items-center mb-6 border-b border-slate-200 dark:border-slate-700 pb-4">
               <h2 className="text-xl sm:text-2xl font-bold text-slate-800 dark:text-slate-100 m-0">User Profile</h2>
@@ -1863,7 +1895,7 @@ const TransportInchargeDashboard = () => {
 
       {/* Bulk Upload Modal */}
       {showBulkUploadModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
           <div className="animate-slide-up glass p-glass" data-lenis-prevent="true" style={{ width: '100%', maxWidth: '800px', borderRadius: '20px', backgroundColor: 'var(--card-bg)', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl sm:text-2xl font-bold text-slate-800 dark:text-slate-100 m-0 flex items-center gap-2">
@@ -1940,7 +1972,7 @@ const TransportInchargeDashboard = () => {
 
       {/* Add/Edit User Modal */}
       {showUserModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem' }}>
           <div className="animate-slide-up glass p-glass" data-lenis-prevent="true" style={{ backgroundColor: 'var(--card-bg)', padding: '2rem', borderRadius: '16px', width: '100%', maxWidth: '500px', maxHeight: '90vh', overflowY: 'auto' }}>
             <h3 style={{ marginTop: 0, fontSize: '1.5rem', fontWeight: 'bold' }}>{editingUser ? 'Edit User' : 'Add User'}</h3>
             <form onSubmit={handleSaveUser} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -1954,26 +1986,37 @@ const TransportInchargeDashboard = () => {
               </div>
               <div>
                 <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Password {editingUser && '(Leave blank to keep current)'}</label>
-                <input required={!editingUser} type="text" value={userFormData.password} onChange={e => setUserFormData({ ...userFormData, password: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
+                <input required={!editingUser} type="password" autoComplete="new-password" value={userFormData.password} onChange={e => setUserFormData({ ...userFormData, password: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
               </div>
               <div className="flex flex-col sm:flex-row gap-4">
                 <div style={{ flex: 1 }}>
                   <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Role</label>
-                  <select value={userFormData.role} onChange={e => setUserFormData({ ...userFormData, role: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }}>
+                  <select value={userFormData.role} onChange={e => {
+                    const role = e.target.value;
+                    setUserFormData(prev => ({
+                      ...prev,
+                      role,
+                      route_id: (role === 'passenger' || role === 'driver') ? prev.route_id : '',
+                      fee_status: role === 'passenger' ? prev.fee_status : 'paid',
+                    }));
+                  }} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }}>
                     <option value="passenger">Student / Passenger</option>
                     <option value="teacher">Teacher / Staff</option>
                     <option value="driver">Driver (Bus Sensor App)</option>
                   </select>
                 </div>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Route</label>
-                  <select value={userFormData.route_id} onChange={e => setUserFormData({ ...userFormData, route_id: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }}>
-                    {routesList.map(r => (
-                      <option key={r.routeId || r.route_id} value={r.routeId || r.route_id}>Route {r.routeId || r.route_id} - {r.routeName || r.route_name}</option>
-                    ))}
-                    {routesList.length === 0 && <option value="">No Routes Found</option>}
-                  </select>
-                </div>
+                {(userFormData.role === 'passenger' || userFormData.role === 'driver') && (
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Route {userFormData.role === 'passenger' ? '' : '(Optional)'}</label>
+                    <select value={userFormData.route_id} onChange={e => setUserFormData({ ...userFormData, route_id: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }}>
+                      {userFormData.role === 'driver' && <option value="">Not Assigned</option>}
+                      {routesList.map(r => (
+                        <option key={r.routeId || r.route_id} value={r.routeId || r.route_id}>Route {r.routeId || r.route_id} - {r.routeName || r.route_name}</option>
+                      ))}
+                      {routesList.length === 0 && <option value="">No Routes Found</option>}
+                    </select>
+                  </div>
+                )}
               </div>
               {userFormData.role === 'teacher' && (
                 <div>
@@ -2062,7 +2105,7 @@ const TransportInchargeDashboard = () => {
 
       {/* Add/Edit Route Modal */}
       {showRouteModal && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem' }}>
           <div className="animate-slide-up glass p-glass" data-lenis-prevent="true" style={{ backgroundColor: 'var(--card-bg)', padding: '2rem', borderRadius: '16px', width: '100%', maxWidth: '500px', maxHeight: '90vh', overflowY: 'auto' }}>
             <h3 style={{ marginTop: 0, fontSize: '1.5rem', fontWeight: 'bold' }}>{editingRoute ? 'Edit Route' : 'Add Route'}</h3>
             <form onSubmit={handleSaveRoute} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>

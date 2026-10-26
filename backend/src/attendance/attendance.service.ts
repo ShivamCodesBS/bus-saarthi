@@ -54,6 +54,59 @@ export class AttendanceService {
     const todayStart = getISTMidnightUTC();
     const results = { synced: 0, skipped: 0, errors: 0 };
 
+    // ---- Batch the lookups. The old implementation ran 3-4 serial queries
+    // PER STUDENT (duplicate check, user lookup, merge check, insert), so a
+    // 60-student batch meant ~240 round trips queuing on the connection pool.
+    const passengerIds = Array.from(
+      new Set(
+        records
+          .map(
+            (record) =>
+              record.passenger_id ||
+              (record as any).login_id ||
+              (record as any).student_id,
+          )
+          .filter(Boolean),
+      ),
+    );
+
+    const existingToday = await this.prisma.attendance.findMany({
+      where: { passengerId: { in: passengerIds }, timestamp: { gte: todayStart } },
+      select: { passengerId: true },
+    });
+    const alreadyBoarded = new Set(existingToday.map((a) => a.passengerId));
+
+    const passengers = await this.prisma.user.findMany({
+      where: { loginId: { in: passengerIds } },
+      select: { loginId: true, name: true, routeId: true, feeStatus: true },
+    });
+    const passengerByLogin = new Map(passengers.map((p) => [p.loginId, p]));
+
+    // Every merge into THIS route that started today, for any of the
+    // passengers' assigned routes.
+    const assignedRouteIds = Array.from(
+      new Set(
+        passengers
+          .filter((p) => p.routeId && String(p.routeId) !== String(route_id))
+          .map((p) => String(p.routeId)),
+      ),
+    );
+    const activeMerges = assignedRouteIds.length
+      ? await this.prisma.mergeEvent.findMany({
+          where: {
+            cancelledRouteId: { in: assignedRouteIds },
+            targetRouteId: String(route_id),
+            status: 'active',
+            createdAt: { gte: todayStart },
+          },
+          select: { id: true, cancelledRouteId: true },
+        })
+      : [];
+    const mergeByRoute = new Map(activeMerges.map((m) => [String(m.cancelledRouteId), m.id]));
+
+    const creates: any[] = [];
+    const events: any[] = [];
+
     for (const record of records) {
       const passengerId =
         record.passenger_id ||
@@ -66,24 +119,12 @@ export class AttendanceService {
       }
 
       try {
-        // Prevent duplicate check for today
-        const existing = await this.prisma.attendance.findFirst({
-          where: {
-            passengerId: passengerId,
-            timestamp: {
-              gte: todayStart,
-            },
-          },
-        });
-
-        if (existing) {
+        if (alreadyBoarded.has(passengerId)) {
           results.skipped++;
           continue;
         }
 
-        const passenger = await this.prisma.user.findUnique({
-          where: { loginId: passengerId },
-        });
+        const passenger = passengerByLogin.get(passengerId);
         if (!passenger) {
           this.logger.warn(`Passenger not found in database: ${passengerId}`);
           results.errors++;
@@ -98,19 +139,11 @@ export class AttendanceService {
         let mergeEventId: string | null = null;
 
         if (!isEligible && passenger.routeId) {
-          const activeMerge = await this.prisma.mergeEvent.findFirst({
-            where: {
-              cancelledRouteId: String(passenger.routeId),
-              targetRouteId: String(route_id),
-              status: 'active',
-              createdAt: { gte: todayStart },
-            },
-          });
-
-          if (activeMerge) {
+          const mergeId = mergeByRoute.get(String(passenger.routeId));
+          if (mergeId) {
             isEligible = true;
             originalRouteId = String(passenger.routeId);
-            mergeEventId = activeMerge.id;
+            mergeEventId = mergeId;
           }
         }
 
@@ -131,22 +164,23 @@ export class AttendanceService {
         const confidence =
           record.confidence ?? (record as any).match_score ?? undefined;
 
-        await this.prisma.attendance.create({
-          data: {
-            passengerId: passenger.loginId,
-            routeId: String(route_id),
-            originalRouteId,
-            mergeEventId,
-            name: passenger.name,
-            feeStatus: passenger.feeStatus,
-            confidence: confidence,
-            timestamp: timestamp,
-          },
+        creates.push({
+          passengerId: passenger.loginId,
+          routeId: String(route_id),
+          originalRouteId,
+          mergeEventId,
+          name: passenger.name,
+          feeStatus: passenger.feeStatus,
+          confidence: confidence,
+          timestamp: timestamp,
         });
 
         results.synced++;
+        // Treat as boarded for the rest of this batch — the same student
+        // appearing twice in one payload must not double-insert.
+        alreadyBoarded.add(passengerId);
 
-        const attendancePayload = {
+        events.push({
           passenger_id: passenger.loginId,
           name: passenger.name,
           route_id: String(route_id),
@@ -154,20 +188,9 @@ export class AttendanceService {
           is_merged: !!originalRouteId,
           fee_status: passenger.feeStatus,
           timestamp: timestamp.toISOString(),
-        };
-
-        // Emit event for real-time gateway (Admin & Route subscribers)
-        this.eventEmitter.emit('attendance.marked', attendancePayload);
-
-        // Invalidate attendance caches so dashboards see fresh data
-        await this.cache.del('attendance:today:all');
-        await this.cache.del(`attendance:today:route:${route_id}`);
-        await this.cache.delByPattern(`attendance:summary:${passenger.loginId}:*`);
-
-        // Notify linked parents asynchronously
-        this.notifyParentsOfBoarding(passenger, String(route_id), timestamp).catch(
-          (err) => this.logger.error(`Failed to notify parent: ${err.message}`),
-        );
+          passengerRef: passenger,
+          timestampDate: timestamp,
+        });
       } catch (err) {
         this.logger.error(
           `Error syncing attendance for ${passengerId}:`,
@@ -175,6 +198,26 @@ export class AttendanceService {
         );
         results.errors++;
       }
+    }
+
+    if (creates.length > 0) {
+      await this.prisma.attendance.createMany({ data: creates });
+
+      // Emit real-time events for Admin & Route subscribers.
+      for (const e of events) {
+        const { passengerRef, timestampDate, ...payload } = e;
+        this.eventEmitter.emit('attendance.marked', payload);
+
+        // Notify linked parents asynchronously.
+        this.notifyParentsOfBoarding(passengerRef, String(route_id), timestampDate).catch(
+          (err) => this.logger.error(`Failed to notify parent: ${err.message}`),
+        );
+      }
+
+      // Invalidate attendance caches once for the whole batch.
+      await this.cache.del('attendance:today:all');
+      await this.cache.del(`attendance:today:route:${route_id}`);
+      await this.cache.delByPattern('attendance:summary:*');
     }
 
     return {
