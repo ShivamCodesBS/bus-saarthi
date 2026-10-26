@@ -67,6 +67,9 @@ export function clearSwrDiskCache() {
  * @param {number} options.staleTime - Time in ms before data is considered stale (default 30s)
  * @param {boolean} options.skip - Skip initial fetch
  * @param {Function} options.onData - Callback when fresh data arrives
+ * @param {boolean} options.networkFirst - Never paint cached data older than
+ *   staleTime on mount; show the loading state until fresh data arrives. Use
+ *   for identity data (e.g. the profile) where a stale flash looks like a bug.
  * @returns {Object} { data, isLoading, isStale, error, refetch }
  */
 export function useStaleWhileRevalidate(url, options = {}) {
@@ -76,12 +79,13 @@ export function useStaleWhileRevalidate(url, options = {}) {
     skip = false,
     onData,
     token: initialToken = null, // Accept initial token
+    networkFirst = false,
   } = options;
 
   // Hydrate synchronously from the disk cache so the very first render
   // already holds data — no skeleton flash while the network wakes up.
   const hydratedRef = useRef(null);
-  if (!hydratedRef.current && !skip && initialToken) {
+  if (!hydratedRef.current && !skip && !networkFirst && initialToken) {
     hydratedRef.current = readDiskCache(cacheKey, initialToken);
   }
 
@@ -187,7 +191,20 @@ export function useStaleWhileRevalidate(url, options = {}) {
 
     // Check the in-memory (same-session) cache first
     const cached = dataCache.get(cacheKey);
-    if (cached && !skip) {
+
+    if (networkFirst && !skip) {
+      // Identity data must never flash stale values. A fresh in-session cache
+      // may still paint instantly; anything older waits for the network behind
+      // the caller's skeleton. Always revalidate either way.
+      if (cached && Date.now() - cached.timestamp <= staleTime) {
+        setData(cached.data);
+        setIsStale(false);
+        setIsLoading(false);
+      }
+
+      abortControllerRef.current = new AbortController();
+      fetchFresh(abortControllerRef.current.signal).catch(() => {});
+    } else if (cached && !skip) {
       const isExpired = Date.now() - cached.timestamp > staleTime;
       setData(cached.data);
       setIsStale(isExpired);
@@ -238,7 +255,7 @@ export function useStaleWhileRevalidate(url, options = {}) {
         abortControllerRef.current.abort();
       }
     };
-  }, [url, cacheKey, staleTime, skip, fetchFresh]);
+  }, [url, cacheKey, staleTime, skip, networkFirst, fetchFresh]);
 
   // Invalidate cache entry
   const invalidate = useCallback(() => {
@@ -311,13 +328,17 @@ export async function preloadQuery(url, options = {}) {
 }
 
 /**
- * Manually set cache data (e.g., after a mutation)
+ * Manually set cache data (e.g., after a mutation). Pass the signed-in token
+ * to also refresh the disk-persisted entry, which is token-scoped.
  */
-export function setCacheData(cacheKey, data) {
+export function setCacheData(cacheKey, data, token) {
   dataCache.set(cacheKey, {
     data,
     timestamp: Date.now(),
   });
+  if (token !== undefined) {
+    writeDiskCache(cacheKey, data, token);
+  }
 }
 
 /**

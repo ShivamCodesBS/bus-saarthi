@@ -121,6 +121,9 @@ export const AuthProvider = ({ children }) => {
     const socket = io(BACKEND_URL, {
       transports: ['websocket', 'polling'],
       auth: { token: user.token },
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
     });
     
     socket.on('connect_error', (err) => {

@@ -112,7 +112,9 @@ const MapResizer = ({ onMapReady }) => {
   const map = useMap();
   useEffect(() => {
     const t1 = setTimeout(() => map.invalidateSize(), 100);
-    const t2 = setTimeout(() => map.invalidateSize(), 550);
+    const t2 = setTimeout(() => map.invalidateSize(), 400);
+    const t3 = setTimeout(() => map.invalidateSize(), 900);
+    const t4 = setTimeout(() => map.invalidateSize(), 1600);
     const ro = new ResizeObserver(() => map.invalidateSize());
     const container = map.getContainer();
     if (container) ro.observe(container);
@@ -120,6 +122,8 @@ const MapResizer = ({ onMapReady }) => {
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
+      clearTimeout(t3);
+      clearTimeout(t4);
       if (container) ro.unobserve(container);
     };
   }, [map, onMapReady]);
@@ -196,6 +200,9 @@ const UnifiedMap = ({
   // Rendered as small markers; clicking one asks the parent to switch.
   buses = [],
   onSelectBus = null,
+  // Last DB-recorded GPS fix for the tracked route: { position, timestamp }.
+  // While offline the marker sits there and the popup says when it was seen.
+  lastKnown = null,
   className = '',
   style = {},
   busLabel = 'Bus',
@@ -377,8 +384,47 @@ const UnifiedMap = ({
     }
   }, [busLocation]);
   
+  // Fullscreen via the native Fullscreen API: the browser scales the SAME
+  // map element to the viewport — no React remount, so tiles and map state
+  // persist. The portal/CSS mode below is only the fallback for browsers
+  // without the API (iOS Safari), where a remount is unavoidable.
+  const mapHostRef = useRef(null);
+  const portalFallbackRef = useRef(false);
+
   const toggleFullscreen = useCallback((expand) => {
-    setIsFullscreen(expand);
+    const el = mapHostRef.current;
+    if (expand) {
+      if (el?.requestFullscreen) {
+        el.requestFullscreen().catch(() => {
+          portalFallbackRef.current = true;
+          setIsFullscreen(true);
+        });
+      } else {
+        portalFallbackRef.current = true;
+        setIsFullscreen(true);
+      }
+    } else if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      portalFallbackRef.current = true;
+      setIsFullscreen(false);
+    }
+  }, []);
+
+  // Native Escape/fullscreen changes must stay in sync with our state.
+  useEffect(() => {
+    const onChange = () => {
+      const active =
+        !!document.fullscreenElement && document.fullscreenElement === mapHostRef.current;
+      if (!document.fullscreenElement) {
+        portalFallbackRef.current = false;
+        setIsFullscreen(false);
+      } else {
+        setIsFullscreen(active);
+      }
+    };
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
   
   const handleMapClick = useCallback((e) => {
@@ -569,8 +615,10 @@ const UnifiedMap = ({
               </>
             )}
             {(!telemetry || telemetryStale) && (
-              <div style={{ fontSize: '12px', color: '#cf1322', fontWeight: 'bold' }}>
-                📡 GPS Signal Lost
+              <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#cf1322' }}>
+                {lastKnown?.timestamp
+                  ? `📡 Last seen ${formatLastUpdate(lastKnown.timestamp)}`
+                  : '📡 No GPS signal yet'}
               </div>
             )}
           </div>
@@ -986,7 +1034,8 @@ const UnifiedMap = ({
   ) : null;
 
   const mapUi = (
-    <div 
+    <div
+      ref={mapHostRef}
       style={containerStyle}
       className={className}
       role="application"
@@ -1038,10 +1087,10 @@ const UnifiedMap = ({
     </div>
   );
 
-  // Fullscreen renders through a portal on document.body — the dashboard
-  // cards use backdrop-filter, which makes them the containing block for
-  // fixed children and kept the "fullscreen" map trapped inside the card.
-  if (isFullscreen && typeof document !== 'undefined') {
+  // CSS/portal fallback only (no Fullscreen API). Dashboard cards use
+  // backdrop-filter, which makes them the containing block for fixed
+  // children — the portal escapes that by mounting on document.body.
+  if (isFullscreen && portalFallbackRef.current && typeof document !== 'undefined') {
     return createPortal(mapUi, document.body);
   }
   return mapUi;

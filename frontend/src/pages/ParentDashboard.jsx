@@ -404,6 +404,8 @@ const ParentDashboard = () => {
       transports: ['websocket', 'polling'],
       auth: { token },
       reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
     });
     socket.on('connect', () => {
       socket.emit('join_route', { route_id: routeId });

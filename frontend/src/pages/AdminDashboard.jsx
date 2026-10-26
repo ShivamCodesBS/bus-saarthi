@@ -229,8 +229,10 @@ const AdminDashboard = () => {
       transports: ['websocket', 'polling'],
       auth: { token: user.token },
       reconnection: true,
-      reconnectionAttempts: 5,
+      // Never give up — a capped retry count left the fleet map dead
+      // whenever the backend cold-start outlasted the retries.
       reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
     });
 
     socket.on('connect', () => {
@@ -1029,6 +1031,25 @@ const AdminDashboard = () => {
   // a red light does not flip the card back and forth.
   const tripStatus = useTripStatus(busTelemetry);
 
+  // Last DB-recorded GPS fix for the selected route — shown when the bus is
+  // offline, plus a dedicated "Last Seen" detail card.
+  const { data: lastKnownData } = useStaleWhileRevalidate(
+    `/api/telemetry/last/${selectedRoute}`,
+    { cacheKey: `admin:last-loc:${selectedRoute}`, staleTime: 15000, token: user?.token },
+  );
+  const lastKnown = useMemo(() => {
+    const d = lastKnownData?.data;
+    if (!d?.lat || !d?.lng) return null;
+    return { position: [d.lat, d.lng], timestamp: d.timestamp, speed: d.speed };
+  }, [lastKnownData]);
+
+  // Offline: put the marker where the bus was last actually seen.
+  useEffect(() => {
+    if (!isBusActive && lastKnown) {
+      setBusLocation(lastKnown.position);
+    }
+  }, [isBusActive, lastKnown]);
+
   // Fleet markers for the map: every bus EXCEPT the one being tracked
   // (the tracked bus gets the large marker).
   const fleetBuses = useMemo(() => {
@@ -1317,6 +1338,7 @@ const AdminDashboard = () => {
                   showRoutePolyline={true}
                   showDestinationMarker={true}
                   buses={fleetBuses}
+                  lastKnown={lastKnown}
                   onSelectBus={(id) => {
                     setSelectedRoute(String(id));
                     toast.success(`Now tracking ${fleetBuses.find((b) => b.id === String(id))?.label || `Route ${id}`}`);
@@ -1374,6 +1396,30 @@ const AdminDashboard = () => {
                         }`}>
                           {tripStatus === 'moving' ? 'Active & Running' : tripStatus === 'active' ? 'Active' : 'Inactive'}
                         </h3>
+                      </div>
+                    </div>
+
+                    <div className="glass p-6 rounded-2xl flex items-center gap-4 flex-1">
+                      <div className={`${
+                        lastKnown ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500'
+                      } p-4 rounded-xl shrink-0`}>
+                        <History size={28} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-slate-500 dark:text-slate-400 text-sm font-semibold m-0 truncate">Last Seen (Route {selectedRoute})</p>
+                        {lastKnown ? (
+                          <>
+                            <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 m-0">
+                              {formatTime(lastKnown.timestamp)}
+                            </h3>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 m-0 mt-0.5 truncate">
+                              {lastKnown.position[0].toFixed(4)}, {lastKnown.position[1].toFixed(4)}
+                              {lastKnown.speed != null ? ` · ${Math.round(lastKnown.speed)} km/h` : ''}
+                            </p>
+                          </>
+                        ) : (
+                          <h3 className="text-lg font-bold text-slate-500 m-0">No GPS record yet</h3>
+                        )}
                       </div>
                     </div>
                   </>

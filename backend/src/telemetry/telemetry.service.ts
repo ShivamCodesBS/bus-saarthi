@@ -78,6 +78,38 @@ export class TelemetryService {
     };
   }
 
+  /**
+   * The most recent GPS fix stored for a route. This is what the map shows
+   * when the bus is offline — the last place it was actually seen, instead
+   * of a hardcoded default pin.
+   */
+  async getLastTelemetry(routeId: string) {
+    const row = await this.prisma.telemetry.findFirst({
+      where: {
+        routeId: String(routeId),
+        latitude: { not: null },
+        longitude: { not: null },
+      },
+      orderBy: { timestamp: 'desc' },
+    });
+
+    if (!row) {
+      return { status: 'success', data: null };
+    }
+
+    return {
+      status: 'success',
+      data: {
+        route_id: String(row.routeId),
+        lat: row.latitude,
+        lng: row.longitude,
+        speed: row.mpuSpeedKmh ?? (row.gpsSpeedKnots ?? 0) * 1.852,
+        heading: row.headingDeg ?? 0,
+        timestamp: row.timestamp,
+      },
+    };
+  }
+
   async getTelemetryHistory(routeId: string, dateStr: string) {
     const start = new Date(`${dateStr}T00:00:00+05:30`);
     const end = new Date(`${dateStr}T23:59:59+05:30`);

@@ -252,8 +252,8 @@ const TransportInchargeDashboard = () => {
       transports: ['websocket', 'polling'],
       auth: { token: user.token },
       reconnection: true,
-      reconnectionAttempts: 5,
       reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
     });
 
     socket.on('connect', () => {

@@ -116,6 +116,7 @@ const Profile = () => {
     staleTime: 60000, // 60 seconds
     skip: !loginId,
     token: user?.token, // Pass initial token
+    networkFirst: true, // Never flash the cached pic/name before fresh data lands
     onData: (data) => {
       // Keep localStorage session in sync
       if (user) {
@@ -142,6 +143,7 @@ const Profile = () => {
     staleTime: 30000, // 30 seconds
     skip: !loginId,
     token: user?.token, // Pass initial token
+    networkFirst: true, // Same reason as the profile: no stale grid flash
   });
 
   // No need for token sync useEffect - tokens passed directly to hooks
@@ -165,8 +167,9 @@ const Profile = () => {
         { headers: { Authorization: `Bearer ${user?.token}` } },
       );
       if (res.data.status === 'success') {
-        // Update cache immediately for instant UI feedback
-        setCacheData('user:profile', { ...profile, profilePic: res.data.url });
+        // Update cache immediately for instant UI feedback (disk entry too,
+        // so the next visit doesn't flash the pre-upload picture)
+        setCacheData('user:profile', { ...profile, profilePic: res.data.url }, user?.token);
         login({ ...user, profile_pic: res.data.url });
         toast.success('Profile picture updated!', { id: loadingToast });
       } else {

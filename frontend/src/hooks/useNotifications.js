@@ -141,7 +141,8 @@ export function useNotifications(options = {}) {
       transports: ['websocket', 'polling'],
       auth: { token: initialToken },
       reconnection: true,
-      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
     });
 
     socket.on('notification', (n) => {

@@ -30,6 +30,15 @@ export class TelemetryController {
     return this.telemetryService.getLatestStatus(routeId);
   }
 
+  /**
+   * Last known GPS position for a route. Any signed-in user may read it —
+   * passengers track their own bus, staff track the fleet.
+   */
+  @Get('telemetry/last/:routeId')
+  getLastTelemetry(@Param('routeId') routeId: string) {
+    return this.telemetryService.getLastTelemetry(routeId);
+  }
+
   @Get('telemetry/history/:routeId')
   @Roles(UserRole.admin, UserRole.tech_admin, UserRole.transport_incharge, UserRole.parent)
   getTelemetryHistory(

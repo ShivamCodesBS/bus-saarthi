@@ -1,5 +1,5 @@
 import toast from 'react-hot-toast';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Bus, Menu, MapPin, Phone, User, X, Compass, Activity, Navigation, Wind, AlertOctagon, Bell, AlarmClock, Users, Home as HomeIcon, Settings, LogOut, MessageSquare, GitMerge, Trash2 } from 'lucide-react';
 import HamburgerMenu from '../components/HamburgerMenu';
 import UserAvatar from '../components/UserAvatar';
@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { friendlyError } from '../lib/errors';
 import { STOP_COORDS } from '../lib/stopCoords';
+import { useStaleWhileRevalidate } from '../hooks/useStaleWhileRevalidate';
 import { useModalA11y } from '../hooks/useModalA11y';
 import UnifiedMap from '../components/UnifiedMap';
 
@@ -95,6 +96,29 @@ const Home = () => {
   const [isLive, setIsLive] = useState(false);
   const [autoFollow, setAutoFollow] = useState(true);
   const telemetryTimeoutRef = useRef(null);
+
+  const effectiveRouteIdSafe = mergeInfo?.isCancelled
+    ? (user?.routeId || user?.route_id || '4')
+    : (mergeInfo?.newRouteId || user?.routeId || user?.route_id || '4');
+
+  // Last DB-recorded GPS fix for the route. While the bus is offline the
+  // marker sits at the last place it was actually seen, not a default pin.
+  const { data: lastKnownData } = useStaleWhileRevalidate(
+    `/api/telemetry/last/${effectiveRouteIdSafe}`,
+    { cacheKey: `home:last-loc:${effectiveRouteIdSafe}`, staleTime: 15000, token: user?.token },
+  );
+  const lastKnown = useMemo(() => {
+    const d = lastKnownData?.data;
+    if (!d?.lat || !d?.lng) return null;
+    return { position: [d.lat, d.lng], timestamp: d.timestamp, speed: d.speed };
+  }, [lastKnownData]);
+
+  // While offline, show the bus at its last DB position.
+  useEffect(() => {
+    if (!isLive && lastKnown) {
+      setBusLocation(lastKnown.position);
+    }
+  }, [isLive, lastKnown]);
 
   // Dynamic Effective Route ID: Switches instantly to newRouteId when merged, or keeps original if cancelled
   const effectiveRouteId = mergeInfo?.isCancelled 
@@ -209,8 +233,10 @@ const Home = () => {
       transports: ['websocket', 'polling'],
       auth: { token: user?.token },
       reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000
+      // No attempt cap — capping at 5 made the map go permanently dead when
+      // the backend cold-start took longer than the retries allowed.
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
     });
 
     socket.on('connect', () => {
@@ -726,13 +752,12 @@ const Home = () => {
 
         {/* BENTO GRID */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 transition-all duration-500">
-          
-          {/* LEFT COLUMN: Info & Telemetry
-              When the map is hidden the content must FILL the row. The old
-              `lg:col-start-3` left the first two of twelve grid columns
-              permanently empty, which made the whole page read as a narrow
-              strip floating in dead space on a wide screen. */}
-          <div className={`${showMap ? 'lg:col-span-6 xl:col-span-5' : 'lg:col-span-12 xl:col-span-12'} flex flex-col gap-8 transition-all duration-500`}>
+
+          {/* LEFT COLUMN: Info & Telemetry.
+              Stays a 12-col grid in BOTH modes so the map always sits beside
+              the content on wide screens — the old ternary dropped to
+              grid-cols-1 with the map open and threw it full-width below. */}
+          <div className={`${showMap ? 'lg:col-span-6 xl:col-span-5' : 'lg:col-span-12 xl:col-span-12'} flex flex-col gap-8 transition-all duration-500 min-w-0`}>
             
             {/* With the map hidden the column is wide, so the cards sit
                 side by side instead of one tall narrow stack. */}
@@ -826,58 +851,6 @@ const Home = () => {
               </CardContent>
             </Card>
 
-            {/* LIVE TELEMETRY CARD */}
-            <Card className="rounded-3xl border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl">
-              <CardHeader className="border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50 pb-5 px-6 pt-6">
-                <CardTitle className="flex justify-between items-center text-lg font-bold text-blue-700 dark:text-blue-400">
-                  {t('liveSensors')}
-                  <Badge variant="outline" className={`font-semibold px-3 py-1 text-sm ${telemetry ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-900' : 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-900'}`}>
-                    {telemetry && <span className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span>}
-                    {telemetry ? t('sensorLive') : t('sensorOffline')}
-                  </Badge>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-6">
-                {telemetry ? (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl flex flex-col gap-2 border border-slate-100 dark:border-slate-700">
-                      <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-[13px] font-semibold capitalize tracking-wide">
-                        <Activity size={16} className="text-blue-500" /> Speed
-                      </div>
-                      <div className="text-2xl font-black text-slate-900 dark:text-white">
-                        {telemetry.speed.toFixed(1)} <span className="text-sm font-semibold text-slate-500">km/h</span>
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl flex flex-col gap-2 border border-slate-100 dark:border-slate-700">
-                      <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-[13px] font-semibold capitalize tracking-wide">
-                        <Compass size={16} className="text-orange-500" /> Direction
-                      </div>
-                      <div className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2 mt-1">
-                        <Navigation size={18} style={{ transform: `rotate(${telemetry.heading}deg)` }} className="text-slate-700 dark:text-slate-300 transition-transform duration-500" />
-                        {getDirection(telemetry.heading)}
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-50 dark:bg-slate-800 p-4 px-5 rounded-2xl col-span-2 flex justify-between items-center border border-slate-100 dark:border-slate-700">
-                      <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-sm font-semibold capitalize tracking-wide">
-                        <Wind size={18} className={telemetry.comfort === 'Smooth' ? 'text-green-500' : 'text-orange-500'} /> {t('rideComfort')}
-                      </div>
-                      <div className={`text-base font-bold ${telemetry.comfort === 'Smooth' ? 'text-green-600 dark:text-green-400' : 'text-orange-500'}`}>
-                        {translateComfort(telemetry.comfort)}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-8 text-center bg-red-50 dark:bg-red-950/20 rounded-2xl border-2 border-dashed border-red-200 dark:border-red-900/50 flex flex-col items-center gap-2">
-                    <AlertOctagon size={32} className="text-red-500 mb-2 opacity-50" />
-                    <p className="m-0 font-bold text-red-600 dark:text-red-400">{t('sensorsNotConnected')}</p>
-                    <p className="m-0 text-sm text-red-500/70 dark:text-red-400/70">{t('waitingForHardware')}</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
             {!showMap && (
               <Button
                 variant="secondary"
@@ -956,9 +929,10 @@ const Home = () => {
 
           </div>
 
-          {/* RIGHT COLUMN: Real Leaflet Map */}
-          <div className={`lg:col-span-6 xl:col-span-7 h-[480px] xl:h-[620px] ${showMap ? 'flex animate-in slide-in-from-right-8 fade-in duration-500' : 'hidden'}`}>
-            <Card className="rounded-3xl border-4 border-blue-500/20 shadow-lg overflow-hidden flex-1 relative flex flex-col bg-slate-100 dark:bg-slate-800">
+          {/* RIGHT COLUMN: Real Leaflet Map — fixed height, and min-h-0 on
+              every flex level so the map host fills the card exactly. */}
+          <div className={`lg:col-span-6 xl:col-span-7 h-[520px] xl:h-[640px] min-h-0 ${showMap ? 'flex animate-in slide-in-from-right-8 fade-in duration-500' : 'hidden'}`}>
+            <Card className="rounded-3xl border-4 border-blue-500/20 shadow-lg overflow-hidden flex-1 relative flex flex-col min-h-0 bg-slate-100 dark:bg-slate-800">
               <div className="bg-blue-600/95 backdrop-blur-md text-white p-3 px-5 flex justify-between items-center z-10 shrink-0">
                 <h3 className="font-bold flex items-center gap-2 text-sm">
                   <MapPin size={16} /> GPS Tracking
@@ -967,7 +941,7 @@ const Home = () => {
                   <X size={16} />
                 </Button>
               </div>
-              <div className="flex-1 relative z-0">
+              <div className="flex-1 relative z-0 min-h-0">
                 <UnifiedMap
                   busLocation={busLocation}
                   routeInfo={routeInfo}
@@ -976,10 +950,11 @@ const Home = () => {
                   initialZoom={15}
                   height="100%"
                   busLabel={`Bus ${routeInfo?.busNumber || routeInfo?.bus_number || 'UP 25 AB 1234'}`}
+                  lastKnown={lastKnown}
                   showFullscreenButton={true}
                   showAutoFollowToggle={true}
                   showRecenterButton={true}
-                  showTelemetryPanel={false}
+                  showTelemetryPanel={true}
                   showRoutePolyline={true}
                   showDestinationMarker={true}
                 />
