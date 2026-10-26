@@ -108,7 +108,7 @@ const FloatingIcons = ({ iconColor = 'text-[#FF6B00] dark:text-[#FF6B00]' }) => 
 const PublicRoute = ({ children }) => {
   const { user } = useAuth();
   if (user) {
-    if (user.role === 'admin') return <Navigate to="/admin-dashboard" replace />;
+    if (user.role === 'admin' || user.role === 'tech_admin') return <Navigate to="/admin-dashboard" replace />;
     if (user.role === 'transport_incharge') return <Navigate to="/transport-incharge-dashboard" replace />;
     if (user.role === 'parent') return <Navigate to="/parent-dashboard" replace />;
     return <Navigate to="/home" replace />;
@@ -226,7 +226,7 @@ function App() {
                 <Route 
                   path="/transport-incharge-dashboard" 
                   element={
-                    <ProtectedRoute allowedRoles={['transport_incharge']}>
+                    <ProtectedRoute allowedRoles={['transport_incharge', 'admin', 'tech_admin']}>
                       <TransportInchargeDashboard />
                     </ProtectedRoute>
                   } 

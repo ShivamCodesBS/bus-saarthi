@@ -55,9 +55,11 @@ export class SosService {
     });
 
     const now = new Date();
-    const timeFormatted = now.toLocaleTimeString([], {
+    const timeFormatted = now.toLocaleTimeString('en-IN', {
+      timeZone: 'Asia/Kolkata',
       hour: '2-digit',
       minute: '2-digit',
+      hour12: true,
     });
     const fullTimestamp = now.toISOString();
     this.eventEmitter.emit('sos.triggered', {
@@ -127,9 +129,11 @@ export class SosService {
         login_id: a.loginId,
         passenger: a.passenger || a.loginId || 'Student',
         route: a.route,
-        time: new Date(a.time).toLocaleTimeString([], {
+        time: new Date(a.time).toLocaleTimeString('en-IN', {
+          timeZone: 'Asia/Kolkata',
           hour: '2-digit',
           minute: '2-digit',
+          hour12: true,
         }),
         timestamp: a.time.toISOString(),
       })),
@@ -153,9 +157,11 @@ export class SosService {
         ? {
             id: active.id,
             route: active.route,
-            time: new Date(active.time).toLocaleTimeString([], {
+            time: new Date(active.time).toLocaleTimeString('en-IN', {
+              timeZone: 'Asia/Kolkata',
               hour: '2-digit',
               minute: '2-digit',
+              hour12: true,
             }),
             timestamp: active.time.toISOString(),
           }

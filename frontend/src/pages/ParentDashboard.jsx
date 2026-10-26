@@ -5,11 +5,8 @@ import {
   Gauge, Compass, AlertOctagon, Menu, X, Activity, ChevronLeft, ChevronRight,
   IndianRupee, Megaphone, Settings, Eye, ArrowLeft, GitMerge,
   MessageSquareWarning, RotateCcw, Check, Wrench, Timer, ShieldAlert,
-  Maximize2, AlertTriangle
+  AlertTriangle
 } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
@@ -23,14 +20,7 @@ import {
 import '../index.css';
 import { friendlyError } from '../lib/errors';
 import { StatCardSkeleton, ComplaintSkeleton } from '../components/ui/skeleton';
-
-// Fix Leaflet default icon
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-});
+import UnifiedMap from '../components/UnifiedMap';
 
 // --- Grievance lifecycle states ---
 const GRIEVANCE_STATUS = {
@@ -45,60 +35,6 @@ const GRIEVANCE_STATUS = {
 const PURPLE = '#7c3aed';
 const PURPLE_LIGHT = '#f3e8ff';
 const PURPLE_DARK = '#6d28d9';
-
-const busIcon = new L.Icon({
-  iconUrl: 'https://cdn-icons-png.flaticon.com/512/3448/3448339.png',
-  iconSize: [38, 38],
-  iconAnchor: [19, 19],
-});
-
-const destinationIcon = new L.Icon({
-  iconUrl: 'https://cdn-icons-png.flaticon.com/512/684/684908.png',
-  iconSize: [28, 28],
-  iconAnchor: [14, 28],
-  popupAnchor: [0, -28],
-});
-
-// STOP_COORDS from Home page for route polyline
-const STOP_COORDS = {
-  'Civil Lines': [28.3615, 79.4180],
-  'Rajendra Nagar': [28.3610, 79.4501],
-  'DD Puram': [28.3715, 79.4452],
-  'Pilibhit Bypass': [28.3842, 79.4310],
-  'Invertis University': [28.3180, 79.4670],
-  'labela chowk': [28.3500, 79.4200],
-  'police line': [28.3550, 79.4250],
-  'Chauki Chauraha': [28.3580, 79.4120],
-  'Satellite Bus Stand': [28.3440, 79.4420],
-  'Bareilly Mod': [28.2500, 79.5200],
-  'Shahjahanpur': [27.8805, 79.9140],
-  'Shahjahanpur Bus Stand': [27.8820, 79.9100],
-  'Roza Junction': [27.8350, 79.9200],
-  'Tilhar': [28.0200, 79.7300],
-  'Miranpur Katra': [28.1100, 79.6200],
-  'Badaun': [28.0300, 79.1200],
-  'Badaun Road': [28.2000, 79.2800],
-  'Ujhani': [28.0100, 79.0100],
-  'Dataganj': [27.9400, 79.3500],
-  'Pilibhit': [28.6300, 79.8000],
-  'Bisalpur': [28.3000, 79.8000],
-  'Nawabganj': [28.5400, 79.6300],
-  'Faridpur': [28.2100, 79.5400],
-};
-
-// Map auto-invalidate on resize
-const MapResizer = () => {
-  const map = useMap();
-  useEffect(() => {
-    const t1 = setTimeout(() => map.invalidateSize(), 100);
-    const t2 = setTimeout(() => map.invalidateSize(), 550);
-    const ro = new ResizeObserver(() => map.invalidateSize());
-    const container = map.getContainer();
-    if (container) ro.observe(container);
-    return () => { clearTimeout(t1); clearTimeout(t2); if (container) ro.unobserve(container); };
-  }, [map]);
-  return null;
-};
 
 // --- Stat Card ---
 const StatCard = ({ icon, label, value, color, sub }) => (
@@ -232,7 +168,6 @@ const ParentDashboard = () => {
 
   const [activeTab, setActiveTab] = useState('overview');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isMapExpanded, setIsMapExpanded] = useState(false);
 
   // Data states
   const [parentData, setParentData] = useState(null);
@@ -253,15 +188,8 @@ const ParentDashboard = () => {
   const [telemetry, setTelemetry] = useState(null);
   const [telemetryStale, setTelemetryStale] = useState(false);
   
-  // View locking & map controls (same as student Home map)
+  // View locking & map controls (handled by UnifiedMap)
   const [autoFollow, setAutoFollow] = useState(true);
-  const autoFollowRef = useRef(true);
-  useEffect(() => {
-    autoFollowRef.current = autoFollow;
-  }, [autoFollow]);
-  
-  // Map instance ref for proper map control
-  const mapInstance = useRef(null);
   
   // Dynamic Route Polyline based on routeInfo (same as student Home map)
   const dynamicRoutePolyline = useMemo(() => {
@@ -403,6 +331,8 @@ const ParentDashboard = () => {
       setChildGrievances((prev) =>
         prev.map((g) => (g.id === id ? { ...g, status: 'closed' } : g)),
       );
+      // Refetch to ensure data is fresh
+      await fetchChildGrievances();
       toast.success('Thank you! The complaint is now closed.');
     } catch (err) {
       toast.error(friendlyError(err, 'We could not confirm the fix. Please try again.'));
@@ -441,6 +371,8 @@ const ParentDashboard = () => {
       );
       setRejectingId(null);
       setRejectReason('');
+      // Refetch to ensure data is fresh
+      await fetchChildGrievances();
       toast.success('Complaint reopened. It is now at the top of the queue.');
     } catch (err) {
       toast.error(friendlyError(err, 'We could not reopen the complaint. Please try again.'));
@@ -527,6 +459,8 @@ const ParentDashboard = () => {
     try {
       await axios.post(`${BACKEND_URL}/api/parents/child/${child.loginId}/leave`, { date }, authHeaders);
       toast.success(`Leave marked for ${date}`);
+      // Refetch to ensure data is fresh
+      await fetchAll();
     } catch (err) {
       toast.error('We could not mark the leave. Please try again.');
     }
@@ -797,116 +731,23 @@ const ParentDashboard = () => {
               <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <MapPin size={18} color={PURPLE} />
                 <span style={{ fontWeight: 700, color: 'var(--text-dark)', fontSize: '0.95rem' }}>Live Bus Location</span>
-                <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <span style={{
-                    fontSize: '0.72rem', fontWeight: 600,
-                    background: telemetryStale || !telemetry ? '#fff1f0' : '#e6fae6',
-                    color: telemetryStale || !telemetry ? '#cf1322' : '#28a745',
-                    padding: '2px 8px', borderRadius: '10px',
-                  }}>
-                    {telemetryStale || !telemetry ? '● No Signal' : '● Live'}
-                  </span>
-                  <button
-                    onClick={() => setIsMapExpanded(true)}
-                    style={{
-                      background: PURPLE_LIGHT, border: `1px solid ${PURPLE}`, color: PURPLE,
-                      padding: '4px 10px', borderRadius: '8px', fontSize: '0.72rem',
-                      fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px',
-                    }}
-                    title="Expand Map"
-                  >
-                    <Maximize2 size={14} /> Fullscreen
-                  </button>
-                </div>
               </div>
-              <div style={{ height: '320px', position: 'relative' }}>
-                {/* Recenter Button */}
-                <div style={{ position: 'absolute', top: '12px', right: '12px', zIndex: 500, pointerEvents: 'auto' }}>
-                  <button
-                    onClick={() => {
-                      setAutoFollow(true);
-                      if (mapInstance.current) {
-                        mapInstance.current.setView(busLocation, 16, { animate: true });
-                      }
-                    }}
-                    title="Recenter on bus"
-                    style={{
-                      padding: '6px',
-                      borderRadius: '50%',
-                      background: 'rgba(255,255,255,0.95)',
-                      backdropFilter: 'blur(4px)',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
-                      border: '1px solid var(--border-color)',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: '36px',
-                      height: '36px',
-                    }}
-                  >
-                    <Navigation size={18} color={PURPLE} />
-                  </button>
-                </div>
-
-                {/* Auto-follow toggle (lock view) */}
-                <div style={{ position: 'absolute', bottom: '12px', right: '12px', zIndex: 500, pointerEvents: 'auto' }}>
-                  <label style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '4px 10px',
-                    borderRadius: '20px',
-                    fontSize: '0.72rem',
-                    fontWeight: 700,
-                    background: 'rgba(255,255,255,0.95)',
-                    backdropFilter: 'blur(4px)',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
-                    border: '1px solid var(--border-color)',
-                    cursor: 'pointer',
-                    color: 'var(--text-dark)',
-                  }}>
-                    <input
-                      type="checkbox"
-                      checked={autoFollow}
-                      onChange={(e) => {
-                        setAutoFollow(e.target.checked);
-                        if (e.target.checked && mapInstance.current) {
-                          mapInstance.current.setView(busLocation, 16, { animate: true });
-                        }
-                      }}
-                      style={{ accentColor: PURPLE, cursor: 'pointer' }}
-                    />
-                    <span>Lock on Bus</span>
-                  </label>
-                </div>
-
-                <MapContainer 
-                  center={busLocation} 
-                  zoom={14} 
-                  style={{ height: '100%', width: '100%' }} 
-                  zoomControl={true}
-                  attributionControl={true}
-                  scrollWheelZoom={true}
-                  dragging={true}
-                  whenCreated={(map) => { mapInstance.current = map; }}
-                >
-                  <MapResizer />
-                  <TileLayer
-                    url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
-                    attribution='&copy; Google Maps'
-                  />
-                  <Marker position={busLocation} icon={busIcon}>
-                    <Popup>
-                      <b>Bus {routeInfo?.busNumber || routeInfo?.bus_number || child?.routeId || 'UP 25 AB 1234'}</b><br />
-                      Speed: {telemetry && !telemetryStale ? Math.round(telemetry.speed) : 0} km/h
-                    </Popup>
-                  </Marker>
-                  <Polyline positions={dynamicRoutePolyline} color="#0056b3" weight={5} opacity={0.8} />
-                  <Marker position={dynamicRoutePolyline[dynamicRoutePolyline.length - 1]} icon={destinationIcon}>
-                    <Popup>Destination</Popup>
-                  </Marker>
-                </MapContainer>
+              <div style={{ position: 'relative' }}>
+                <UnifiedMap
+                  busLocation={busLocation}
+                  routeInfo={routeInfo}
+                  telemetry={telemetry}
+                  isLive={!!telemetry && !telemetryStale}
+                  initialZoom={14}
+                  height="320px"
+                  busLabel={`Bus ${routeInfo?.busNumber || routeInfo?.bus_number || child?.routeId || ''}`}
+                  showFullscreenButton={true}
+                  showAutoFollowToggle={true}
+                  showRecenterButton={true}
+                  showTelemetryPanel={true}
+                  showRoutePolyline={true}
+                  showDestinationMarker={true}
+                />
               </div>
             </div>
 
@@ -1366,14 +1207,14 @@ const ParentDashboard = () => {
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
                     <XAxis
                       dataKey="timestamp"
-                      tickFormatter={(t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      tickFormatter={(t) => new Date(t).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })}
                       tick={{ fontSize: 10, fill: 'var(--text-light)' }}
                     />
                     <YAxis tick={{ fontSize: 10, fill: 'var(--text-light)' }} />
                     <Tooltip
                       contentStyle={{ borderRadius: '10px', fontSize: '0.82rem', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
                       formatter={(v) => [`${v} km/h`, 'Speed']}
-                      labelFormatter={(l) => new Date(l).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                      labelFormatter={(l) => new Date(l).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
                     />
                     {speedData.speedLimit && (
                       <ReferenceLine y={speedData.speedLimit} stroke="#ef4444" strokeDasharray="5 5" label={{ value: `Limit ${speedData.speedLimit}`, fill: '#ef4444', fontSize: 10 }} />
@@ -1424,108 +1265,7 @@ const ParentDashboard = () => {
       </div>
 
       {/* EXPANDED MAP MODAL */}
-      {isMapExpanded && (
-        <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-md z-[100] flex flex-col animate-in fade-in duration-200">
-          <div className="p-4 md:px-6 flex justify-between items-center text-white shrink-0 shadow-md" style={{ background: PURPLE_DARK }}>
-            <h2 className="font-bold flex items-center gap-2 text-lg m-0">
-              <MapPin size={20} /> Full Screen Tracking — Route {child?.routeId || '—'} {routeInfo?.busNumber ? `(Bus ${routeInfo.busNumber})` : ''}
-            </h2>
-            <button
-              onClick={() => setIsMapExpanded(false)}
-              className="text-white hover:bg-white/20 p-2 rounded-full border-none bg-transparent cursor-pointer flex items-center justify-center transition-colors"
-              title="Close Fullscreen"
-            >
-              <X size={24} />
-            </button>
           </div>
-          <div className="flex-1 z-0 relative">
-            {/* Auto-follow & Recenter in Fullscreen */}
-            <div style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 500, pointerEvents: 'auto' }}>
-              <button
-                onClick={() => {
-                  setAutoFollow(true);
-                  if (mapInstance.current) {
-                    mapInstance.current.setView(busLocation, 16, { animate: true });
-                  }
-                }}
-                title="Recenter on bus"
-                style={{
-                  padding: '8px',
-                  borderRadius: '50%',
-                  background: 'rgba(255,255,255,0.95)',
-                  boxShadow: '0 2px 10px rgba(0,0,0,0.25)',
-                  border: '1px solid var(--border-color)',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: '40px',
-                  height: '40px',
-                }}
-              >
-                <Navigation size={20} color={PURPLE} />
-              </button>
-            </div>
-
-            <div style={{ position: 'absolute', bottom: '16px', right: '16px', zIndex: 500, pointerEvents: 'auto' }}>
-              <label style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '6px 14px',
-                borderRadius: '24px',
-                fontSize: '0.78rem',
-                fontWeight: 700,
-                background: 'rgba(255,255,255,0.95)',
-                boxShadow: '0 2px 10px rgba(0,0,0,0.25)',
-                border: '1px solid var(--border-color)',
-                cursor: 'pointer',
-                color: 'var(--text-dark)',
-              }}>
-                <input
-                  type="checkbox"
-                  checked={autoFollow}
-                  onChange={(e) => {
-                    setAutoFollow(e.target.checked);
-                    if (e.target.checked && mapInstance.current) {
-                      mapInstance.current.setView(busLocation, 16, { animate: true });
-                    }
-                  }}
-                  style={{ accentColor: PURPLE, cursor: 'pointer' }}
-                />
-                <span>Lock on Bus</span>
-              </label>
-            </div>
-
-            <MapContainer 
-              center={busLocation} 
-              zoom={15} 
-              style={{ height: '100%', width: '100%' }} 
-              zoomControl={true} 
-              scrollWheelZoom={true} 
-              dragging={true}
-              whenCreated={(map) => { mapInstance.current = map; }}
-            >
-              <MapResizer />
-              <TileLayer
-                url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
-                attribution='&copy; Google Maps'
-              />
-              <Marker position={busLocation} icon={busIcon}>
-                <Popup>
-                  <b>Bus {routeInfo?.busNumber || routeInfo?.bus_number || child?.routeId || 'UP 25 AB 1234'}</b><br />
-                  Speed: {telemetry && !telemetryStale ? Math.round(telemetry.speed) : 0} km/h
-                </Popup>
-              </Marker>
-              <Polyline positions={dynamicRoutePolyline} color="#0056b3" weight={6} />
-              <Marker position={dynamicRoutePolyline[dynamicRoutePolyline.length - 1]} icon={destinationIcon}>
-                <Popup>Destination</Popup>
-              </Marker>
-            </MapContainer>
-          </div>
-        </div>
-      )}
-    </div>
   );
 };
 

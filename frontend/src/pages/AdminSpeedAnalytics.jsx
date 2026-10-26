@@ -42,7 +42,7 @@ export default function AdminSpeedAnalytics() {
   // Format chart time
   const formatXAxis = (tickItem) => {
     const d = new Date(tickItem);
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
   };
 
   const CustomTooltip = ({ active, payload, label }) => {
@@ -50,7 +50,7 @@ export default function AdminSpeedAnalytics() {
       return (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-4 rounded-xl shadow-xl">
           <p className="font-bold text-slate-800 dark:text-slate-100 mb-2">
-            {new Date(label).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            {new Date(label).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
           </p>
           <p className="text-orange-500 font-bold m-0 flex items-center gap-2">
             <Activity size={16} /> Speed: {payload[0].value} km/h
@@ -244,7 +244,7 @@ export default function AdminSpeedAnalytics() {
                         return (
                           <tr key={i} className="border-b border-slate-100 dark:border-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
                             <td className="p-4 font-bold text-slate-700 dark:text-slate-300">
-                              {new Date(v.timestamp).toLocaleTimeString()}
+                              {new Date(v.timestamp).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
                             </td>
                             <td className="p-4">
                               <span className="font-black text-red-600 dark:text-red-400 text-lg">{Math.round(v.speed)}</span> 

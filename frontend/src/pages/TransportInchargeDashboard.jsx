@@ -2,35 +2,21 @@ import { useState, useEffect, useRef } from 'react';
 import { Users, MapPin, LogOut, Settings, Bell, AlertOctagon, CheckCircle2, MessageSquare, Trash2, UserPlus, Navigation, X, User, Menu, Eye, Download, Upload, GitMerge, Undo2, Sparkles, AlertTriangle, ArrowRight, History, Layers, Wrench, Timer, RotateCcw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useLang } from '../context/LanguageContext';
 import { io } from 'socket.io-client';
 import toast from 'react-hot-toast';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
 import axios from 'axios';
-import { BACKEND_URL } from '../config';
+import { BACKEND_URL, SOCKET_URL } from '../config';
 import '../index.css';
 import HamburgerMenu from '../components/HamburgerMenu';
 import UserAvatar from '../components/UserAvatar';
 import Papa from 'papaparse';
-import { sanitizePayload, normalizeFeeStatus, USER_PAYLOAD_KEYS } from '../lib/utils';
+import { sanitizePayload, normalizeFeeStatus, USER_PAYLOAD_KEYS, formatSosTime } from '../lib/utils';
 import { friendlyError } from '../lib/errors';
 import { ComplaintSkeleton, RouteSkeleton, UserRowSkeleton } from '../components/ui/skeleton';
+import UnifiedMap from '../components/UnifiedMap';
+import { useStaleWhileRevalidate } from '../hooks/useStaleWhileRevalidate';
 
-
-// Fix for default marker icon in react-leaflet
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-});
-
-const busIcon = new L.Icon({
-  iconUrl: 'https://cdn-icons-png.flaticon.com/512/3448/3448339.png',
-  iconSize: [35, 35],
-  iconAnchor: [17, 17],
-});
 
 // Grievance lifecycle states, mirroring the backend enum.
 const GRIEVANCE_STATUS = {
@@ -39,24 +25,6 @@ const GRIEVANCE_STATUS = {
   resolved:     { label: 'Awaiting Confirmation',     bg: '#e6f4ff', color: '#0958d9', Icon: Timer },
   reopened:     { label: 'Not Resolved (Reopened)',   bg: '#fff1f0', color: '#cf1322', Icon: RotateCcw },
   closed:       { label: 'Closed - Confirmed',        bg: '#e6fae6', color: '#28a745', Icon: CheckCircle2 },
-};
-
-// Component to handle map container resizing
-const MapResizer = () => {
-  const map = useMap();
-  useEffect(() => {
-    const t1 = setTimeout(() => map.invalidateSize(), 100);
-    const t2 = setTimeout(() => map.invalidateSize(), 500);
-    const ro = new ResizeObserver(() => map.invalidateSize());
-    const container = map.getContainer();
-    if (container) ro.observe(container);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      if (container) ro.unobserve(container);
-    };
-  }, [map]);
-  return null;
 };
 
 const TransportInchargeDashboard = () => {
@@ -91,7 +59,111 @@ const TransportInchargeDashboard = () => {
   const [grievanceFilter, setGrievanceFilter] = useState('all');
   const [grievanceBusy, setGrievanceBusy] = useState(new Set());
   const [attendanceLogs, setAttendanceLogs] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
+
+  // Data Fetching with Stale-While-Revalidate
+  const {
+    data: routesData,
+    isLoading: routesLoading,
+    refetch: refetchRoutes,
+  } = useStaleWhileRevalidate('/api/routes', {
+    cacheKey: 'admin:routes',
+    staleTime: 60000,
+    token: user?.token,
+    onData: (data) => {
+      setRoutesList(data);
+      setSelectedRoute((prev) => {
+        if (prev === '1' && data.length > 0) {
+          return String(data[0].routeId || data[0].route_id);
+        }
+        return prev;
+      });
+    },
+  });
+
+  const {
+    data: grievancesData,
+    isLoading: grievancesLoading,
+    refetch: refetchGrievances,
+  } = useStaleWhileRevalidate('/api/admin/grievances', {
+    cacheKey: 'admin:grievances',
+    staleTime: 30000,
+    token: user?.token,
+    onData: (data) => setGrievances(data),
+  });
+
+  const {
+    data: usersData,
+    isLoading: usersLoading,
+    refetch: refetchUsers,
+  } = useStaleWhileRevalidate('/api/users', {
+    cacheKey: 'admin:users',
+    staleTime: 60000,
+    token: user?.token,
+    onData: (data) => setUsersList(data),
+  });
+
+  const {
+    data: attendanceData,
+    isLoading: attendanceLoading,
+    refetch: refetchAttendance,
+  } = useStaleWhileRevalidate('/api/attendance', {
+    cacheKey: 'admin:attendance',
+    staleTime: 30000,
+    token: user?.token,
+    onData: (data) => setAttendanceLogs(data),
+  });
+
+  const {
+    data: activeMergesData,
+    refetch: refetchActiveMerges,
+  } = useStaleWhileRevalidate('/api/merge/active', {
+    cacheKey: 'admin:merges:active',
+    staleTime: 30000,
+    token: user?.token,
+    onData: (data) => setActiveMerges(data),
+  });
+
+  const {
+    data: mergeSuggestionsData,
+    refetch: refetchMergeSuggestions,
+  } = useStaleWhileRevalidate('/api/merge/suggestions', {
+    cacheKey: 'admin:merges:suggestions',
+    staleTime: 60000,
+    token: user?.token,
+    onData: (data) => setMergeSuggestions(data),
+  });
+
+  const {
+    data: mergeHistoryData,
+    refetch: refetchMergeHistory,
+  } = useStaleWhileRevalidate('/api/merge/history', {
+    cacheKey: 'admin:merges:history',
+    staleTime: 60000,
+    token: user?.token,
+    onData: (data) => setMergeHistory(data),
+  });
+
+  const {
+    data: sosData,
+    isLoading: sosLoading,
+    refetch: refetchSos,
+  } = useStaleWhileRevalidate('/api/sos/active', {
+    cacheKey: 'admin:sos:active',
+    staleTime: 10000,
+    token: user?.token,
+    onData: (data) => {
+      if (Array.isArray(data) && data.length > 0) {
+        const formatted = data.map((alert) => ({
+          ...alert,
+          time: formatSosTime(alert.timestamp, alert.time),
+        }));
+        setSosAlerts(formatted);
+      }
+    },
+  });
+
+  const hasCachedData = routesData || grievancesData || usersData || attendanceData || activeMergesData || mergeSuggestionsData || mergeHistoryData || sosData;
+  const isLoading = !hasCachedData && (routesLoading || grievancesLoading || usersLoading || attendanceLoading || sosLoading);
 
   // User Management
   const [userFilter, setUserFilter] = useState('driver'); // 'driver' or 'passenger'
@@ -112,7 +184,7 @@ const TransportInchargeDashboard = () => {
   const [selectedRoute, setSelectedRoute] = useState('1');
   const [busLocation, setBusLocation] = useState([28.3180, 79.4670]);
   const [isBusActive, setIsBusActive] = useState(false);
-  const telemetryTimeoutRef = useRef(null);
+  const [busTelemetry, setBusTelemetry] = useState(null);
   const selectedRouteRef = useRef(selectedRoute);
   // The socket effect closes over the token; a ref keeps it in sync without
   // tearing down and re-creating the socket on every token change.
@@ -157,11 +229,32 @@ const TransportInchargeDashboard = () => {
   const [fullScreenMedia, setFullScreenMedia] = useState(null);
   const [zoomLevel, setZoomLevel] = useState(1);
 
+  // Flag unread notifications in an effect rather than during render.
   useEffect(() => {
-    const socket = io(BACKEND_URL, { transports: ['websocket', 'polling'] });
+    if (showNotifications) return;
+    const allNotificationIds = [
+      ...sosAlerts.map(alert => `sos-${alert.id}`),
+      ...grievances.filter(g => g.status === 'pending').map(g => `grievance-${g.id}`)
+    ];
+    const hasNew = allNotificationIds.some((id) => !seenIds.includes(id));
+    if (hasNew) {
+      setHasUnread(true);
+    }
+  }, [sosAlerts, grievances, seenIds, showNotifications]);
+
+  useEffect(() => {
+    if (!user?.token) return;
+    const socket = io(SOCKET_URL, {
+      transports: ['websocket', 'polling'],
+      auth: { token: user.token },
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+    });
+
     socket.on('connect', () => {
       console.log('Transport Incharge connected to socket server');
-      socket.emit('join_admin', { token: tokenRef.current });
+      socket.emit('join_admin', { token: user.token });
     });
 
     socket.on('connect_error', (err) => {
@@ -169,12 +262,13 @@ const TransportInchargeDashboard = () => {
     });
 
     socket.on('sos_alert', (data) => {
+      const alertTime = formatSosTime(data.timestamp, data.time);
       const newAlert = {
         id: `${data.login_id}-${data.timestamp || data.time}`,
         route: data.route,
         passenger: data.passenger,
         login_id: data.login_id,
-        time: data.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        time: alertTime,
         timestamp: data.timestamp || new Date().toISOString(),
       };
       setSosAlerts(prev => {
@@ -204,8 +298,14 @@ const TransportInchargeDashboard = () => {
       if (data.location && data.location.lat && data.location.lng) {
         setBusLocation([data.location.lat, data.location.lng]);
         setIsBusActive(true);
-        if (telemetryTimeoutRef.current) clearTimeout(telemetryTimeoutRef.current);
-        telemetryTimeoutRef.current = setTimeout(() => setIsBusActive(false), 15000);
+      }
+      if (data.speed !== undefined || data.heading !== undefined || data.comfort !== undefined) {
+        setBusTelemetry({
+          speed: data.speed || 0,
+          heading: data.heading || 0,
+          comfort: data.comfort || 'Smooth',
+          lastUpdated: new Date().toISOString()
+        });
       }
     });
 
@@ -221,73 +321,15 @@ const TransportInchargeDashboard = () => {
 
     setSocketInstance(socket);
     return () => socket.disconnect();
-  }, []);
+  }, [user?.token]);
 
   useEffect(() => {
     if (socketInstance) {
       socketInstance.emit('join_route', { route_id: selectedRoute });
       setIsBusActive(false);
-      if (telemetryTimeoutRef.current) clearTimeout(telemetryTimeoutRef.current);
+      setBusTelemetry(null);
     }
   }, [selectedRoute, socketInstance]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const fetchData = async () => {
-      setIsLoading(true);
-      const authHeaders = { headers: { Authorization: `Bearer ${user?.token}` } };
-      try {
-        const [rRes, gRes, usersRes, attRes, mRes, sRes, hRes, sosRes] = await Promise.all([
-          axios.get(`${BACKEND_URL}/api/routes`, authHeaders).catch(e => { console.warn('Routes fetch failed'); return { data: { status: 'error' } }; }),
-          axios.get(`${BACKEND_URL}/api/admin/grievances`, authHeaders).catch(e => { console.warn('Grievances fetch failed'); return { data: { status: 'error' } }; }),
-          axios.get(`${BACKEND_URL}/api/users`, authHeaders).catch(e => { console.warn('Users fetch failed'); return { data: { status: 'error' } }; }),
-          axios.get(`${BACKEND_URL}/api/attendance`, authHeaders).catch(e => { console.warn('Attendance fetch failed'); return { data: { status: 'error' } }; }),
-          axios.get(`${BACKEND_URL}/api/merge/active`, authHeaders).catch(e => ({ data: { data: [] } })),
-          axios.get(`${BACKEND_URL}/api/merge/suggestions`, authHeaders).catch(e => ({ data: { data: [] } })),
-          axios.get(`${BACKEND_URL}/api/merge/history`, authHeaders).catch(e => ({ data: { data: [] } })),
-          axios.get(`${BACKEND_URL}/api/sos/active`, authHeaders).catch(e => ({ data: { data: [] } })),
-        ]);
-
-        if (cancelled) return;
-
-        const routes = Array.isArray(rRes.data) ? rRes.data : (rRes.data?.data || []);
-        const grievancesData = Array.isArray(gRes.data) ? gRes.data : (gRes.data?.data || []);
-        const usersData = Array.isArray(usersRes.data) ? usersRes.data : (usersRes.data?.data || []);
-        const attendanceData = Array.isArray(attRes.data) ? attRes.data : (attRes.data?.data || []);
-        const sosData = Array.isArray(sosRes.data) ? sosRes.data : (sosRes.data?.data || []);
-
-        setRoutesList(routes);
-        setSelectedRoute((prev) => {
-          if (prev === '1' && routes.length > 0) {
-            return String(routes[0].routeId || routes[0].route_id);
-          }
-          return prev;
-        });
-
-        setGrievances(grievancesData);
-        // Keep every role — the Users tab filters by role itself.
-        setUsersList(usersData);
-        setAttendanceLogs(attendanceData);
-        setActiveMerges(mRes.data?.data || []);
-        setMergeSuggestions(sRes.data?.data || []);
-        setMergeHistory(hRes.data?.data || []);
-        if (sosData.length > 0) setSosAlerts(sosData);
-
-      } catch (err) {
-        if (cancelled) return;
-        console.error("Error fetching data", err);
-        toast.error("Network error: Unable to reach the server.", { id: 'ti_network_err' });
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
-    };
-    fetchData();
-    return () => { cancelled = true; };
-    // `activeTab` is deliberately NOT a dependency: switching tabs re-ran all
-    // eight requests for no reason. `user?.token` is included so a new token
-    // triggers a reload.
-  }, [user?.token]);
 
   const handleLogout = () => {
     logout();
@@ -339,15 +381,11 @@ const TransportInchargeDashboard = () => {
       }
 
       setMergeFormData({ cancelled_route_id: '', target_route_id: '', reason: 'low_attendance', notes: '', mode: 'merge' });
-      
-      const [mRes, sRes, hRes] = await Promise.all([
-        axios.get(`${BACKEND_URL}/api/merge/active`, authHeaders),
-        axios.get(`${BACKEND_URL}/api/merge/suggestions`, authHeaders),
-        axios.get(`${BACKEND_URL}/api/merge/history`, authHeaders),
+      await Promise.all([
+        refetchActiveMerges(),
+        refetchMergeSuggestions(),
+        refetchMergeHistory(),
       ]);
-      setActiveMerges(mRes.data?.data || []);
-      setMergeSuggestions(sRes.data?.data || []);
-      setMergeHistory(hRes.data?.data || []);
     } catch (err) {
       toast.error(friendlyError(err, 'Failed to process bus operation'));
     } finally {
@@ -362,14 +400,11 @@ const TransportInchargeDashboard = () => {
       const res = await axios.post(`${BACKEND_URL}/api/merge/${mergeId}/undo`, {}, authHeaders);
       if (res.data.status === 'success') {
         toast.success(res.data.message || 'Merge undone successfully!');
-        const [mRes, sRes, hRes] = await Promise.all([
-          axios.get(`${BACKEND_URL}/api/merge/active`, authHeaders),
-          axios.get(`${BACKEND_URL}/api/merge/suggestions`, authHeaders),
-          axios.get(`${BACKEND_URL}/api/merge/history`, authHeaders),
+        await Promise.all([
+          refetchActiveMerges(),
+          refetchMergeSuggestions(),
+          refetchMergeHistory(),
         ]);
-        setActiveMerges(mRes.data?.data || []);
-        setMergeSuggestions(sRes.data?.data || []);
-        setMergeHistory(hRes.data?.data || []);
       }
     } catch (err) {
       toast.error(friendlyError(err, 'Failed to undo merge'));
@@ -402,6 +437,7 @@ const TransportInchargeDashboard = () => {
             : g,
         ),
       );
+      await refetchGrievances();
       toast.success(
         'Marked as fixed. The complaint stays open until the complainant confirms it.',
       );
@@ -428,6 +464,7 @@ const TransportInchargeDashboard = () => {
       setGrievances((prev) =>
         prev.map((g) => (g.id === id ? { ...g, status: 'in_progress' } : g)),
       );
+      await refetchGrievances();
       toast.success('Marked as in progress. The complainant has been notified.');
     } catch (err) {
       toast.error(friendlyError(err, 'Failed to update complaint'));
@@ -449,6 +486,7 @@ const TransportInchargeDashboard = () => {
         { hours: 24 },
         { headers: { Authorization: `Bearer ${user?.token}` } },
       );
+      await refetchGrievances();
       toast.success('Confirmation window extended by 24 hours.');
     } catch (err) {
       toast.error(friendlyError(err, 'Failed to extend deadline'));
@@ -466,6 +504,7 @@ const TransportInchargeDashboard = () => {
     try {
       await axios.delete(`${BACKEND_URL}/api/users/${login_id}`, { headers: { Authorization: `Bearer ${user?.token}` } });
       setUsersList((prev) => prev.filter((u) => u.loginId !== login_id));
+      await refetchUsers();
       toast.success("User deleted successfully!");
     } catch (err) {
       toast.error(friendlyError(err, "Failed to delete user"));
@@ -504,11 +543,7 @@ const TransportInchargeDashboard = () => {
         toast.success("User created successfully!");
       }
       setShowUserModal(false);
-      const res = await axios.get(`${BACKEND_URL}/api/users`, authHeaders);
-      // GET /api/users returns a bare array — the old `res.data.status ===
-      // 'success'` check was never true, so the list never refreshed.
-      const users = Array.isArray(res.data) ? res.data : (res.data?.data || []);
-      setUsersList(users);
+      await refetchUsers();
     } catch (err) {
       toast.error(friendlyError(err, "Failed to save user"));
     }
@@ -583,9 +618,7 @@ const TransportInchargeDashboard = () => {
       setShowBulkUploadModal(false);
       setBulkUploadData([]);
       setBulkUploadErrors([]);
-      
-      const fetchRes = await axios.get(`${BACKEND_URL}/api/users`, authHeaders);
-      if (fetchRes.data.status === 'success') setUsersList(fetchRes.data.data.filter(u => ['driver', 'passenger'].includes(u.role)));
+      await refetchUsers();
     } catch (err) {
       toast.error(friendlyError(err, "Failed to process bulk upload"));
     }
@@ -619,8 +652,7 @@ const TransportInchargeDashboard = () => {
         await axios.post(`${BACKEND_URL}/api/routes`, routeFormData, authHeaders);
       }
       setShowRouteModal(false);
-      const res = await axios.get(`${BACKEND_URL}/api/routes`, authHeaders);
-      if (res.data.status === 'success') setRoutesList(res.data.data);
+      await refetchRoutes();
     } catch (err) {
       toast.error(friendlyError(err, "Failed to save route"));
     }
@@ -653,7 +685,7 @@ const TransportInchargeDashboard = () => {
     if (!window.confirm("Delete this route?")) return;
     try {
       await axios.delete(`${BACKEND_URL}/api/routes/${route_id}`, { headers: { Authorization: `Bearer ${user?.token}` } });
-      setRoutesList((prev) => prev.filter((r) => String(r.routeId || r.route_id) !== String(route_id)));
+      await refetchRoutes();
     } catch (err) {
       toast.error(friendlyError(err, "Failed to delete route"));
     }
@@ -699,8 +731,8 @@ const TransportInchargeDashboard = () => {
                   id: `sos-${alert.id}`,
                   type: 'sos',
                   title: `SOS Alert - Route ${alert.route} (Bus ${routesList.find(r => String(r.routeId || r.route_id) === String(alert.route))?.busNumber || routesList.find(r => String(r.routeId || r.route_id) === String(alert.route))?.bus_number || 'Unknown'})`,
-                  message: `${alert.passenger} (ID: ${alert.login_id}) initiated SOS at ${alert.time}.`,
-                  time: alert.time,
+                  message: `${alert.passenger} (ID: ${alert.login_id}) initiated SOS at ${formatSosTime(alert.timestamp, alert.time)}.`,
+                  time: formatSosTime(alert.timestamp, alert.time),
                   icon: <AlertOctagon size={20} color="#cf1322" className="shrink-0 mt-0.5" />,
                   bg: '#fff1f0', borderColor: '#cf1322', textTitle: '#cf1322', textDesc: '#a8071a'
                 })),
@@ -714,12 +746,6 @@ const TransportInchargeDashboard = () => {
                   bg: '#fffbeb', borderColor: '#f59e0b', textTitle: '#d97706', textDesc: '#b45309'
                 }))
               ];
-
-              const currentIds = allNotifications.map(n => n.id);
-              const hasNew = currentIds.some(id => !seenIds.includes(id));
-              if (hasNew && !showNotifications && !hasUnread) {
-                setTimeout(() => setHasUnread(true), 0);
-              }
 
               return (
                 <>
@@ -868,7 +894,7 @@ const TransportInchargeDashboard = () => {
                 <h3 style={{ color: '#cf1322', fontWeight: 'bold', margin: 0 }}>ACTIVE SOS ALERT</h3>
                 <p style={{ margin: 0, fontSize: '0.95rem', color: '#a8071a', fontWeight: '600' }}>Route {sosAlerts[0].route} (Bus {routesList.find(r => String(r.routeId || r.route_id) === String(sosAlerts[0].route))?.busNumber || routesList.find(r => String(r.routeId || r.route_id) === String(sosAlerts[0].route))?.bus_number || 'Unknown'}) • Driver: {usersList.find(u => (u.loginId || u.login_id) === routesList.find(r => String(r.routeId || r.route_id) === String(sosAlerts[0].route))?.driverId)?.name || 'Unknown'}</p>
                 <p style={{ margin: 0, fontSize: '0.85rem', color: '#a8071a' }}>
-                  Initiated by {sosAlerts[0].passenger} (ID: {sosAlerts[0].login_id}) • {sosAlerts[0].time}{sosAlerts[0].timestamp ? ` (${formatTime(sosAlerts[0].timestamp)})` : ''}
+                  Initiated by {sosAlerts[0].passenger} (ID: {sosAlerts[0].login_id}) • {formatSosTime(sosAlerts[0].timestamp, sosAlerts[0].time)}{sosAlerts[0].timestamp ? ` (${formatTime(sosAlerts[0].timestamp)})` : ''}
                 </p>
               </div>
             </div>
@@ -944,11 +970,22 @@ const TransportInchargeDashboard = () => {
 
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.5rem' }}>
               <div className="glass" style={{ flex: '1 1 280px', borderRadius: '20px', overflow: 'hidden', minHeight: '400px', border: '2px solid var(--primary-blue)' }}>
-                <MapContainer center={busLocation} zoom={14} style={{ height: '100%', width: '100%' }}>
-                  <MapResizer />
-                  <TileLayer url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}" attribution='&copy; Google Maps' />
-                  <Marker position={busLocation} icon={busIcon}><Popup>Bus Location</Popup></Marker>
-                </MapContainer>
+                <UnifiedMap
+                  busLocation={busLocation}
+                  routeInfo={routesList.find(r => String(r.routeId || r.route_id) === String(selectedRoute))}
+                  telemetry={busTelemetry}
+                  isLive={isBusActive}
+                  initialZoom={14}
+                  height="100%"
+                  minHeight="400px"
+                  busLabel={`Bus ${routesList.find(r => String(r.routeId || r.route_id) === String(selectedRoute))?.busNumber || routesList.find(r => String(r.routeId || r.route_id) === String(selectedRoute))?.bus_number || selectedRoute}`}
+                  showFullscreenButton={true}
+                  showAutoFollowToggle={true}
+                  showRecenterButton={true}
+                  showTelemetryPanel={true}
+                  showRoutePolyline={true}
+                  showDestinationMarker={true}
+                />
               </div>
             </div>
           </div>

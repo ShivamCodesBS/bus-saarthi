@@ -116,7 +116,11 @@ export const AuthProvider = ({ children }) => {
       if (data.login_id === user.id || data.login_id === user.login_id) {
         setUser(prev => {
           if (!prev) return prev;
-          const updated = { ...prev, profile_pic: data.profile_pic };
+          const updated = { 
+            ...prev, 
+            profile_pic: data.profile_pic,
+            name: data.name || prev.name,
+          };
           localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
           return updated;
         });

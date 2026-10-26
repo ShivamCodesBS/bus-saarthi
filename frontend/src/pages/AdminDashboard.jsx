@@ -4,30 +4,20 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { io } from 'socket.io-client';
 import toast from 'react-hot-toast';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
 import axios from 'axios';
 import { BACKEND_URL, SOCKET_URL } from '../config';
 import '../index.css';
 import HamburgerMenu from '../components/HamburgerMenu';
 import Papa from 'papaparse';
-import { sanitizePayload, normalizeFeeStatus, USER_PAYLOAD_KEYS } from '../lib/utils';
+import { sanitizePayload, normalizeFeeStatus, USER_PAYLOAD_KEYS, formatSosTime } from '../lib/utils';
 import UserAvatar from '../components/UserAvatar';
 import BusPicker from '../components/BusPicker';
 import MediaViewer from '../components/MediaViewer';
-import { friendlyError } from '../lib/errors';
+import NotificationBell from '../components/NotificationBell';
 import WebRTCPlayer from '../components/WebRTCPlayer';
 import { ComplaintSkeleton, RouteSkeleton, UserRowSkeleton, StatCardSkeleton } from '../components/ui/skeleton';
 import { useStaleWhileRevalidate } from '../hooks/useStaleWhileRevalidate';
-
-// Fix for default marker icon in react-leaflet
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-});
+import UnifiedMap from '../components/UnifiedMap';
 
 // Grievance lifecycle states, mirroring the backend enum.
 const GRIEVANCE_STATUS = {
@@ -36,31 +26,6 @@ const GRIEVANCE_STATUS = {
   resolved:     { label: 'Awaiting Confirmation',     bg: '#e6f4ff', color: '#0958d9', Icon: Timer },
   reopened:     { label: 'Not Resolved (Reopened)',   bg: '#fff1f0', color: '#cf1322', Icon: RotateCcw },
   closed:       { label: 'Closed - Confirmed',        bg: '#e6fae6', color: '#28a745', Icon: CheckCircle2 },
-};
-
-// Custom Bus Icon
-const busIcon = new L.Icon({
-  iconUrl: 'https://cdn-icons-png.flaticon.com/512/3448/3448339.png',
-  iconSize: [35, 35],
-  iconAnchor: [17, 17],
-});
-
-// Component to handle map container resizing
-const MapResizer = () => {
-  const map = useMap();
-  useEffect(() => {
-    const t1 = setTimeout(() => map.invalidateSize(), 100);
-    const t2 = setTimeout(() => map.invalidateSize(), 500);
-    const ro = new ResizeObserver(() => map.invalidateSize());
-    const container = map.getContainer();
-    if (container) ro.observe(container);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      if (container) ro.unobserve(container);
-    };
-  }, [map]);
-  return null;
 };
 
 // Format time helper (moved outside component to avoid impure function warning)
@@ -169,12 +134,8 @@ const AdminDashboard = () => {
   // Fleet Tracking State
   const [selectedRoute, setSelectedRoute] = useState('1');
   const [busLocation, setBusLocation] = useState([28.3180, 79.4670]);
-  const [mapCenter, setMapCenter] = useState([28.3180, 79.4670]);
-  const [mapZoom, setMapZoom] = useState(15);
   const [isBusActive, setIsBusActive] = useState(false);
-  const [autoFollow, setAutoFollow] = useState(true);
-  const telemetryTimeoutRef = useRef(null);
-  const mapInstance = useRef(null);
+  const [busTelemetry, setBusTelemetry] = useState(null);
   const selectedRouteRef = useRef(selectedRoute);
   // The socket effect closes over the token; a ref keeps it in sync without
   // tearing down and re-creating the socket on every token change.
@@ -204,64 +165,6 @@ const AdminDashboard = () => {
   });
   const [isMerging, setIsMerging] = useState(false);
   const [selectedMergeCity, setSelectedMergeCity] = useState('All');
-
-  // Notifications State
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [hasUnread, setHasUnread] = useState(false);
-  const [seenIds, setSeenIds] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('admin_seen_notif_ids') || '[]'); } 
-    catch { return []; }
-  });
-
-  // Media Modal State
-  const [fullScreenMedia, setFullScreenMedia] = useState(null);
-
-  /**
-   * The notification feed. It used to be built inside a render-phase IIFE
-   * that also scheduled a `setHasUnread` via `setTimeout` — a state update
-   * during render, which re-ran the whole build on every render.
-   */
-  const notifications = useMemo(() => {
-    const busFor = (route) => {
-      const r = routesList.find(
-        (x) => String(x.routeId || x.route_id) === String(route),
-      );
-      return r?.bus?.busNumber || r?.busNumber || r?.bus_number;
-    };
-
-    return [
-      ...sosAlerts.map((alert) => ({
-        id: `sos-${alert.id}`,
-        type: 'sos',
-        title: `SOS Alert - Route ${alert.route} (Bus ${busFor(alert.route) || 'Unknown'})`,
-        message: `${alert.passenger} (ID: ${alert.login_id}) initiated SOS at ${alert.time}.`,
-        time: alert.time,
-        icon: (
-          <AlertOctagon size={20} className="text-red-500 shrink-0 mt-0.5" />
-        ),
-        bg: 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-900/50',
-        textTitle: 'text-red-600 dark:text-red-400',
-        textDesc: 'text-red-500 dark:text-red-300',
-      })),
-      ...grievances
-        .filter((g) => g.status === 'pending' || g.status === 'reopened')
-        .map((g) => ({
-          id: `grievance-${g.id}`,
-          type: 'grievance',
-          title: `New Complaint (Route ${g.route} - Bus ${busFor(g.route) || 'Unknown'})`,
-          message:
-            (g.isAnonymous ? '🕵️ Anonymous complaint: ' : '') +
-            g.text.substring(0, 60) + (g.text.length > 60 ? '...' : ''),
-          time: formatTime(g.createdAt),
-          icon: (
-            <MessageSquare size={20} className="text-orange-500 shrink-0 mt-0.5" />
-          ),
-          bg: 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-900/50',
-          textTitle: 'text-orange-600 dark:text-orange-400',
-          textDesc: 'text-orange-500 dark:text-red-300',
-        })),
-    ];
-    }, [sosAlerts, grievances, routesList]);
 
   // Combined & deduplicated list of today's boarded passengers (seeded + live)
   const combinedBoardings = useMemo(() => {
@@ -340,12 +243,13 @@ const AdminDashboard = () => {
     });
 
     socket.on('sos_alert', (data) => {
+      const alertTime = formatSosTime(data.timestamp, data.time);
       const newAlert = {
         id: `${data.login_id}-${data.timestamp || data.time}`,
         route: data.route,
         passenger: data.passenger,
         login_id: data.login_id,
-        time: data.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        time: alertTime,
         timestamp: data.timestamp || new Date().toISOString(),
       };
       setSosAlerts(prev => {
@@ -401,24 +305,35 @@ const AdminDashboard = () => {
         const newLocation = [data.location.lat, data.location.lng];
         setBusLocation(newLocation);
         setIsBusActive(true);
-        if (autoFollow) {
-          setMapCenter(newLocation);
-        }
-        if (telemetryTimeoutRef.current) clearTimeout(telemetryTimeoutRef.current);
-        telemetryTimeoutRef.current = setTimeout(() => {
-          setIsBusActive(false);
-        }, 15000);
+      }
+      if (data.speed !== undefined || data.heading !== undefined || data.comfort !== undefined) {
+        setBusTelemetry({
+          speed: data.speed || 0,
+          heading: data.heading || 0,
+          comfort: data.comfort || 'Smooth',
+          lastUpdated: new Date().toISOString()
+        });
       }
     });
 
     socket.on('merge_executed', (data) => {
       toast.success(`Bus Merge Active: ${data.cancelledRoute?.routeName || 'Route'} merged into ${data.targetRoute?.routeName || 'Route'}`, { id: 'admin_merge_exec' });
-      setActiveMerges(prev => [data.mergeEvent, ...prev.filter(m => m.id !== data.mergeEvent?.id)]);
+      const mergeEvent = data.mergeEvent || data.merge;
+      if (mergeEvent) {
+        setActiveMerges(prev => {
+          // Avoid duplicates by checking ID
+          if (prev.some(m => m.id === mergeEvent.id)) return prev;
+          return [mergeEvent, ...prev];
+        });
+      }
     });
 
     socket.on('merge_undone', (data) => {
-      toast.success(`Bus Merge Restored: ${data.merge?.cancelledRouteName || 'Route'} is active again`, { id: 'admin_merge_undone' });
-      setActiveMerges(prev => prev.filter(m => m.id !== data.merge?.id));
+      toast.success(`Bus Merge Restored: ${data.mergeEvent?.cancelledRouteName || data.merge?.cancelledRouteName || 'Route'} is active again`, { id: 'admin_merge_undone' });
+      const mergeEvent = data.mergeEvent || data.merge;
+      if (mergeEvent) {
+        setActiveMerges(prev => prev.filter(m => m.id !== mergeEvent.id));
+      }
     });
 
     setSocketInstance(socket);
@@ -442,8 +357,8 @@ const AdminDashboard = () => {
       });
       socketInstance.emit('join_route', { route_id: selectedRoute });
       previousRouteRef.current = selectedRoute;
-      setTimeout(() => setIsBusActive(false), 0);
-      if (telemetryTimeoutRef.current) clearTimeout(telemetryTimeoutRef.current);
+      setIsBusActive(false);
+      setBusTelemetry(null);
     }
   }, [selectedRoute, socketInstance]);
 
@@ -565,7 +480,15 @@ const AdminDashboard = () => {
     cacheKey: 'admin:sos',
     staleTime: 10000,
     token: user?.token,
-    onData: (data) => { if (data.length > 0) setSosAlerts(data); },
+    onData: (data) => {
+      if (Array.isArray(data) && data.length > 0) {
+        const formatted = data.map((alert) => ({
+          ...alert,
+          time: formatSosTime(alert.timestamp, alert.time),
+        }));
+        setSosAlerts(formatted);
+      }
+    },
   });
 
   // No need for token sync useEffect - tokens passed directly to hooks
@@ -616,6 +539,16 @@ const AdminDashboard = () => {
         if (res.data.status === 'success') {
           toast.success(res.data.message || 'Bus merged successfully!');
           if (res.data.warning) toast(res.data.warning, { icon: '⚠️' });
+          
+          // IMMEDIATELY update activeMerges from API response for instant UI feedback
+          if (res.data.data) {
+            setActiveMerges(prev => {
+              const newMerge = res.data.data;
+              // Avoid duplicates by checking ID
+              if (prev.some(m => m.id === newMerge.id)) return prev;
+              return [newMerge, ...prev];
+            });
+          }
         }
       } else {
         // Cancel bus (no merge)
@@ -624,16 +557,27 @@ const AdminDashboard = () => {
         if (res.data.status === 'success') {
           toast.success(res.data.message || 'Bus cancelled successfully!');
           if (res.data.warning) toast(res.data.warning, { icon: '⚠️' });
+          
+          // IMMEDIATELY update activeMerges from API response for instant UI feedback
+          if (res.data.data) {
+            setActiveMerges(prev => {
+              const newMerge = res.data.data;
+              if (prev.some(m => m.id === newMerge.id)) return prev;
+              return [newMerge, ...prev];
+            });
+          }
         }
       }
       
       setMergeFormData({ cancelled_route_id: '', target_route_id: '', reason: 'low_attendance', notes: '', mode: 'merge' });
       
-      // Invalidate merge caches - they'll refetch on next render
-      refetchActiveMerges();
-      refetchMergeSuggestions();
-      refetchMergeHistory();
-      refetchRoutes(); // Routes may have changed
+      // Invalidate merge caches - wait for all refetches to complete so UI updates instantly
+      await Promise.all([
+        refetchActiveMerges(),
+        refetchMergeSuggestions(),
+        refetchMergeHistory(),
+        refetchRoutes(), // Routes may have changed
+      ]);
     } catch (err) {
       toast.error(friendlyError(err, 'Failed to process bus operation'));
     } finally {
@@ -648,14 +592,16 @@ const AdminDashboard = () => {
       const res = await axios.post(`${BACKEND_URL}/api/merge/${mergeId}/undo`, {}, authHeaders);
       if (res.data.status === 'success') {
         toast.success(res.data.message || 'Merge undone successfully!');
-        const [mRes, sRes, hRes] = await Promise.all([
-          axios.get(`${BACKEND_URL}/api/merge/active`, authHeaders),
-          axios.get(`${BACKEND_URL}/api/merge/suggestions`, authHeaders),
-          axios.get(`${BACKEND_URL}/api/merge/history`, authHeaders),
+        
+        // IMMEDIATELY remove the undone merge from activeMerges for instant UI feedback
+        setActiveMerges(prev => prev.filter(m => m.id !== mergeId));
+        
+        // Also refetch to ensure consistency - wait for all to complete
+        await Promise.all([
+          refetchActiveMerges(),
+          refetchMergeSuggestions(),
+          refetchMergeHistory(),
         ]);
-        setActiveMerges(mRes.data?.data || []);
-        setMergeSuggestions(sRes.data?.data || []);
-        setMergeHistory(hRes.data?.data || []);
       }
     } catch (err) {
       toast.error(friendlyError(err, 'Failed to undo merge'));
@@ -688,8 +634,8 @@ const AdminDashboard = () => {
             : g,
         ),
       );
-      // Invalidate grievances cache
-      refetchGrievances();
+      // Invalidate grievances cache - wait for refetch to complete so UI updates instantly
+      await refetchGrievances();
       toast.success(
         'Marked as fixed. The complaint stays open until the complainant confirms it.',
       );
@@ -716,8 +662,8 @@ const AdminDashboard = () => {
       setGrievances((prev) =>
         prev.map((g) => (g.id === id ? { ...g, status: 'in_progress' } : g)),
       );
-      // Invalidate grievances cache
-      refetchGrievances();
+      // Invalidate grievances cache - wait for refetch to complete so UI updates instantly
+      await refetchGrievances();
       toast.success('Marked as in progress. The complainant has been notified.');
     } catch (err) {
       toast.error(friendlyError(err, 'Failed to update complaint'));
@@ -739,8 +685,8 @@ const AdminDashboard = () => {
         { hours: 24 },
         { headers: { Authorization: `Bearer ${user?.token}` } },
       );
-      // Invalidate grievances cache
-      refetchGrievances();
+      // Invalidate grievances cache - wait for refetch to complete so UI updates instantly
+      await refetchGrievances();
       toast.success('Confirmation window extended by 24 hours.');
     } catch (err) {
       toast.error(friendlyError(err, 'Failed to extend deadline'));
@@ -758,8 +704,8 @@ const AdminDashboard = () => {
     try {
       await axios.delete(`${BACKEND_URL}/api/grievance/${id}`, { headers: { Authorization: `Bearer ${user?.token}` } });
       setGrievances((prev) => prev.filter((g) => g.id !== id));
-      // Invalidate grievances cache
-      refetchGrievances();
+      // Invalidate grievances cache - wait for refetch to complete so UI updates instantly
+      await refetchGrievances();
     } catch (err) {
       toast.error(friendlyError(err, "Failed to delete complaint"));
     }
@@ -771,8 +717,8 @@ const AdminDashboard = () => {
     try {
       await axios.delete(`${BACKEND_URL}/api/users/${login_id}`, { headers: { Authorization: `Bearer ${user?.token}` } });
       setUsersList((prev) => prev.filter((u) => u.loginId !== login_id));
-      // Invalidate users cache
-      refetchUsers();
+      // Invalidate users cache - wait for refetch to complete so UI updates instantly
+      await refetchUsers();
       toast.success("User deleted successfully!");
     } catch (err) {
       toast.error(friendlyError(err, "Failed to delete user"));
@@ -823,8 +769,8 @@ const AdminDashboard = () => {
         }
       }
       setShowUserModal(false);
-      // Invalidate users cache - will refetch on next render
-      refetchUsers();
+      // Invalidate users cache - wait for refetch to complete so UI updates instantly
+      await refetchUsers();
     } catch (err) {
       toast.error(friendlyError(err, "Failed to save user"));
     }
@@ -897,8 +843,8 @@ const AdminDashboard = () => {
       setBulkUploadData([]);
       setBulkUploadErrors([]);
       
-      // Invalidate users cache - will refetch on next render
-      refetchUsers();
+      // Invalidate users cache - wait for refetch to complete so UI updates instantly
+      await refetchUsers();
     } catch (err) {
       toast.error(friendlyError(err, "Failed to process bulk upload"));
     }
@@ -930,8 +876,8 @@ const AdminDashboard = () => {
         newEditingUser.face_enrolled_at = null;
         setEditingUser(newEditingUser);
       }
-      // Invalidate users cache
-      refetchUsers();
+      // Invalidate users cache - wait for refetch to complete so UI updates instantly
+      await refetchUsers();
       toast.success("Face data removed successfully!");
     } catch (err) {
       toast.error(friendlyError(err, "Failed to delete face data"));
@@ -956,8 +902,8 @@ const AdminDashboard = () => {
     try {
       await axios.delete(`${BACKEND_URL}/api/routes/${route_id}`, { headers: { Authorization: `Bearer ${user?.token}` } });
       setRoutesList((prev) => prev.filter((r) => String(r.routeId || r.route_id) !== String(route_id)));
-      // Invalidate routes cache
-      refetchRoutes();
+      // Invalidate routes cache - wait for refetch to complete so UI updates instantly
+      await refetchRoutes();
     } catch (err) {
       toast.error(friendlyError(err, "Failed to delete route"));
     }
@@ -979,8 +925,8 @@ const AdminDashboard = () => {
         await axios.post(`${BACKEND_URL}/api/routes`, routeFormData, authHeaders);
       }
       setShowRouteModal(false);
-      // Invalidate routes cache - will refetch on next render
-      refetchRoutes();
+      // Invalidate routes cache - wait for refetch to complete so UI updates instantly
+      await refetchRoutes();
     } catch (err) {
       toast.error(friendlyError(err, "Failed to save route"));
     }
@@ -1048,70 +994,7 @@ const AdminDashboard = () => {
         </div>
 
         <div className="flex items-center gap-2 md:gap-4 shrink-0">
-          <div className="relative">
-            {(() => {
-              const allNotifications = notifications;
-              const currentIds = allNotifications.map(n => n.id);
-
-              return (
-                <>
-                  <button 
-                    onClick={() => {
-                      setShowNotifications(!showNotifications);
-                      if (!showNotifications) {
-                        setHasUnread(false);
-                        const newIds = allNotifications.map(n => n.id);
-                        setSeenIds(newIds);
-                        localStorage.setItem('admin_seen_notif_ids', JSON.stringify(newIds));
-                      }
-                    }} 
-                    className={`relative bg-transparent border-none cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors p-1 ${hasUnread ? 'animate-bell-ring text-red-500 dark:text-red-400' : ''}`}
-                  >
-                    <Bell size={24} />
-                    {hasUnread && (
-                      <span style={{
-                        position: 'absolute', top: '0', right: '0', width: '10px', height: '10px',
-                        backgroundColor: 'red', borderRadius: '50%', border: '2px solid white', animation: 'pulse 1.5s infinite'
-                      }}></span>
-                    )}
-                  </button>
-                  {showNotifications && (
-                    <div className="absolute top-12 right-0 w-80 sm:w-96 bg-white dark:bg-slate-900 shadow-2xl rounded-2xl border border-slate-200 dark:border-slate-700 p-4 z-50 animate-fade-in">
-                      <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 m-0">
-                          Notifications {allNotifications.length > 0 && `(${allNotifications.length})`}
-                        </h3>
-                        <button onClick={() => setShowNotifications(false)} className="bg-transparent border-none cursor-pointer p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
-                          <X size={20} className="text-slate-500 dark:text-slate-400" />
-                        </button>
-                      </div>
-                      <div className="flex flex-col gap-3 max-h-[350px] overflow-y-auto hide-scrollbar">
-                        {allNotifications.length > 0 ? (
-                          allNotifications.map(notification => (
-                            <div key={notification.id} className={`p-3 border rounded-xl flex gap-3 items-start ${notification.bg}`}>
-                              {notification.icon}
-                              <div className="min-w-0 flex-1">
-                                <div className="flex justify-between items-start gap-2">
-                                  <p className={`m-0 text-sm font-bold truncate ${notification.textTitle}`}>{notification.title}</p>
-                                  <span className={`text-[10px] whitespace-nowrap mt-0.5 ${notification.textDesc}`}>{notification.time}</span>
-                                </div>
-                                <p className={`m-0 text-xs mt-1 leading-relaxed ${notification.textDesc}`}>{notification.message}</p>
-                              </div>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="text-center py-6 text-slate-500 dark:text-slate-400">
-                            <Bell size={32} className="mx-auto mb-2 opacity-50" />
-                            <p className="m-0 text-sm font-medium">No new notifications</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </>
-              );
-            })()}
-          </div>
+          <NotificationBell user={user} token={user?.token} />
 
           {/* PROFILE DROPDOWN (Desktop only) */}
           <div className="relative hidden lg:block">
@@ -1244,7 +1127,7 @@ const AdminDashboard = () => {
                   Bus {routesList.find(r => String(r.route_id) === String(sosAlerts[0].route))?.bus_number || 'Unknown'} (Route {sosAlerts[0].route}) • Driver: {usersList.find(u => u.login_id === routesList.find(r => String(r.routeId || r.route_id) === String(sosAlerts[0].route))?.driverId)?.name || 'Unknown'}
                 </p>
                 <p style={{ margin: 0, fontSize: '0.85rem', color: '#a8071a' }}>
-                  Initiated by {sosAlerts[0].passenger} (ID: {sosAlerts[0].login_id}) • {sosAlerts[0].time}{sosAlerts[0].timestamp ? ` (${formatTime(sosAlerts[0].timestamp)})` : ''}
+                  Initiated by {sosAlerts[0].passenger} (ID: {sosAlerts[0].login_id}) • {formatSosTime(sosAlerts[0].timestamp, sosAlerts[0].time)}{sosAlerts[0].timestamp ? ` (${formatTime(sosAlerts[0].timestamp)})` : ''}
                 </p>
               </div>
             </div>
@@ -1334,71 +1217,22 @@ const AdminDashboard = () => {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch w-full">
               {/* Left side: Map */}
               <div className="glass p-glass rounded-3xl overflow-hidden min-h-[400px] border-2 border-blue-600 relative z-[1] w-full">
-                {/* Status indicator */}
-                <div className="absolute top-3 left-3 right-3 z-10 flex justify-between items-start pointer-events-none">
-                  <div className="pointer-events-auto">
-                    <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-white/90 backdrop-blur-sm shadow-lg border ${
-                      isBusActive ? 'border-green-200 text-green-700' : 'border-orange-200 text-orange-700'
-                    }`}>
-                      <span className={`w-2 h-2 rounded-full ${isBusActive ? 'bg-green-500 animate-pulse' : 'bg-orange-500'}`} />
-                      {isBusActive ? 'LIVE' : 'OFFLINE'}
-                    </div>
-                  </div>
-                  <div className="pointer-events-auto ml-auto">
-                    <button
-                      onClick={() => {
-                        setAutoFollow(true);
-                        setMapCenter(busLocation);
-                        setMapZoom(16);
-                      }}
-                      title="Recenter on bus"
-                      className="p-2 rounded-full bg-white/90 backdrop-blur-sm shadow-lg border border-slate-200 hover:bg-slate-50 transition-all"
-                    >
-                      <div className="w-8 h-8 flex items-center justify-center">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-blue-600">
-                          <circle cx="12" cy="12" r="3" />
-                          <path d="M12 2v2M12 20v2M2 12h2M20 12h2" />
-                        </svg>
-                      </div>
-                    </button>
-                  </div>
-                </div>
-
-                <MapContainer 
-                  center={mapCenter} 
-                  zoom={mapZoom} 
-                  style={{ height: '100%', width: '100%', position: 'absolute', top: 0, left: 0 }}
-                  zoomControl={false}
-                  whenCreated={(map) => { mapInstance.current = map; }}
-                >
-                  <MapResizer />
-                  <TileLayer
-                    url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
-                    attribution='&copy; Google Maps'
-                  />
-                  <Marker position={busLocation} icon={busIcon}>
-                    <Popup><b>Route {selectedRoute} (Bus {routesList.find(r => String(r.routeId || r.route_id) === String(selectedRoute))?.busNumber || routesList.find(r => String(r.routeId || r.route_id) === String(selectedRoute))?.bus_number || 'Unknown'})</b><br />Live Location</Popup>
-                  </Marker>
-                </MapContainer>
-
-                {/* Auto-follow toggle */}
-                <div className="absolute bottom-3 right-3 z-10 pointer-events-auto">
-                  <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-white/90 backdrop-blur-sm shadow-lg border border-slate-200 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={autoFollow}
-                      onChange={(e) => {
-                        setAutoFollow(e.target.checked);
-                        if (e.target.checked) {
-                          setMapCenter(busLocation);
-                          setMapZoom(16);
-                        }
-                      }}
-                      className="w-4 h-4 accent-blue-600 cursor-pointer"
-                    />
-                    <span>Auto-follow bus</span>
-                  </label>
-                </div>
+                <UnifiedMap
+                  busLocation={busLocation}
+                  routeInfo={routesList.find(r => String(r.routeId || r.route_id) === String(selectedRoute))}
+                  telemetry={busTelemetry}
+                  isLive={isBusActive}
+                  initialZoom={15}
+                  height="100%"
+                  minHeight="400px"
+                  busLabel={`Route ${selectedRoute} (Bus ${routesList.find(r => String(r.routeId || r.route_id) === String(selectedRoute))?.busNumber || routesList.find(r => String(r.routeId || r.route_id) === String(selectedRoute))?.bus_number || 'Unknown'})`}
+                  showFullscreenButton={true}
+                  showAutoFollowToggle={true}
+                  showRecenterButton={true}
+                  showTelemetryPanel={true}
+                  showRoutePolyline={true}
+                  showDestinationMarker={true}
+                />
               </div>
 
               {/* Right side: Stats for selected bus */}
@@ -2222,6 +2056,7 @@ const AdminDashboard = () => {
                         {routesList
                           .filter(r => selectedMergeCity === 'All' || (r.city || 'Bareilly') === selectedMergeCity)
                           .filter(r => !activeMerges.some(m => String(m.cancelledRouteId) === String(r.routeId || r.route_id)))
+                          .filter(r => !activeMerges.some(m => m.status === 'active' && String(m.targetRouteId) === String(r.routeId || r.route_id)))
                           .map(r => (
                             <option key={r.routeId || r.route_id} value={r.routeId || r.route_id}>
                               {r.routeName || r.route_name} (Bus {r.busNumber || r.bus_number}) • {r.city || 'Bareilly'}
@@ -2253,6 +2088,7 @@ const AdminDashboard = () => {
                             return String(r.routeId || r.route_id) !== String(mergeFormData.cancelled_route_id);
                           })
                           .filter(r => !activeMerges.some(m => String(m.cancelledRouteId) === String(r.routeId || r.route_id)))
+                          .filter(r => !activeMerges.some(m => m.status === 'active' && String(m.targetRouteId) === String(r.routeId || r.route_id)))
                           .map(r => (
                             <option key={r.routeId || r.route_id} value={r.routeId || r.route_id}>
                               {r.routeName || r.route_name} (Bus {r.busNumber || r.bus_number}) • Cap: {r.seatingCapacity || 50}
@@ -2390,42 +2226,55 @@ const AdminDashboard = () => {
                     </div>
                   ) : (
                     <div className="flex flex-col gap-3 max-h-[420px] overflow-y-auto pr-1">
-                      {activeMerges.map(merge => (
-                        <div
-                          key={merge.id}
-                          className="p-4 rounded-2xl border border-orange-200 dark:border-orange-900/50 bg-gradient-to-br from-orange-50/60 to-white/90 dark:from-slate-800/80 dark:to-slate-800/40 flex flex-col gap-2.5 shadow-sm"
-                        >
-                          <div className="flex justify-between items-start">
-                            <div className="flex items-center gap-1.5">
-                              <span className="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded">CANCELLED</span>
-                              <span className="font-bold text-xs text-slate-800 dark:text-slate-200">{merge.cancelledRouteName}</span>
-                            </div>
-                            <span className="text-[10px] font-semibold text-slate-400">
-                              {formatTime(merge.mergedAt || merge.createdAt)}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300 bg-white/70 dark:bg-slate-900/60 p-2 rounded-xl border border-slate-100 dark:border-slate-800">
-                            <span className="text-red-500 font-bold">Bus {merge.cancelledBusNumber || merge.cancelledRouteId}</span>
-                            <ArrowRight size={14} className="text-orange-500 shrink-0" />
-                            <span className="text-emerald-600 dark:text-emerald-400 font-bold">Bus {merge.targetBusNumber || merge.targetRouteId} ({merge.targetRouteName})</span>
-                          </div>
-
-                          <div className="flex justify-between items-center text-[11px] text-slate-500 dark:text-slate-400 pt-1">
-                            <span>Moved: <strong className="text-slate-700 dark:text-slate-200">{merge.studentsMoved || 0} students</strong></span>
-                            <span className="capitalize bg-slate-100 dark:bg-slate-700/60 px-2 py-0.5 rounded-full font-medium">
-                              {(merge.reason || 'low_attendance').replace(/_/g, ' ')}
-                            </span>
-                          </div>
-
-                          <button
-                            onClick={() => handleUndoMerge(merge.id)}
-                            className="mt-1 w-full py-1.5 px-3 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400 text-xs font-bold rounded-xl border border-red-200 dark:border-red-800/40 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                      {activeMerges.map(merge => {
+                        const isCancelledOnly = merge.status === 'cancelled' || (merge.cancelledRouteId === merge.targetRouteId);
+                        return (
+                          <div
+                            key={merge.id}
+                            className={`p-4 rounded-2xl border flex flex-col gap-2.5 shadow-sm ${
+                              isCancelledOnly
+                                ? 'border-red-200 dark:border-red-900/50 bg-gradient-to-br from-red-50/60 to-white/90 dark:from-slate-800/80 dark:to-slate-800/40'
+                                : 'border-orange-200 dark:border-orange-900/50 bg-gradient-to-br from-orange-50/60 to-white/90 dark:from-slate-800/80 dark:to-slate-800/40'
+                            }`}
                           >
-                            <Undo2 size={13} /> Undo Merge & Restore Route
-                          </button>
-                        </div>
-                      ))}
+                            <div className="flex justify-between items-start">
+                              <div className="flex items-center gap-1.5">
+                                <span className="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded">
+                                  {isCancelledOnly ? 'CANCELLED' : 'MERGED'}
+                                </span>
+                                <span className="font-bold text-xs text-slate-800 dark:text-slate-200">{merge.cancelledRouteName}</span>
+                              </div>
+                              <span className="text-[10px] font-semibold text-slate-400">
+                                {formatTime(merge.mergedAt || merge.createdAt)}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300 bg-white/70 dark:bg-slate-900/60 p-2 rounded-xl border border-slate-100 dark:border-slate-800">
+                              <span className="text-red-500 font-bold">Bus {merge.cancelledBusNumber || merge.cancelledRouteId}</span>
+                              <ArrowRight size={14} className="text-orange-500 shrink-0" />
+                              {isCancelledOnly ? (
+                                <span className="text-red-500 font-bold">NO REPLACEMENT BUS</span>
+                              ) : (
+                                <span className="text-emerald-600 dark:text-emerald-400 font-bold">Bus {merge.targetBusNumber || merge.targetRouteId} ({merge.targetRouteName})</span>
+                              )}
+                            </div>
+
+                            <div className="flex justify-between items-center text-[11px] text-slate-500 dark:text-slate-400 pt-1">
+                              <span>Moved: <strong className="text-slate-700 dark:text-slate-200">{merge.studentsMoved || 0} students</strong></span>
+                              <span className="capitalize bg-slate-100 dark:bg-slate-700/60 px-2 py-0.5 rounded-full font-medium">
+                                {(merge.reason || 'low_attendance').replace(/_/g, ' ')}
+                              </span>
+                            </div>
+
+                            <button
+                              onClick={() => handleUndoMerge(merge.id)}
+                              className="mt-1 w-full py-1.5 px-3 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400 text-xs font-bold rounded-xl border border-red-200 dark:border-red-800/40 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                              <Undo2 size={13} /> {isCancelledOnly ? 'Undo Cancellation & Restore Route' : 'Undo Merge & Restore Route'}
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

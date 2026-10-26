@@ -7,8 +7,14 @@ import '../index.css';
 const HamburgerMenu = ({ isOpen, onClose }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const { t } = useLang();
+
+  const homePath =
+    (user?.role === 'admin' || user?.role === 'tech_admin') ? '/admin-dashboard' :
+    user?.role === 'transport_incharge' ? '/transport-incharge-dashboard' :
+    user?.role === 'parent' ? '/parent-dashboard' :
+    '/home';
 
   const isActive = (path) => location.pathname === path;
 
@@ -70,7 +76,7 @@ const HamburgerMenu = ({ isOpen, onClose }) => {
           </button>
 
           {[
-            { icon: Home, label: t('home'), path: '/home' },
+            { icon: Home, label: t('home'), path: homePath },
             { icon: User, label: t('profile'), path: '/profile' },
             { icon: Settings, label: t('settings'), path: '/settings' },
           ].map((item, index) => (

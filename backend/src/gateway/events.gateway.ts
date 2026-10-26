@@ -231,16 +231,17 @@ export class EventsGateway
 
   @OnEvent('merge.undone')
   handleMergeUndone(payload: any) {
-    const { merge } = payload;
+    // Support both field names for backward compatibility
+    const mergeEvent = payload.mergeEvent || payload.merge;
     
     this.server.to('admin_room').emit('merge_undone', payload);
-    this.server.to(`route_${merge.cancelledRouteId}`).emit('route_restored', {
-      cancelledRouteId: merge.cancelledRouteId,
-      message: `Your original bus route (${merge.cancelledRouteName}) has been restored.`,
+    this.server.to(`route_${mergeEvent.cancelledRouteId}`).emit('route_restored', {
+      cancelledRouteId: mergeEvent.cancelledRouteId,
+      message: `Your original bus route (${mergeEvent.cancelledRouteName}) has been restored.`,
     });
-    this.server.to(`route_${merge.targetRouteId}`).emit('students_removed', {
-      fromRouteId: merge.cancelledRouteId,
-      message: `Merge with ${merge.cancelledRouteName} was undone.`,
+    this.server.to(`route_${mergeEvent.targetRouteId}`).emit('students_removed', {
+      fromRouteId: mergeEvent.cancelledRouteId,
+      message: `Merge with ${mergeEvent.cancelledRouteName} was undone.`,
     });
   }
 
@@ -293,6 +294,25 @@ export class EventsGateway
     this.server.emit('global_broadcast', payload);
   }
 
+  @OnEvent('grievance.created')
+  handleGrievanceCreated(grievance: any) {
+    this.logger.log(`📢 New grievance ${grievance.id} on route ${grievance.route}`);
+    // Broadcast to students on the same route/bus
+    this.server.to(`route_${grievance.route}`).emit('new_grievance', grievance);
+    // Broadcast to staff
+    this.server.to('admin_room').emit('new_grievance', grievance);
+  }
+
+  @OnEvent('grievance.updated')
+  handleGrievanceUpdated(grievance: any) {
+    this.logger.log(`📢 Grievance ${grievance.id} updated to status ${grievance.status}`);
+    this.server.to(`route_${grievance.route}`).emit('grievance_updated', grievance);
+    this.server.to('admin_room').emit('grievance_updated', grievance);
+    if (grievance.loginId) {
+      this.server.to(`user_${grievance.loginId}`).emit('grievance_updated', grievance);
+    }
+  }
+
   /**
    * Deliver a personal in-app notification to the user's open tabs.
    * The persistent record lives in the `notifications` table; this is the
@@ -308,6 +328,36 @@ export class EventsGateway
     // Also broadcast on a per-login channel so tabs that joined the route
     // room still receive it.
     this.server.to(`user_${payload.login_id}`).emit('notification', payload);
+  }
+
+  /**
+   * Handle user profile updates and broadcast to the user's open tabs.
+   * This ensures the admin dashboard, profile page, and other tabs
+   * all stay in sync when an admin updates a user's details.
+   */
+  @OnEvent('user.updated')
+  handleUserUpdated(payload: any) {
+    if (!payload?.loginId) return;
+    const { loginId, name, profilePic } = payload;
+    
+    // Broadcast to all tabs of the specific user
+    this.server.to(`user_${loginId}`).emit('profile_update', {
+      login_id: loginId,
+      name,
+      profile_pic: profilePic,
+    });
+    
+    // Also send to the specific socket if we have it
+    const socketId = this.onlineUsers.get(loginId);
+    if (socketId) {
+      this.server.to(socketId).emit('profile_update', {
+        login_id: loginId,
+        name,
+        profile_pic: profilePic,
+      });
+    }
+    
+    this.logger.log(`User profile updated for ${loginId}: ${name}`);
   }
 
   /**

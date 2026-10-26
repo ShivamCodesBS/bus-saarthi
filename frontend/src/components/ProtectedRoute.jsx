@@ -12,8 +12,9 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
   if (allowedRoles && !allowedRoles.includes(user.role)) {
     // User does not have the required role, redirect to their appropriate home
     const fallback =
-      user.role === 'admin' ? '/admin-dashboard' :
+      (user.role === 'admin' || user.role === 'tech_admin') ? '/admin-dashboard' :
       user.role === 'transport_incharge' ? '/transport-incharge-dashboard' :
+      user.role === 'parent' ? '/parent-dashboard' :
       '/home';
     return <Navigate to={fallback} replace />;
   }

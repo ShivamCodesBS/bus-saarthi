@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CacheService } from '../cache/cache.service';
 import { isStaff } from '../common/roles';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 /** How long a complainant has to confirm (or reject) a resolution. */
 export const RESOLUTION_WINDOW_HOURS = 48;
@@ -19,6 +20,7 @@ export class GrievancesService {
     private prisma: PrismaService,
     private notificationsService: NotificationsService,
     private cache: CacheService,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -84,6 +86,9 @@ export class GrievancesService {
 
     await this.cache.delByPattern('grievances:*');
 
+    // Emit real-time event for connected clients on the same route and staff
+    this.eventEmitter.emit('grievance.created', grievance);
+
     // Notify staff that a new grievance is waiting.
     await this.notifyStaffOfNewGrievance(grievance, resolvedName, route?.routeName);
 
@@ -120,14 +125,48 @@ export class GrievancesService {
     if (cached) return cached;
 
     const where: any = {};
-    if (!staff || options.onlyMine) {
+    if (options.onlyMine) {
       where.loginId = loginId;
+    } else if (!staff) {
+      // Non-staff callers (students, parents, teachers):
+      // Show complaints for their assigned bus/route OR complaints they filed themselves.
+      const caller = await this.prisma.user.findUnique({
+        where: { loginId },
+        select: { routeId: true, role: true },
+      });
+
+      let routeIds: string[] = [];
+      if (options.route && options.route !== 'all') {
+        routeIds = [String(options.route)];
+      } else if (caller?.routeId) {
+        routeIds = [String(caller.routeId)];
+      } else if (caller?.role === UserRole.parent) {
+        // If user is a parent, find routes for all their linked children
+        const links = await this.prisma.parentChildLink.findMany({
+          where: { parentLoginId: loginId },
+          include: { child: { select: { routeId: true } } },
+        });
+        routeIds = links
+          .map((l) => l.child?.routeId)
+          .filter(Boolean)
+          .map(String);
+      }
+
+      if (routeIds.length > 0) {
+        where.OR = [
+          { route: { in: routeIds } },
+          { loginId: loginId },
+        ];
+      } else {
+        where.loginId = loginId;
+      }
+    } else {
+      if (options.route && options.route !== 'all') {
+        where.route = options.route;
+      }
     }
     if (options.status && options.status !== 'all') {
       where.status = options.status;
-    }
-    if (options.route && options.route !== 'all') {
-      where.route = options.route;
     }
 
     const grievances = await this.prisma.grievance.findMany({
@@ -161,18 +200,30 @@ export class GrievancesService {
     });
     const upvotedIds = new Set(upvotes.map((u) => u.grievanceId));
 
-    // Non-staff must never receive the reporter's identity.
+    // For parent accounts, check which grievances belong to their linked children
+    let linkedChildIds = new Set<string>();
+    if (role === UserRole.parent) {
+      const links = await this.prisma.parentChildLink.findMany({
+        where: { parentLoginId: loginId },
+        select: { childLoginId: true },
+      });
+      linkedChildIds = new Set(links.map((l) => l.childLoginId));
+    }
+
+    // Non-staff must never receive the reporter's identity unless it's their own or their child's.
     const visible = grievances.map((g) => {
       const { user, ...rest } = g;
-      const mine = g.loginId === loginId;
-      // Staff see the real name AND the anonymous flag; non-staff see
-      // "Anonymous Passenger" and the anonymous flag is hidden.
+      const isMyChild = linkedChildIds.has(g.loginId);
+      const mine = g.loginId === loginId || isMyChild;
       return {
         ...rest,
         realName: staff || mine ? g.realName : null,
         isAnonymous: staff || mine ? g.isAnonymous : false,
-        authorDisplay: staff || mine ? g.realName : 'Anonymous Passenger',
+        authorDisplay: staff || mine
+          ? (isMyChild ? `${g.realName} (Your Child)` : (g.realName || 'Passenger'))
+          : 'Anonymous Passenger',
         isMine: mine,
+        isChild: isMyChild,
         hasUpvotedLocally: upvotedIds.has(g.id),
       };
     });
@@ -190,9 +241,30 @@ export class GrievancesService {
     if (!grievance) throw new NotFoundException('Grievance not found');
 
     const staff = isStaff(role);
-    const mine = grievance.loginId === loginId;
+    const isOwner = grievance.loginId === loginId;
+    let isParentOfChild = false;
+    if (role === UserRole.parent && !isOwner) {
+      const link = await this.prisma.parentChildLink.findUnique({
+        where: {
+          parentLoginId_childLoginId: {
+            parentLoginId: loginId,
+            childLoginId: grievance.loginId,
+          },
+        },
+      });
+      isParentOfChild = !!link;
+    }
+    const mine = isOwner || isParentOfChild;
+
     if (!staff && !mine) {
-      throw new ForbiddenException('You cannot view this grievance');
+      // Check if user is on the same route
+      const caller = await this.prisma.user.findUnique({
+        where: { loginId },
+        select: { routeId: true },
+      });
+      if (!caller?.routeId || String(caller.routeId) !== String(grievance.route)) {
+        throw new ForbiddenException('You cannot view this grievance');
+      }
     }
 
     const { user, ...rest } = grievance;
@@ -235,10 +307,13 @@ export class GrievancesService {
       newUpvotes = grievance.upvotes + 1;
     }
 
-    await this.prisma.grievance.update({
+    const updatedGrievance = await this.prisma.grievance.update({
       where: { id },
       data: { upvotes: newUpvotes },
     });
+
+    await this.cache.delByPattern('grievances:*');
+    this.eventEmitter.emit('grievance.updated', updatedGrievance);
 
     return { status: 'success', upvotes: newUpvotes };
   }
@@ -266,6 +341,7 @@ export class GrievancesService {
     });
 
     await this.cache.delByPattern('grievances:*');
+    this.eventEmitter.emit('grievance.updated', updated);
     await this.notifyComplainant(updated, {
       title: '🛠️ Your complaint is being worked on',
       body: note
@@ -317,6 +393,7 @@ export class GrievancesService {
     });
 
     await this.cache.delByPattern('grievances:*');
+    this.eventEmitter.emit('grievance.updated', updated);
     await this.notifyComplainant(updated, {
       title: '✅ Your complaint was marked as fixed',
       body: response
@@ -334,14 +411,28 @@ export class GrievancesService {
   }
 
   /**
-   * The complainant confirms the fix. This is the ONLY way a grievance
+   * The complainant (or their linked parent) confirms the fix. This is the ONLY way a grievance
    * reaches the terminal `closed` state.
    */
   async confirmResolved(id: string, loginId: string) {
     const grievance = await this.requireGrievance(id);
-    if (grievance.loginId !== loginId) {
+    const isOwner = grievance.loginId === loginId;
+    let isParentOfChild = false;
+    if (!isOwner) {
+      const link = await this.prisma.parentChildLink.findUnique({
+        where: {
+          parentLoginId_childLoginId: {
+            parentLoginId: loginId,
+            childLoginId: grievance.loginId,
+          },
+        },
+      });
+      isParentOfChild = !!link;
+    }
+
+    if (!isOwner && !isParentOfChild) {
       throw new ForbiddenException(
-        'Only the person who raised this complaint can confirm it',
+        'Only the person who raised this complaint or their parent can confirm it',
       );
     }
     if (grievance.status !== GrievanceStatus.resolved) {
@@ -360,6 +451,7 @@ export class GrievancesService {
     });
 
     await this.cache.delByPattern('grievances:*');
+    this.eventEmitter.emit('grievance.updated', updated);
     await this.notifyStaff(
       grievance.loginId,
       updated.id,
@@ -374,14 +466,28 @@ export class GrievancesService {
   }
 
   /**
-   * The complainant rejects the fix. The complaint goes back into the queue
+   * The complainant (or their linked parent) rejects the fix. The complaint goes back into the queue
    * with a raised priority so it sorts to the top for staff.
    */
   async reopen(id: string, loginId: string, reason?: string) {
     const grievance = await this.requireGrievance(id);
-    if (grievance.loginId !== loginId) {
+    const isOwner = grievance.loginId === loginId;
+    let isParentOfChild = false;
+    if (!isOwner) {
+      const link = await this.prisma.parentChildLink.findUnique({
+        where: {
+          parentLoginId_childLoginId: {
+            parentLoginId: loginId,
+            childLoginId: grievance.loginId,
+          },
+        },
+      });
+      isParentOfChild = !!link;
+    }
+
+    if (!isOwner && !isParentOfChild) {
       throw new ForbiddenException(
-        'Only the person who raised this complaint can reopen it',
+        'Only the person who raised this complaint or their parent can reopen it',
       );
     }
     if (grievance.status !== GrievanceStatus.resolved) {
@@ -406,6 +512,7 @@ export class GrievancesService {
     });
 
     await this.cache.delByPattern('grievances:*');
+    this.eventEmitter.emit('grievance.updated', updated);
     await this.notifyStaff(
       grievance.loginId,
       updated.id,

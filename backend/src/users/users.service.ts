@@ -11,6 +11,7 @@ import { UserRole, FeeStatus } from '@prisma/client';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { CacheService } from '../cache/cache.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { canAssignRole } from '../common/roles';
 
 const DEFAULT_PASSWORD = 'Invertis@123';
@@ -20,6 +21,7 @@ export class UsersService {
   constructor(
     private prisma: PrismaService,
     private cache: CacheService,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -278,6 +280,13 @@ const updatedUser = await this.prisma.user.update({
   // The role may have changed — drop the cached identity.
   await this.cache.delByPattern('users:*');
   await this.cache.del(`auth:user:${loginId}`);
+
+  // Emit event for real-time profile updates
+  this.eventEmitter.emit('user.updated', {
+    loginId: updatedUser.loginId,
+    name: updatedUser.name,
+    profilePic: updatedUser.profilePic,
+  });
 
   return {
     status: 'success',

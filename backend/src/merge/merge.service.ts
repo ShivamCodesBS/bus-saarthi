@@ -228,7 +228,7 @@ export class MergeService {
 
     // 3. Emit events
     this.eventEmitter.emit('merge.undone', {
-      merge,
+      mergeEvent: merge,
       undoneBy,
       revertedCount: reverted.count,
     });
