@@ -140,6 +140,10 @@ const UnifiedMap = ({
   showRoutePolyline = true,
   showDestinationMarker = true,
   height = '320px',
+  // Percentage heights collapse to zero inside an auto-height parent, which
+  // is exactly how the admin/TI map containers are built — so the floor
+  // below is what actually keeps the map visible there.
+  minHeight = '320px',
   className = '',
   style = {},
   busLabel = 'Bus',
@@ -356,6 +360,7 @@ const UnifiedMap = ({
   
   const mapStyle = {
     height,
+    minHeight: isFullscreen ? undefined : minHeight,
     width: '100%',
     borderRadius: isFullscreen ? '0' : '16px',
     ...style
@@ -860,9 +865,10 @@ const UnifiedMap = ({
       aria-label="Live bus tracking map"
     >
       {fullscreenHeader}
-      <div style={{ 
-        height: isFullscreen ? '100%' : height, 
-        width: '100%', 
+      <div style={{
+        height: isFullscreen ? '100%' : height,
+        minHeight: isFullscreen ? undefined : minHeight,
+        width: '100%',
         position: 'relative',
         borderRadius: isFullscreen ? '0' : '16px',
         overflow: 'hidden'

@@ -8,6 +8,56 @@ import { BACKEND_URL } from '../config';
  */
 const dataCache = new Map();
 
+const DISK_PREFIX = 'bus_saarthi:swr:';
+const DISK_MAX_BYTES = 1_500_000; // stay far below the ~5MB storage quota
+
+/**
+ * Disk persistence. The in-memory cache dies on every refresh, which is why
+ * every dashboard re-showed skeletons and waited for the network on each
+ * visit. These helpers let the hook paint the last known data instantly and
+ * revalidate in the background.
+ *
+ * Entries are scoped to the signed-in token, so a different user on the same
+ * browser never sees the previous user's data.
+ */
+function readDiskCache(cacheKey, token) {
+  try {
+    const raw = localStorage.getItem(DISK_PREFIX + cacheKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || !('data' in parsed)) return null;
+    // Token scoping: a mismatched token means another user's data.
+    if ((parsed.token || null) !== (token || null)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeDiskCache(cacheKey, data, token) {
+  try {
+    const raw = JSON.stringify({ data, timestamp: Date.now(), token: token || null });
+    if (raw.length > DISK_MAX_BYTES) return; // payload too large to cache
+    localStorage.setItem(DISK_PREFIX + cacheKey, raw);
+  } catch {
+    /* quota exceeded / private mode — caching is best-effort */
+  }
+}
+
+/** Drop every persisted entry (used on sign-out). */
+export function clearSwrDiskCache() {
+  try {
+    const stale = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(DISK_PREFIX)) stale.push(key);
+    }
+    stale.forEach((key) => localStorage.removeItem(key));
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * Stale-while-revalidate hook for fast initial load with live updates
  * 
@@ -28,9 +78,16 @@ export function useStaleWhileRevalidate(url, options = {}) {
     token: initialToken = null, // Accept initial token
   } = options;
 
-  const [data, setData] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isStale, setIsStale] = useState(false);
+  // Hydrate synchronously from the disk cache so the very first render
+  // already holds data — no skeleton flash while the network wakes up.
+  const hydratedRef = useRef(null);
+  if (!hydratedRef.current && !skip && initialToken) {
+    hydratedRef.current = readDiskCache(cacheKey, initialToken);
+  }
+
+  const [data, setData] = useState(() => hydratedRef.current?.data ?? null);
+  const [isLoading, setIsLoading] = useState(() => !(hydratedRef.current?.data != null));
+  const [isStale, setIsStale] = useState(() => hydratedRef.current != null);
   const [error, setError] = useState(null);
   
   // Use ref for token so it can be updated externally via setToken
@@ -77,11 +134,12 @@ export function useStaleWhileRevalidate(url, options = {}) {
         result = [];
       }
       
-      // Update cache with fresh data
+      // Update both caches with fresh data
       dataCache.set(cacheKey, {
         data: result,
         timestamp: Date.now(),
       });
+      writeDiskCache(cacheKey, result, token);
 
       if (mountedRef.current) {
         setData(result);
@@ -127,7 +185,7 @@ export function useStaleWhileRevalidate(url, options = {}) {
     mountedRef.current = true;
     let cancelled = false;
 
-    // Check cache first
+    // Check the in-memory (same-session) cache first
     const cached = dataCache.get(cacheKey);
     if (cached && !skip) {
       const isExpired = Date.now() - cached.timestamp > staleTime;
@@ -141,6 +199,18 @@ export function useStaleWhileRevalidate(url, options = {}) {
         abortControllerRef.current = new AbortController();
         fetchFresh(abortControllerRef.current.signal).catch(() => {});
       }
+    } else if (!skip && hydratedRef.current?.data != null) {
+      // Hydrated from the DISK cache (page refresh): paint instantly, mark
+      // stale, and ALWAYS revalidate in the background — the entry can be
+      // hours old.
+      const hydrated = hydratedRef.current;
+      setData(hydrated.data);
+      setIsStale(true);
+      setIsLoading(false);
+      if (onDataRef.current) onDataRef.current(hydrated.data);
+
+      abortControllerRef.current = new AbortController();
+      fetchFresh(abortControllerRef.current.signal).catch(() => {});
     } else if (!skip) {
       // No cache - fetch immediately AND AWAIT IT
       abortControllerRef.current = new AbortController();

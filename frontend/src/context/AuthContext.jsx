@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
+import { clearSwrDiskCache } from '../hooks/useStaleWhileRevalidate';
 import { BACKEND_URL } from '../config';
 
 const AuthContext = createContext();
@@ -182,6 +183,9 @@ export const AuthProvider = ({ children }) => {
   const logout = () => {
     setUser(null);
     localStorage.removeItem(STORAGE_KEY);
+    // The persisted dashboard caches are token-scoped, but clearing them on
+    // sign-out keeps the next login honest.
+    clearSwrDiskCache();
   };
 
   return (

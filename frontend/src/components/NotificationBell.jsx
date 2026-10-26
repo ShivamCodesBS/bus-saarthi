@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Bell, X, Check, Clock, AlertTriangle, MessageSquare, CheckCircle2, Eye, GitMerge } from 'lucide-react';
 import { useNotifications } from '../hooks/useNotifications';
 
 const NotificationBell = ({ user, token }) => {
-  const [showDropdown, setShowDropdown] = useState(false);
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
   const dropdownRef = useRef(null);
   const buttonRef = useRef(null);
-  
+
   const {
     notifications,
     unreadCount,
@@ -21,29 +23,23 @@ const NotificationBell = ({ user, token }) => {
     token,
   });
 
-  // Close dropdown when clicking outside
+  // Close dropdown when clicking outside. A single `open` state drives the
+  // bell, the panel, the X and this handler — the old version kept two
+  // states, so the X and outside-click closed a panel that was not the one
+  // on screen and the dropdown could not be dismissed at all.
   useEffect(() => {
+    if (!open) return;
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         if (!buttonRef.current || !buttonRef.current.contains(event.target)) {
-          setShowDropdown(false);
+          setOpen(false);
         }
       }
     };
-    
+
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const [showNotifications, setShowNotifications] = useState(false);
-
-  const handleToggle = () => {
-    setShowDropdown(prev => !prev);
-  };
-
-  const handleClose = () => {
-    setShowDropdown(false);
-  };
+  }, [open]);
 
   const handleMarkAsRead = async (id) => {
     await markAsRead([id]);
@@ -51,6 +47,15 @@ const NotificationBell = ({ user, token }) => {
 
   const handleMarkAllRead = async () => {
     await markAllAsRead();
+  };
+
+  /** Open the screen the notification is about, and mark it read. */
+  const handleOpenNotification = async (notification) => {
+    if (!notification.read) await handleMarkAsRead(notification.id);
+    if (notification.type === 'grievance' || String(notification.type || '').startsWith('grievance') || notification.grievance_id) {
+      setOpen(false);
+      navigate('/community');
+    }
   };
 
   const formatNotificationTime = (createdAt) => {
@@ -113,12 +118,12 @@ const NotificationBell = ({ user, token }) => {
     <div className="relative">
       <button
         ref={buttonRef}
-        onClick={() => setShowNotifications(!showNotifications)}
+        onClick={() => setOpen((o) => !o)}
         className={`relative bg-transparent border-none cursor-pointer p-1.5 rounded-xl transition-all duration-200 ${
           unreadCount > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
         }`}
         aria-label="Notifications"
-        aria-expanded={showNotifications}
+        aria-expanded={open}
       >
         <Bell size={24} className={unreadCount > 0 ? 'animate-bell-ring' : ''} />
         {unreadCount > 0 && (
@@ -128,7 +133,7 @@ const NotificationBell = ({ user, token }) => {
         )}
       </button>
 
-      {showNotifications && (
+      {open && (
         <div
           ref={dropdownRef}
           className="absolute top-full right-0 mt-2 w-96 bg-white dark:bg-slate-900 shadow-2xl rounded-2xl border border-slate-200 dark:border-slate-700 z-50 animate-fade-in overflow-hidden"
@@ -157,7 +162,7 @@ const NotificationBell = ({ user, token }) => {
                 </button>
               )}
               <button
-                onClick={handleClose}
+                onClick={() => setOpen(false)}
                 className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                 aria-label="Close notifications"
               >
@@ -187,7 +192,7 @@ const NotificationBell = ({ user, token }) => {
                     className={`p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors ${
                       !notification.read ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''
                     }`}
-                    onClick={() => !notification.read && handleMarkAsRead(notification.id)}
+                    onClick={() => handleOpenNotification(notification)}
                   >
                     <div className="flex gap-3">
                       <div className="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center bg-slate-100 dark:bg-slate-800">
