@@ -1799,9 +1799,10 @@ filteredComplaints.map((comp) => {
                 {/* Media Attachment */}
                 {comp.type === 'photo' && comp.mediaUrl && (
                   <button
-                    onClick={() =>
-                      setMediaOpen({ type: 'photo', url: comp.mediaUrl })
-                    }
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMediaOpen({ type: 'photo', url: comp.mediaUrl });
+                    }}
                     style={{
                       display: 'block',
                       width: '100%',
@@ -1834,9 +1835,10 @@ filteredComplaints.map((comp) => {
                 )}
                 {comp.type === 'video' && comp.mediaUrl && (
                   <button
-                    onClick={() =>
-                      setMediaOpen({ type: 'video', url: comp.mediaUrl })
-                    }
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMediaOpen({ type: 'video', url: comp.mediaUrl });
+                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -1891,9 +1893,10 @@ filteredComplaints.map((comp) => {
                 )}
                 {comp.type === 'audio' && comp.mediaUrl && (
                   <button
-                    onClick={() =>
-                      setMediaOpen({ type: 'audio', url: comp.mediaUrl })
-                    }
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMediaOpen({ type: 'audio', url: comp.mediaUrl });
+                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -1997,7 +2000,7 @@ filteredComplaints.map((comp) => {
                   }}
                 >
                   <button
-                    onClick={() => handleUpvote(comp.id)}
+                    onClick={(e) => { e.stopPropagation(); handleUpvote(comp.id); }}
                     disabled={processingUpvotes.has(comp.id) || isMine}
                     title={
                       isMine ? 'You cannot agree with your own complaint' : ''
@@ -2266,7 +2269,7 @@ filteredComplaints.map((comp) => {
 
         return (
           <div
-            className="modal-overlay"
+            className="modal-overlay animate-fade-in"
             onClick={() => setDetailId(null)}
             style={{
               position: 'fixed',
@@ -2280,7 +2283,7 @@ filteredComplaints.map((comp) => {
             }}
           >
             <div
-              className="modal-sheet"
+              className="modal-sheet animate-slide-up"
               onClick={(e) => e.stopPropagation()}
               data-lenis-prevent="true"
               style={{
@@ -3248,6 +3251,11 @@ filteredComplaints.map((comp) => {
           </div>
         </div>
       )}
+
+      {/* Full-screen viewer for complaint attachments. Without this the
+          media buttons set state that nothing rendered — and the modal
+          scroll-lock never released. */}
+      <MediaViewer media={mediaOpen} onClose={() => setMediaOpen(null)} />
     </div>
   );
 };

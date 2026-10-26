@@ -93,6 +93,8 @@ const AdminDashboard = () => {
 
   // Specific Route Complaints Modal
   const [showRouteComplaintsModal, setShowRouteComplaintsModal] = useState(false);
+  // Full-screen media viewer for complaint attachments (photo/video/audio).
+  const [fullScreenMedia, setFullScreenMedia] = useState(null);
 
   // Grievance triage state
   const [grievanceFilter, setGrievanceFilter] = useState('all');
@@ -2402,12 +2404,12 @@ const AdminDashboard = () => {
                     <p style={{ margin: 0, color: 'var(--text-dark)' }}>{comp.text}</p>
                     {/* Media Attachment */}
                     {comp.type === 'photo' && (comp.media_url || comp.mediaUrl) && (
-                      <div style={{ borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: '#f8f9fa', display: 'flex', justifyContent: 'center' }}>
+                      <div onClick={() => setFullScreenMedia({ type: 'photo', url: comp.media_url || comp.mediaUrl })} style={{ borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: '#f8f9fa', display: 'flex', justifyContent: 'center', cursor: 'zoom-in' }}>
                         <img src={comp.media_url || comp.mediaUrl} alt="Complaint Attachment" style={{ width: '100%', height: 'auto', display: 'block', maxHeight: '400px', objectFit: 'contain' }} />
                       </div>
                     )}
                     {comp.type === 'video' && (comp.media_url || comp.mediaUrl) && (
-                      <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: 'black', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <div onClick={() => setFullScreenMedia({ type: 'video', url: comp.media_url || comp.mediaUrl })} style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: 'black', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                         <video src={comp.media_url || comp.mediaUrl} controls style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'contain' }} />
                       </div>
                     )}

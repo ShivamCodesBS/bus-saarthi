@@ -17,7 +17,10 @@ export default function MediaViewer({ media, onClose }) {
   const [errorText, setErrorText] = useState('');
 
   // Fullscreen viewer — lock the page behind it, close on Escape.
-  useModalA11y(true, onClose);
+  // Reactive to `media`: this component can stay mounted with media=null
+  // (Admin renders it unconditionally), and a constant `true` here held the
+  // body scroll-lock forever — the "page can't scroll after closing" bug.
+  useModalA11y(!!media, onClose);
   const retryKey = useRef(0);
 
   // Reset when the media changes.
