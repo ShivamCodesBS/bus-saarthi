@@ -114,6 +114,7 @@ const Profile = () => {
     cacheKey: 'user:profile',
     staleTime: 60000, // 60 seconds
     skip: !loginId,
+    token: user?.token, // Pass initial token
     onData: (data) => {
       // Keep localStorage session in sync
       if (user) {
@@ -139,15 +140,10 @@ const Profile = () => {
     cacheKey: `user:attendance:${loginId}`,
     staleTime: 30000, // 30 seconds
     skip: !loginId,
+    token: user?.token, // Pass initial token
   });
 
-  // Set tokens when user changes
-  useEffect(() => {
-    if (user?.token) {
-      setProfileToken(user.token);
-      setAttendanceToken(user.token);
-    }
-  }, [user?.token, setProfileToken, setAttendanceToken]);
+  // No need for token sync useEffect - tokens passed directly to hooks
 
   // Show skeleton while initial load, then show cached data immediately
   const isInitialLoading = profileLoading && !profile;

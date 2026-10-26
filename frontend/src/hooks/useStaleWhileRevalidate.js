@@ -25,6 +25,7 @@ export function useStaleWhileRevalidate(url, options = {}) {
     staleTime = 30000, // 30 seconds
     skip = false,
     onData,
+    token: initialToken = null, // Accept initial token
   } = options;
 
   const [data, setData] = useState(null);
@@ -32,7 +33,9 @@ export function useStaleWhileRevalidate(url, options = {}) {
   const [isStale, setIsStale] = useState(false);
   const [error, setError] = useState(null);
   
-  const tokenRef = useRef(null);
+  // Use ref for token so it can be updated externally via setToken
+  // but also accept initial token from options
+  const tokenRef = useRef(initialToken);
   const abortControllerRef = useRef(null);
   const mountedRef = useRef(true);
 

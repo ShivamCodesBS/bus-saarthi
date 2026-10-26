@@ -456,6 +456,7 @@ const AdminDashboard = () => {
   } = useStaleWhileRevalidate('/api/routes', {
     cacheKey: 'admin:routes',
     staleTime: 60000,
+    token: user?.token, // Pass initial token
     onData: (routes) => {
       setRoutesList(routes);
       
@@ -494,6 +495,7 @@ const AdminDashboard = () => {
   } = useStaleWhileRevalidate('/api/admin/grievances', {
     cacheKey: 'admin:grievances',
     staleTime: 30000,
+    token: user?.token,
     onData: (data) => setGrievances(data),
   });
 
@@ -505,6 +507,7 @@ const AdminDashboard = () => {
   } = useStaleWhileRevalidate('/api/users', {
     cacheKey: 'admin:users',
     staleTime: 60000,
+    token: user?.token,
     onData: (data) => setUsersList(data),
   });
 
@@ -516,6 +519,7 @@ const AdminDashboard = () => {
   } = useStaleWhileRevalidate('/api/attendance', {
     cacheKey: 'admin:attendance',
     staleTime: 30000,
+    token: user?.token,
     onData: (data) => setAttendanceLogs(data),
   });
 
@@ -526,6 +530,7 @@ const AdminDashboard = () => {
   } = useStaleWhileRevalidate('/api/merge/active', {
     cacheKey: 'admin:merges:active',
     staleTime: 30000,
+    token: user?.token,
     onData: (data) => setActiveMerges(data),
   });
 
@@ -536,6 +541,7 @@ const AdminDashboard = () => {
   } = useStaleWhileRevalidate('/api/merge/suggestions', {
     cacheKey: 'admin:merges:suggestions',
     staleTime: 60000,
+    token: user?.token,
     onData: (data) => setMergeSuggestions(data),
   });
 
@@ -546,6 +552,7 @@ const AdminDashboard = () => {
   } = useStaleWhileRevalidate('/api/merge/history', {
     cacheKey: 'admin:merges:history',
     staleTime: 60000,
+    token: user?.token,
     onData: (data) => setMergeHistory(data),
   });
 
@@ -557,22 +564,11 @@ const AdminDashboard = () => {
   } = useStaleWhileRevalidate('/api/sos/active', {
     cacheKey: 'admin:sos',
     staleTime: 10000,
+    token: user?.token,
     onData: (data) => { if (data.length > 0) setSosAlerts(data); },
   });
 
-  // Update tokens when user changes
-  useEffect(() => {
-    if (user?.token) {
-      setRoutesToken(user.token);
-      setGrievancesToken(user.token);
-      setUsersToken(user.token);
-      setAttendanceToken(user.token);
-      setActiveMergesToken(user.token);
-      setMergeSuggestionsToken(user.token);
-      setMergeHistoryToken(user.token);
-      setSosToken(user.token);
-    }
-  }, [user?.token, setRoutesToken, setGrievancesToken, setUsersToken, setAttendanceToken, setActiveMergesToken, setMergeSuggestionsToken, setMergeHistoryToken, setSosToken]);
+  // No need for token sync useEffect - tokens passed directly to hooks
 
   // Combined loading state - only true if NO cached data exists (initial load)
   // If data exists but is stale, we show the cached data and fetch in background
