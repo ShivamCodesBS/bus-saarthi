@@ -97,6 +97,7 @@ const Profile = () => {
   const fileInputRef = useRef(null);
 
   const [isUploading, setIsUploading] = useState(false);
+  const [showIdCard, setShowIdCard] = useState(false); // ADD THIS
 
   const loginId = user?.loginId || user?.login_id || user?.id;
   const role = user?.role || 'passenger';
