@@ -32,7 +32,7 @@ import { StatsModule } from './stats/stats.module';
     AppConfigModule,
     PrismaModule,
     CacheModule,
-    QueueModule,
+    QueueModule.register(),
     EventEmitterModule.forRoot(),
     ThrottlerModule.forRoot([
       {
@@ -57,7 +57,7 @@ import { StatsModule } from './stats/stats.module';
     AttendanceModule,
     FaceRecognitionModule,
     GrievancesModule,
-    TelemetryModule,
+    TelemetryModule.register(),
     NotificationsModule,
     SosModule,
     LeavesModule,

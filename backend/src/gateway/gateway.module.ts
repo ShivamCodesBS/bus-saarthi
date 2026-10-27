@@ -20,7 +20,9 @@ import { TelemetryModule } from '../telemetry/telemetry.module';
     }),
     NotificationsModule,
     UsersModule,
-    TelemetryModule,
+    // Dynamic: registers the queue/worker only when REDIS_HOST is set. The
+    // gateway injects TelemetryService, which exists in both modes.
+    TelemetryModule.register(),
   ],
   providers: [EventsGateway],
   exports: [EventsGateway],

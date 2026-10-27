@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { TelemetryBatchDto } from './dto/telemetry-batch.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -35,7 +35,9 @@ export class TelemetryService {
   constructor(
     private prisma: PrismaService,
     private eventEmitter: EventEmitter2,
-    @InjectQueue('telemetry') private telemetryQueue: Queue,
+    // Absent when REDIS_HOST is not configured — the service then always
+    // persists directly (see isQueueReady).
+    @Optional() @InjectQueue('telemetry') private telemetryQueue: Queue | undefined,
   ) {}
 
   /**
@@ -51,11 +53,12 @@ export class TelemetryService {
    */
   async addBatchToQueue(batchDto: TelemetryBatchDto) {
     const { route_id, data } = batchDto;
+    const queue = this.telemetryQueue;
 
-    if (await this.isQueueReady()) {
+    if (queue && (await this.isQueueReady())) {
       try {
         await withTimeout(
-          this.telemetryQueue.add('process-telemetry', { route_id, data }, {
+          queue.add('process-telemetry', { route_id, data }, {
             attempts: 3,
             backoff: { type: 'exponential', delay: 1000 },
             removeOnComplete: 100,
@@ -82,8 +85,11 @@ export class TelemetryService {
    * Bounded, cached check that the BullMQ backend is actually reachable.
    * `waitUntilReady` never settles while Redis is down, so the probe must
    * carry its own timeout; caching keeps the steady-state cost at zero.
+   * With no queue registered at all (REDIS_HOST unset) this is always false.
    */
   private async isQueueReady(): Promise<boolean> {
+    const queue = this.telemetryQueue;
+    if (!queue) return false;
     if (this.queueReady === true) return true;
 
     const now = Date.now();
@@ -97,7 +103,7 @@ export class TelemetryService {
 
     try {
       await withTimeout(
-        this.telemetryQueue.waitUntilReady(),
+        queue.waitUntilReady(),
         QUEUE_PROBE_TIMEOUT_MS,
         'Redis probe timed out',
       );
