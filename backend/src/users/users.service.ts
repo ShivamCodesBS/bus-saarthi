@@ -246,6 +246,9 @@ export class UsersService {
       }
     }
 
+    // Determine if token should be revoked (sensitive field changes)
+    const shouldRevokeToken = body.password || body.role || body.email;
+
     let password = user.password;
     if (body.password) {
       password = await bcrypt.hash(body.password, 10);
@@ -280,6 +283,7 @@ export class UsersService {
         address: body.address,
         gradeClass: body.gradeClass,
         password: password,
+        ...(shouldRevokeToken && { tokenVersion: { increment: 1 } }),
       },
     });
 
@@ -289,24 +293,21 @@ export class UsersService {
     // The role may have changed — drop the cached identity.
     await this.cache.delByPattern('users:*');
     await this.cache.del(`auth:user:${loginId}`);
+    // Also invalidate versioned cache keys
+    await this.cache.delByPattern(`auth:user:${loginId}:*`);
+
+    // Emit event for real-time profile updates
+    this.eventEmitter.emit('user.updated', {
+      loginId: updatedUser.loginId,
+      name: updatedUser.name,
+      profilePic: updatedUser.profilePic,
+    });
 
     return {
       status: 'success',
       message: 'User updated',
       user: this.sanitize(updatedUser),
     };
-  // Emit event for real-time profile updates
-  this.eventEmitter.emit('user.updated', {
-    loginId: updatedUser.loginId,
-    name: updatedUser.name,
-    profilePic: updatedUser.profilePic,
-  });
-
-  return {
-    status: 'success',
-    message: 'User updated',
-    user: this.sanitize(updatedUser),
-  };
   }
 
   async remove(loginId: string, actorRole: UserRole) {
@@ -422,8 +423,15 @@ export class UsersService {
 
     await this.prisma.user.update({
       where: { loginId },
-      data: { password: await bcrypt.hash(newPassword, 10) },
+      data: { 
+        password: await bcrypt.hash(newPassword, 10),
+        tokenVersion: { increment: 1 }, // Revoke all existing tokens
+      },
     });
+    
+    // Invalidate versioned cache keys
+    await this.cache.delByPattern(`auth:user:${loginId}:*`);
+
     return { status: 'success', message: 'Password changed successfully' };
   }
 

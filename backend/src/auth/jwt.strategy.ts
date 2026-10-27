@@ -31,15 +31,18 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
    */
   async validate(payload: any) {
     const loginId = payload.login_id;
+    const tokenVersion = payload.tokenVersion ?? 0;
     if (!loginId) {
       throw new UnauthorizedException();
     }
 
+    // Cache key includes tokenVersion - invalidates on password/role change
+    const cacheKey = `auth:user:${loginId}:v${tokenVersion}`;
     const cached = await this.cache.get<{
       role: string;
       routeId: string | null;
       name: string;
-    }>(`auth:user:${loginId}`);
+    }>(cacheKey);
 
     if (cached) {
       return {
@@ -55,14 +58,19 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     const user = await this.prisma.user.findUnique({
       where: { loginId },
-      select: { id: true, loginId: true, name: true, role: true, routeId: true },
+      select: { id: true, loginId: true, name: true, role: true, routeId: true, tokenVersion: true },
     });
     if (!user) {
       throw new UnauthorizedException();
     }
 
+    // Token version mismatch = token revoked
+    if (user.tokenVersion !== tokenVersion) {
+      throw new UnauthorizedException('Token revoked');
+    }
+
     await this.cache.set(
-      `auth:user:${loginId}`,
+      cacheKey,
       { role: user.role, routeId: user.routeId, name: user.name },
       300,
     );

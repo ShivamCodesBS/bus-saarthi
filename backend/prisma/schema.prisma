@@ -45,6 +45,7 @@ model User {
   faceResetRequestedBy String?          @map("face_reset_requested_by") @db.VarChar(50)
   createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  tokenVersion      Int                @default(0) @map("token_version")
   wakeAlarm         Json?              @map("wake_alarm") @db.Json
   /// Subject taught — only meaningful for the `teacher` role.
   subject           String?            @db.VarChar(100)

@@ -26,6 +26,7 @@ const USER_SELECT = {
   locationLat: true,
   locationLng: true,
   wakeAlarm: true,
+  tokenVersion: true,
 } as const;
 
 @Injectable()
@@ -89,19 +90,8 @@ export class AuthService {
       data: { lastLogin: new Date() },
     });
 
-    const payload = {
-      id: user.id,
-      login_id: user.loginId,
-      role: user.role,
-      name: user.name,
-      route_id: user.routeId,
-    };
-
-    const access_token = this.jwtService.sign(payload);
-
     return {
       status: 'success',
-      token: access_token,
       user: {
         login_id: user.loginId,
         name: user.name,
@@ -116,6 +106,18 @@ export class AuthService {
         grade_class: user.gradeClass,
       },
     };
+  }
+
+  // Generate JWT token for HttpOnly cookie
+  generateToken(user: { login_id: string; name: string; role: UserRole; route_id: string | null }): string {
+    const payload = {
+      login_id: user.login_id,
+      role: user.role,
+      name: user.name,
+      route_id: user.route_id,
+      tokenVersion: 0, // Will be validated on each request via cache
+    };
+    return this.jwtService.sign(payload);
   }
 
   private humanRole(role: UserRole): string {
