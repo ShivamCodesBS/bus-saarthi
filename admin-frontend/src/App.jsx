@@ -61,8 +61,10 @@ export default function App() {
 
     const verify = async () => {
       try {
-        const apiUrl =
-          import.meta.env.VITE_API_URL || 'https://bus-saarthi-j3lq.onrender.com';
+        const apiUrl = import.meta.env.VITE_API_URL;
+        if (!apiUrl) {
+          throw new Error('VITE_API_URL environment variable is required');
+        }
         const res = await fetch(`${apiUrl}/api/users/me`, {
           headers: { Authorization: `Bearer ${authToken}` },
         });

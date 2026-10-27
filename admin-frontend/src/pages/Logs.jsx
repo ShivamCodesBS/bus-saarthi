@@ -13,7 +13,11 @@ export default function Logs({ authToken }) {
   useEffect(() => {
     if (!authToken) return;
 
-    const apiUrl = import.meta.env.VITE_API_URL || 'https://bus-saarthi-j3lq.onrender.com';
+    const apiUrl = import.meta.env.VITE_API_URL;
+    if (!apiUrl) {
+      setError('VITE_API_URL environment variable is required');
+      return;
+    }
     
     const fetchLogs = async () => {
       try {
