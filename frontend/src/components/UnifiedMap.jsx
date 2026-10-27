@@ -5,7 +5,8 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { 
   Navigation, Maximize2, X, Activity, Gauge, Compass, Wind, 
-  MapPin, RefreshCw, Crosshair, Layers, Info 
+  MapPin, RefreshCw, Crosshair, Layers, Info,
+  ChevronDown, ChevronUp
 } from 'lucide-react';
 
 // Fix for default marker icon in react-leaflet
@@ -283,13 +284,15 @@ const UnifiedMap = ({
     ];
   }, [routeInfo]);
   
-  // Handle telemetry updates - mark stale after 5 seconds
+  // Handle telemetry updates - mark stale after 30 seconds (progressive degradation)
+  // 0-15s: LIVE (green), 15-30s: STALE (orange), 30s+: OFFLINE (red)
   useEffect(() => {
     if (telemetry && telemetry.lastUpdated) {
       setLastTelemetryUpdate(telemetry.lastUpdated);
       setTelemetryStale(false);
       clearTimeout(staleTimerRef.current);
-      staleTimerRef.current = setTimeout(() => setTelemetryStale(true), 5000);
+      // Extended to 30s for better mobile network resilience
+      staleTimerRef.current = setTimeout(() => setTelemetryStale(true), 30000);
     } else if (!telemetry) {
       setTelemetryStale(true);
       setLastTelemetryUpdate(null);
@@ -447,7 +450,8 @@ const UnifiedMap = ({
       const t = tripTelemetryRef.current;
       if (!t?.lastUpdated) return setTripState('offline');
       const age = Date.now() - new Date(t.lastUpdated).getTime();
-      if (age > 10000) return setTripState('offline');
+      // Extended to 30s to match telemetryStale timeout for consistency
+      if (age > 30000) return setTripState('offline');
       if ((t.speed || 0) > 3) {
         lastMovingAtRef.current = Date.now();
         setTripState('moving');
@@ -533,12 +537,9 @@ const UnifiedMap = ({
         minZoom={3}
       />
       
-      {/* Route Polyline — only while the bus is actively reporting. When
-          offline the bus sits at its last-known/default point and a line
-          "from the bus" reads as a rendering bug rather than a route.
-          Uses the internal motion state, not the parent's isLive flag,
-          which some pages never reset. */}
-      {showRoutePolyline && tripState !== 'offline' && dynamicRoutePolyline.length > 1 && (
+      {/* Route Polyline — show whenever route data is available, regardless of live GPS.
+          The bus marker + telemetry popup handle the "offline" indication. */}
+      {showRoutePolyline && dynamicRoutePolyline.length > 1 && (
         <Polyline 
           positions={dynamicRoutePolyline} 
           color="#0056b3" 
@@ -565,8 +566,8 @@ const UnifiedMap = ({
         </Marker>
       ))}
       
-      {/* Destination Marker — same live gating as the polyline */}
-      {showDestinationMarker && tripState !== 'offline' && dynamicRoutePolyline.length > 0 && (
+      {/* Destination Marker — show whenever route data is available */}
+      {showDestinationMarker && dynamicRoutePolyline.length > 0 && (
         <Marker position={dynamicRoutePolyline[dynamicRoutePolyline.length - 1]} icon={destinationIcon}>
           <Popup>
             <div style={{ textAlign: 'center' }}>
@@ -691,10 +692,10 @@ const UnifiedMap = ({
                 style={{
                   background: 'none', border: 'none', cursor: 'pointer',
                   padding: '2px', borderRadius: '6px', color: '#666',
-                  display: 'flex', alignItems: 'center',
+                  display: 'flex', alignItems: 'center', fontSize: '12px',
                 }}
               >
-                {telemetryMinimized ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
+                {telemetryMinimized ? '▼' : '▲'}
               </button>
             </div>
             {telemetryMinimized ? (
@@ -1054,8 +1055,8 @@ const UnifiedMap = ({
             resolve to zero, but an absolutely-positioned child stretches to
             the host's real box regardless. */}
         <MapContainer
-          center={isFullscreen ? busLocation : mapCenter}
-          zoom={isFullscreen ? 15 : mapZoom}
+          center={isFullscreen && autoFollow ? busLocation : mapCenter}
+          zoom={isFullscreen && autoFollow ? 15 : mapZoom}
           style={{ position: 'absolute', inset: 0, height: '100%', width: '100%' }}
           zoomControl={false}
           scrollWheelZoom={true}

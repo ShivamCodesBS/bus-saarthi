@@ -1701,8 +1701,10 @@ filteredComplaints.map((comp) => {
                               {t('yourComplaint')}
                             </span>
                           </span>
+                        ) : comp.isAnonymous ? (
+                          t('anonymousPassenger')
                         ) : (
-                          comp.isAnonymous ? t('anonymousPassenger') : (comp.authorDisplay || comp.realName || t('anonymousPassenger'))
+                          comp.authorDisplay || comp.realName || t('anonymousPassenger')
                         )}
                       </h3>
                       <p

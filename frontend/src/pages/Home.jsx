@@ -97,15 +97,20 @@ const Home = () => {
   const [autoFollow, setAutoFollow] = useState(true);
   const telemetryTimeoutRef = useRef(null);
 
-  const effectiveRouteIdSafe = mergeInfo?.isCancelled
+  // Dynamic Effective Route ID: Switches instantly to newRouteId when merged, or keeps original if cancelled
+  const effectiveRouteId = mergeInfo?.isCancelled 
     ? (user?.routeId || user?.route_id || '4')
     : (mergeInfo?.newRouteId || user?.routeId || user?.route_id || '4');
+
+  // Ref for current effective route ID so socket handlers always see the latest value
+  const effectiveRouteIdRef = useRef(effectiveRouteId);
+  effectiveRouteIdRef.current = effectiveRouteId;
 
   // Last DB-recorded GPS fix for the route. While the bus is offline the
   // marker sits at the last place it was actually seen, not a default pin.
   const { data: lastKnownData } = useStaleWhileRevalidate(
-    `/api/telemetry/last/${effectiveRouteIdSafe}`,
-    { cacheKey: `home:last-loc:${effectiveRouteIdSafe}`, staleTime: 15000, token: user?.token },
+    `/api/telemetry/last/${effectiveRouteId}`,
+    { cacheKey: `home:last-loc:${effectiveRouteId}`, staleTime: 15000, token: user?.token },
   );
   const lastKnown = useMemo(() => {
     const d = lastKnownData?.data;
@@ -237,18 +242,51 @@ const Home = () => {
       // the backend cold-start took longer than the retries allowed.
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
+      // Add randomization to prevent thundering herd on backend recovery
+      randomizationFactor: 0.5,
     });
 
     socket.on('connect', () => {
+      console.log('✅ Socket connected');
       const loginId = user?.loginId || user?.login_id;
       socket.emit('join_route', { route_id: effectiveRouteId, login_id: loginId });
+    });
+
+    socket.on('connect_error', (err) => {
+      console.warn('⚠️ Socket connection error:', err.message);
+      // Show user-friendly reconnection feedback
+      toast('📡 Reconnecting to live tracking...', {
+        duration: 2000,
+        icon: '🔄',
+        id: 'socket-reconnect',
+        style: { borderRadius: '12px', fontWeight: 600 },
+      });
+    });
+
+    socket.on('reconnect', (attemptNumber) => {
+      console.log(`✅ Socket reconnected after ${attemptNumber} attempts`);
+      toast.success('Live tracking restored!', {
+        duration: 3000,
+        id: 'socket-reconnect',
+        icon: '✅',
+      });
+    });
+
+    socket.on('disconnect', (reason) => {
+      console.warn('⚠️ Socket disconnected:', reason);
+      if (reason === 'io server disconnect') {
+        // Server disconnected, try to reconnect
+        socket.connect();
+      }
     });
 
     let telemetryTimeout;
 
     // Listen for live telemetry data
     socket.on('live_telemetry', (data) => {
-      if (data.route_id && String(data.route_id) !== String(effectiveRouteId)) return;
+      // Use ref to always get current effective route ID (avoids stale closure)
+      const currentRouteId = effectiveRouteIdRef.current;
+      if (data.route_id && String(data.route_id) !== String(currentRouteId)) return;
       if (data.location && data.location.lat && data.location.lng) {
         setBusLocation([data.location.lat, data.location.lng]);
         setIsLive(true);
@@ -264,10 +302,12 @@ const Home = () => {
       });
 
       if (telemetryTimeoutRef.current) clearTimeout(telemetryTimeoutRef.current);
+      // Extended timeout: 30s instead of 15s for better mobile network resilience
+      // Prevents map from showing "OFFLINE" during brief signal gaps at traffic signals
       telemetryTimeoutRef.current = setTimeout(() => {
         setTelemetry(null);
         setIsLive(false);
-      }, 5000);
+      }, 30000);
     });
 
     socket.on('live_attendance', () => {
@@ -276,6 +316,11 @@ const Home = () => {
 
     // Listen for real-time bus merge event
     socket.on('your_route_merged', (data) => {
+      // Leave the old route room before joining the new one
+      const oldRouteId = effectiveRouteIdRef.current;
+      if (oldRouteId && data.newRouteId && String(oldRouteId) !== String(data.newRouteId)) {
+        socket.emit('unsubscribe_route', { route_id: oldRouteId });
+      }
       setMergeInfo(data);
       toast.error(`🚌 BUS MERGED: ${data.message}`, { duration: 10000 });
       if (data.newRouteId) {
@@ -285,6 +330,11 @@ const Home = () => {
 
     // Listen for route restored event
     socket.on('route_restored', () => {
+      // Leave the merged route room before rejoining original
+      const mergedRouteId = effectiveRouteIdRef.current;
+      if (mergedRouteId) {
+        socket.emit('unsubscribe_route', { route_id: mergedRouteId });
+      }
       setMergeInfo(null);
       toast.success('Your original bus route has been restored!', { duration: 6000 });
       const homeRouteId = user?.routeId || user?.route_id || '4';
@@ -370,7 +420,7 @@ const Home = () => {
       if (telemetryTimeoutRef.current) clearTimeout(telemetryTimeoutRef.current);
       setTimeout(() => socket.disconnect(), 500);
     };
-  }, [user, effectiveRouteId]);
+  }, [user, effectiveRouteId, user?.token]);
 
 
   const acknowledgeBroadcast = () => {
@@ -872,7 +922,18 @@ const Home = () => {
                    <div className="absolute left-2 top-2 bottom-4 w-0.5 bg-slate-200 dark:bg-slate-700 z-0"></div>
                    
                    {(() => {
-                      const stopsArray = routeInfo?.stops ? routeInfo.stops.split(',').map(s => s.trim()) : ['Civil Lines', 'Rajendra Nagar', 'DD Puram', 'Invertis University'];
+                      // stops may arrive as a JSON array string, a comma
+                      // list, or an array — normalise before rendering.
+                      const parseStops = (raw) => {
+                        if (!raw) return ['Civil Lines', 'Rajendra Nagar', 'DD Puram', 'Invertis University'];
+                        if (Array.isArray(raw)) return raw.map((s) => (typeof s === 'object' && s) ? (s.name || s.stopName) : String(s));
+                        try {
+                          const parsed = JSON.parse(raw);
+                          if (Array.isArray(parsed)) return parsed.map((s) => (typeof s === 'object' && s) ? (s.name || s.stopName) : String(s));
+                        } catch { /* plain comma list */ }
+                        return String(raw).split(',').map((s) => s.trim().replace(/^["\']+|["\']+$/g, ''));
+                      };
+                      const stopsArray = parseStops(routeInfo?.stops);
 
                       const getDistance = (lat1, lon1, lat2, lon2) => {
                         const R = 6371;
@@ -942,6 +1003,9 @@ const Home = () => {
                 </Button>
               </div>
               <div className="flex-1 relative z-0 min-h-0">
+                {/* Absolute host: the map fills the card exactly, immune to
+                    percentage-height chains anywhere up the tree. */}
+                <div className="absolute inset-0 z-0">
                 <UnifiedMap
                   busLocation={busLocation}
                   routeInfo={routeInfo}
@@ -958,6 +1022,7 @@ const Home = () => {
                   showRoutePolyline={true}
                   showDestinationMarker={true}
                 />
+                </div>
               </div>
             </Card>
           </div>

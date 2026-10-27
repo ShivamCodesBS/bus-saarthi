@@ -189,6 +189,24 @@ const TransportInchargeDashboard = () => {
   const [busLocation, setBusLocation] = useState([28.3180, 79.4670]);
   const [isBusActive, setIsBusActive] = useState(false);
   const [busTelemetry, setBusTelemetry] = useState(null);
+
+  // Last DB-recorded GPS fix for the selected route.
+  const { data: lastKnownData } = useStaleWhileRevalidate(
+    `/api/telemetry/last/${selectedRoute}`,
+    { cacheKey: `ti:last-loc:${selectedRoute}`, staleTime: 15000, token: user?.token },
+  );
+  const lastKnown = useMemo(() => {
+    const d = lastKnownData?.data;
+    if (!d?.lat || !d?.lng) return null;
+    return { position: [d.lat, d.lng], timestamp: d.timestamp, speed: d.speed };
+  }, [lastKnownData]);
+
+  // Offline: put the marker where the bus was last actually seen.
+  useEffect(() => {
+    if (!isBusActive && lastKnown) {
+      setBusLocation(lastKnown.position);
+    }
+  }, [isBusActive, lastKnown]);
   const selectedRouteRef = useRef(selectedRoute);
   // The socket effect closes over the token; a ref keeps it in sync without
   // tearing down and re-creating the socket on every token change.
@@ -254,15 +272,41 @@ const TransportInchargeDashboard = () => {
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
+      // Add randomization to prevent thundering herd on backend recovery
+      randomizationFactor: 0.5,
     });
 
     socket.on('connect', () => {
-      console.log('Transport Incharge connected to socket server');
+      console.log('✅ Transport Incharge connected to socket server');
       socket.emit('join_admin', { token: user.token });
     });
 
     socket.on('connect_error', (err) => {
       console.warn('Socket connection error (Transport):', err.message);
+      // Show user-friendly reconnection feedback
+      toast('📡 Reconnecting to fleet tracking...', {
+        duration: 2000,
+        icon: '🔄',
+        id: 'ti-socket-reconnect',
+        style: { borderRadius: '12px', fontWeight: 600 },
+      });
+    });
+
+    socket.on('reconnect', (attemptNumber) => {
+      console.log(`✅ Transport socket reconnected after ${attemptNumber} attempts`);
+      toast.success('Fleet tracking restored!', {
+        duration: 3000,
+        id: 'ti-socket-reconnect',
+        icon: '✅',
+      });
+    });
+
+    socket.on('disconnect', (reason) => {
+      console.warn('⚠️ Transport socket disconnected:', reason);
+      if (reason === 'io server disconnect') {
+        // Server disconnected, try to reconnect
+        socket.connect();
+      }
     });
 
     socket.on('sos_alert', (data) => {
@@ -1048,6 +1092,7 @@ const TransportInchargeDashboard = () => {
                   height="100%"
                   minHeight="400px"
                   buses={fleetBuses}
+                  lastKnown={lastKnown}
                   onSelectBus={(id) => setSelectedRoute(String(id))}
                   busLabel={`Bus ${routesList.find(r => String(r.routeId || r.route_id) === String(selectedRoute))?.busNumber || routesList.find(r => String(r.routeId || r.route_id) === String(selectedRoute))?.bus_number || selectedRoute}`}
                   showFullscreenButton={true}

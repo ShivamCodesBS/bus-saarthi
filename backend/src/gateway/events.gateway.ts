@@ -340,8 +340,12 @@ export class EventsGateway
    */
   private maskGrievance(grievance: any) {
     if (!grievance || typeof grievance !== 'object') return grievance;
-    const { loginId, login_id, ...rest } = grievance;
-    if (grievance.isAnonymous) delete rest.realName;
+    const { loginId, login_id, realName, ...rest } = grievance;
+    if (grievance.isAnonymous) {
+      // When anonymous, strip realName entirely from route-room payload
+      return rest;
+    }
+    // Not anonymous: keep realName (already in rest)
     return rest;
   }
 
