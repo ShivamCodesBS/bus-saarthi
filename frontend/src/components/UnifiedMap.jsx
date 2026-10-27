@@ -18,21 +18,31 @@ L.Icon.Default.mergeOptions({
 });
 
 // Bus marker: a white badge with a navigation arrow that rotates with the
-// live heading (built per heading — a static PNG could not show direction).
-const busDirectionIcon = (heading) => new L.DivIcon({
-  className: 'bus-direction-marker',
-  html: `
+// live heading. When offline, shows "Last seen" timing as a label below.
+const busDirectionIcon = (heading, isOffline, lastSeenText) => {
+  const markerHtml = `
     <div style="position:relative;width:42px;height:42px;">
-      <div style="position:absolute;inset:0;border-radius:50%;background:white;border:3px solid #3b82f6;box-shadow:0 3px 10px rgba(0,0,0,0.35);"></div>
+      <div style="position:absolute;inset:0;border-radius:50%;background:white;border:3px solid ${isOffline ? '#cf1322' : '#3b82f6'};box-shadow:0 3px 10px rgba(0,0,0,0.35);"></div>
       <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transform:rotate(${Number(heading) || 0}deg);transition:transform 0.4s ease;">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="#3b82f6"><path d="M12 2 L19 21 L12 17 L5 21 Z"/></svg>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="${isOffline ? '#cf1322' : '#3b82f6'}"><path d="M12 2 L19 21 L12 17 L5 21 Z"/></svg>
       </div>
       <div style="position:absolute;right:-4px;bottom:-4px;width:18px;height:18px;border-radius:50%;background:white;box-shadow:0 1px 4px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;font-size:10px;line-height:1;">🚌</div>
-    </div>`,
-  iconSize: [42, 42],
-  iconAnchor: [21, 21],
-  popupAnchor: [0, -21],
-});
+    </div>
+    ${isOffline && lastSeenText ? `
+      <div style="position:absolute;top:44px;left:50%;transform:translateX(-50%);white-space:nowrap;background:rgba(207,19,34,0.95);color:white;padding:4px 8px;border-radius:8px;font-size:10px;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,0.3);pointer-events:none;">
+        Last seen ${lastSeenText}
+      </div>
+    ` : ''}
+  `;
+  
+  return new L.DivIcon({
+    className: 'bus-direction-marker',
+    html: markerHtml,
+    iconSize: [42, isOffline ? 70 : 42],
+    iconAnchor: [21, 21],
+    popupAnchor: [0, -21],
+  });
+};
 
 // Destination Icon
 const destinationIcon = new L.Icon({
@@ -537,16 +547,17 @@ const UnifiedMap = ({
         minZoom={3}
       />
       
-      {/* Route Polyline — show whenever route data is available, regardless of live GPS.
-          The bus marker + telemetry popup handle the "offline" indication. */}
+      {/* Route Polyline — show the planned route but NOT lines connected to 
+          the current bus position. The bus marker stands alone. */}
       {showRoutePolyline && dynamicRoutePolyline.length > 1 && (
         <Polyline 
           positions={dynamicRoutePolyline} 
           color="#0056b3" 
           weight={5} 
-          opacity={0.8}
+          opacity={0.6}
           lineCap="round"
           lineJoin="round"
+          dashArray="10, 10"
         />
       )}
 
@@ -579,7 +590,14 @@ const UnifiedMap = ({
       )}
       
       {/* Bus Marker with live telemetry popup */}
-      <Marker position={busLocation} icon={busDirectionIcon(telemetry?.heading)}>
+      <Marker 
+        position={busLocation} 
+        icon={busDirectionIcon(
+          telemetry?.heading, 
+          !telemetry || telemetryStale,
+          lastKnown?.timestamp ? formatLastUpdate(lastKnown.timestamp) : null
+        )}
+      >
         <Popup
           minWidth={180}
           maxWidth={240}
@@ -594,7 +612,7 @@ const UnifiedMap = ({
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '2px' }}>
                   <span style={{ color: '#666' }}>Speed:</span>
                   <span style={{ fontWeight: 'bold', color: telemetry.speed > 60 ? '#cf1322' : '#28a745' }}>
-                    {Math.round(telemetry.speed)} km/h
+                    {telemetry.speed > 0 ? Math.round(telemetry.speed) : 0} km/h
                   </span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '2px' }}>
@@ -618,7 +636,7 @@ const UnifiedMap = ({
             {(!telemetry || telemetryStale) && (
               <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#cf1322' }}>
                 {lastKnown?.timestamp
-                  ? `📡 Last seen ${formatLastUpdate(lastKnown.timestamp)}`
+                  ? `📡 Offline - Last seen ${formatLastUpdate(lastKnown.timestamp)}`
                   : '📡 No GPS signal yet'}
               </div>
             )}
@@ -673,7 +691,7 @@ const UnifiedMap = ({
         </div>
         
         {/* Telemetry Panel — collapsible to a compact speed chip */}
-        {showTelemetryPanel && telemetry && !telemetryStale && (
+        {showTelemetryPanel && telemetry && !telemetryStale && telemetry.speed > 0 && (
           <div style={{
             marginTop: '8px',
             padding: '8px 12px',
@@ -776,7 +794,7 @@ const UnifiedMap = ({
                   fontWeight: '700', 
                   color: telemetry.comfort === 'Smooth' ? '#28a745' : '#f97316',
                 }}>
-                  {telemetry.comfort}
+                  {telemetry.comfort || 'Smooth'}
                 </div>
               </div>
             </div>
