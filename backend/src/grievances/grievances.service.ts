@@ -9,6 +9,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CacheService } from '../cache/cache.service';
 import { isStaff } from '../common/roles';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Cron, CronExpression } from '@nestjs/schedule';
 
 /** How long a complainant has to confirm (or reject) a resolution. */
 export const RESOLUTION_WINDOW_HOURS = 48;
@@ -19,6 +21,7 @@ export class GrievancesService {
     private prisma: PrismaService,
     private notificationsService: NotificationsService,
     private cache: CacheService,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -50,16 +53,8 @@ export class GrievancesService {
       select: { routeId: true, name: true, role: true },
     });
 
-    // The route comes from the user's assignment, not from the client. If the
-    // client sends a route, it must match the user's own assignment.
-    let effectiveRoute = user?.routeId ?? null;
-    if (
-      routeId &&
-      effectiveRoute &&
-      String(routeId) !== String(effectiveRoute)
-    ) {
-      effectiveRoute = effectiveRoute;
-    }
+    // The route comes from the user's assignment, not from the client.
+    const effectiveRoute = user?.routeId ?? null;
     if (!effectiveRoute) {
       throw new BadRequestException(
         'You are not allocated to a bus route yet, so a grievance cannot be filed against a route.',
@@ -88,12 +83,13 @@ export class GrievancesService {
 
     await this.cache.delByPattern('grievances:*');
 
-    // Notify staff that a new grievance is waiting.
-    await this.notifyStaffOfNewGrievance(
-      grievance,
-      resolvedName,
-      route?.routeName,
-    );
+    // Emit real-time event for connected clients on the same route and staff
+    this.eventEmitter.emit('grievance.created', grievance);
+
+    // Notify staff without blocking the submitter's request — the fan-out
+    // (DB lookup + insert + push per staff member) used to run inline and
+    // made filing a complaint feel slow.
+    void this.notifyStaffOfNewGrievance(grievance, resolvedName, route?.routeName);
 
     return {
       status: 'success',
@@ -128,20 +124,57 @@ export class GrievancesService {
     if (cached) return cached;
 
     const where: any = {};
-    if (!staff || options.onlyMine) {
+    if (options.onlyMine) {
       where.loginId = loginId;
+    } else if (!staff) {
+      // Non-staff callers (students, parents, teachers):
+      // Show complaints for their assigned bus/route OR complaints they filed themselves.
+      const caller = await this.prisma.user.findUnique({
+        where: { loginId },
+        select: { routeId: true, role: true },
+      });
+
+      let routeIds: string[] = [];
+      if (options.route && options.route !== 'all') {
+        routeIds = [String(options.route)];
+      } else if (caller?.routeId) {
+        routeIds = [String(caller.routeId)];
+      } else if (caller?.role === UserRole.parent) {
+        // If user is a parent, find routes for all their linked children
+        const links = await this.prisma.parentChildLink.findMany({
+          where: { parentLoginId: loginId },
+          include: { child: { select: { routeId: true } } },
+        });
+        routeIds = links
+          .map((l) => l.child?.routeId)
+          .filter(Boolean)
+          .map(String);
+      }
+
+      if (routeIds.length > 0) {
+        where.OR = [
+          { route: { in: routeIds } },
+          { loginId: loginId },
+        ];
+      } else {
+        where.loginId = loginId;
+      }
+    } else {
+      if (options.route && options.route !== 'all') {
+        where.route = options.route;
+      }
     }
     if (options.status && options.status !== 'all') {
       where.status = options.status;
-    }
-    if (options.route && options.route !== 'all') {
-      where.route = options.route;
     }
 
     const grievances = await this.prisma.grievance.findMany({
       where,
       orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
       include: { user: { select: { name: true, role: true } } },
+      // Bound the query — the table grows forever and the full scan was
+      // re-run by every cache miss.
+      take: 200,
     });
 
     // A closed complaint must never outrank a live one, however high its
@@ -169,18 +202,33 @@ export class GrievancesService {
     });
     const upvotedIds = new Set(upvotes.map((u) => u.grievanceId));
 
-    // Non-staff must never receive the reporter's identity.
+    // For parent accounts, check which grievances belong to their linked children
+    let linkedChildIds = new Set<string>();
+    if (role === UserRole.parent) {
+      const links = await this.prisma.parentChildLink.findMany({
+        where: { parentLoginId: loginId },
+        select: { childLoginId: true },
+      });
+      linkedChildIds = new Set(links.map((l) => l.childLoginId));
+    }
+
+    // Non-staff must never receive identity data beyond what the reporter
+    // consented to: anonymous reporters appear as "Anonymous Passenger",
+    // while a reporter who opted to show their name does show it.
     const visible = grievances.map((g) => {
       const { user, ...rest } = g;
-      const mine = g.loginId === loginId;
-      // Staff see the real name AND the anonymous flag; non-staff see
-      // "Anonymous Passenger" and the anonymous flag is hidden.
+      const isMyChild = linkedChildIds.has(g.loginId);
+      const mine = g.loginId === loginId || isMyChild;
+      const canSeeName = staff || mine || !g.isAnonymous;
       return {
         ...rest,
-        realName: staff || mine ? g.realName : null,
+        realName: canSeeName ? g.realName : null,
         isAnonymous: staff || mine ? g.isAnonymous : false,
-        authorDisplay: staff || mine ? g.realName : 'Anonymous Passenger',
+        authorDisplay: staff || mine
+          ? (isMyChild ? `${g.realName} (Your Child)` : (g.realName || 'Passenger'))
+          : (g.isAnonymous ? 'Anonymous Passenger' : (g.realName || 'Passenger')),
         isMine: mine,
+        isChild: isMyChild,
         hasUpvotedLocally: upvotedIds.has(g.id),
       };
     });
@@ -198,17 +246,41 @@ export class GrievancesService {
     if (!grievance) throw new NotFoundException('Grievance not found');
 
     const staff = isStaff(role);
-    const mine = grievance.loginId === loginId;
+    const isOwner = grievance.loginId === loginId;
+    let isParentOfChild = false;
+    if (role === UserRole.parent && !isOwner) {
+      const link = await this.prisma.parentChildLink.findUnique({
+        where: {
+          parentLoginId_childLoginId: {
+            parentLoginId: loginId,
+            childLoginId: grievance.loginId,
+          },
+        },
+      });
+      isParentOfChild = !!link;
+    }
+    const mine = isOwner || isParentOfChild;
+
     if (!staff && !mine) {
-      throw new ForbiddenException('You cannot view this grievance');
+      // Check if user is on the same route
+      const caller = await this.prisma.user.findUnique({
+        where: { loginId },
+        select: { routeId: true },
+      });
+      if (!caller?.routeId || String(caller.routeId) !== String(grievance.route)) {
+        throw new ForbiddenException('You cannot view this grievance');
+      }
     }
 
     const { user, ...rest } = grievance;
+    const canSeeName = staff || mine || !grievance.isAnonymous;
     return {
       ...rest,
-      realName: staff || mine ? grievance.realName : null,
+      realName: canSeeName ? grievance.realName : null,
       isAnonymous: staff || mine ? grievance.isAnonymous : false,
-      authorDisplay: staff || mine ? grievance.realName : 'Anonymous Passenger',
+      authorDisplay: staff || mine
+        ? grievance.realName
+        : (grievance.isAnonymous ? 'Anonymous Passenger' : (grievance.realName || 'Passenger')),
       isMine: mine,
     };
   }
@@ -243,10 +315,13 @@ export class GrievancesService {
       newUpvotes = grievance.upvotes + 1;
     }
 
-    await this.prisma.grievance.update({
+    const updatedGrievance = await this.prisma.grievance.update({
       where: { id },
       data: { upvotes: newUpvotes },
     });
+
+    await this.cache.delByPattern('grievances:*');
+    this.eventEmitter.emit('grievance.updated', updatedGrievance);
 
     return { status: 'success', upvotes: newUpvotes };
   }
@@ -274,6 +349,7 @@ export class GrievancesService {
     });
 
     await this.cache.delByPattern('grievances:*');
+    this.eventEmitter.emit('grievance.updated', updated);
     await this.notifyComplainant(updated, {
       title: '🛠️ Your complaint is being worked on',
       body: note
@@ -325,6 +401,7 @@ export class GrievancesService {
     });
 
     await this.cache.delByPattern('grievances:*');
+    this.eventEmitter.emit('grievance.updated', updated);
     await this.notifyComplainant(updated, {
       title: '✅ Your complaint was marked as fixed',
       body: response
@@ -342,17 +419,30 @@ export class GrievancesService {
   }
 
   /**
-   * The complainant confirms the fix. This is the ONLY way a grievance
+   * The complainant (or their linked parent) confirms the fix. This is the ONLY way a grievance
    * reaches the terminal `closed` state.
    */
   async confirmResolved(id: string, loginId: string) {
     const grievance = await this.requireGrievance(id);
-    await this.assertReporterOrLinkedParent(
-      loginId,
-      grievance.loginId,
-      'confirm',
-    );
+    const isOwner = grievance.loginId === loginId;
+    let isParentOfChild = false;
+    if (!isOwner) {
+      const link = await this.prisma.parentChildLink.findUnique({
+        where: {
+          parentLoginId_childLoginId: {
+            parentLoginId: loginId,
+            childLoginId: grievance.loginId,
+          },
+        },
+      });
+      isParentOfChild = !!link;
+    }
 
+    if (!isOwner && !isParentOfChild) {
+      throw new ForbiddenException(
+        'Only the person who raised this complaint or their parent can confirm it',
+      );
+    }
     if (grievance.status !== GrievanceStatus.resolved) {
       throw new BadRequestException(
         'This complaint is not awaiting your confirmation',
@@ -369,11 +459,16 @@ export class GrievancesService {
     });
 
     await this.cache.delByPattern('grievances:*');
-    await this.notifyStaff(grievance.loginId, updated.id, {
-      title: '👍 Complaint confirmed by complainant',
-      body: 'The complainant confirmed the issue is resolved. The complaint is now closed.',
-      type: 'grievance_confirmed',
-    });
+    this.eventEmitter.emit('grievance.updated', updated);
+    void this.notifyStaff(
+      grievance.loginId,
+      updated.id,
+      {
+        title: '👍 Complaint confirmed by complainant',
+        body: 'The complainant confirmed the issue is resolved. The complaint is now closed.',
+        type: 'grievance_confirmed',
+      },
+    );
 
     return {
       status: 'success',
@@ -383,17 +478,30 @@ export class GrievancesService {
   }
 
   /**
-   * The complainant rejects the fix. The complaint goes back into the queue
+   * The complainant (or their linked parent) rejects the fix. The complaint goes back into the queue
    * with a raised priority so it sorts to the top for staff.
    */
   async reopen(id: string, loginId: string, reason?: string) {
     const grievance = await this.requireGrievance(id);
-    await this.assertReporterOrLinkedParent(
-      loginId,
-      grievance.loginId,
-      'reopen',
-    );
+    const isOwner = grievance.loginId === loginId;
+    let isParentOfChild = false;
+    if (!isOwner) {
+      const link = await this.prisma.parentChildLink.findUnique({
+        where: {
+          parentLoginId_childLoginId: {
+            parentLoginId: loginId,
+            childLoginId: grievance.loginId,
+          },
+        },
+      });
+      isParentOfChild = !!link;
+    }
 
+    if (!isOwner && !isParentOfChild) {
+      throw new ForbiddenException(
+        'Only the person who raised this complaint or their parent can reopen it',
+      );
+    }
     if (grievance.status !== GrievanceStatus.resolved) {
       throw new BadRequestException(
         'Only a complaint that is awaiting your confirmation can be reopened',
@@ -416,13 +524,18 @@ export class GrievancesService {
     });
 
     await this.cache.delByPattern('grievances:*');
-    await this.notifyStaff(grievance.loginId, updated.id, {
-      title: '⚠️ Complaint reopened — not satisfied',
-      body: reason
-        ? `The complainant says the issue is not fixed: ${reason}`
-        : 'The complainant has rejected the fix and reopened the complaint.',
-      type: 'grievance_reopened',
-    });
+    this.eventEmitter.emit('grievance.updated', updated);
+    void this.notifyStaff(
+      grievance.loginId,
+      updated.id,
+      {
+        title: '⚠️ Complaint reopened — not satisfied',
+        body: reason
+          ? `The complainant says the issue is not fixed: ${reason}`
+          : 'The complainant has rejected the fix and reopened the complaint.',
+        type: 'grievance_reopened',
+      },
+    );
 
     return {
       status: 'success',
@@ -451,6 +564,7 @@ export class GrievancesService {
     });
 
     await this.cache.delByPattern('grievances:*');
+    this.eventEmitter.emit('grievance.updated', updated);
     await this.notifyComplainant(updated, {
       title: '⏳ More time granted on your complaint',
       body: `The transport team needs ${hours} more hour(s) to resolve your complaint.`,
@@ -511,6 +625,11 @@ export class GrievancesService {
     }
   }
 
+  /**
+   * Fan out a notification to every staff member. Notifications are
+   * delivered concurrently (one insert + push per staff member used to run
+   * strictly sequentially, which stalled every mutation).
+   */
   private async notifyStaff(
     complainantLoginId: string,
     grievanceId: string,
@@ -529,13 +648,13 @@ export class GrievancesService {
         },
         select: { loginId: true },
       });
-      for (const s of staff) {
-        await this.notificationsService.notifyUser(
-          s.loginId,
-          grievanceId,
-          payload,
-        );
-      }
+      await Promise.all(
+        staff.map((s) =>
+          this.notificationsService
+            .notifyUser(s.loginId, grievanceId, payload)
+            .catch(() => {}),
+        ),
+      );
     } catch {
       /* ignore */
     }
@@ -559,15 +678,60 @@ export class GrievancesService {
         },
         select: { loginId: true },
       });
-      for (const s of staff) {
-        await this.notificationsService.notifyUser(s.loginId, grievance.id, {
-          title: '📣 New grievance raised',
-          body: `A new complaint was filed for ${routeName ?? `Route ${grievance.route}`}.`,
-          type: 'grievance_new',
-        });
-      }
+      await Promise.all(
+        staff.map((s) =>
+          this.notificationsService
+            .notifyUser(s.loginId, grievance.id, {
+              title: '📣 New grievance raised',
+              body: `A new complaint was filed for ${routeName ?? `Route ${grievance.route}`}.`,
+              type: 'grievance_new',
+            })
+            .catch(() => {}),
+        ),
+      );
     } catch {
       /* ignore */
+    }
+  }
+
+  /**
+   * Every hour, follow up on resolutions whose confirmation window has
+   * lapsed. Complaints only ever close when the complainant confirms, so
+   * this nudge reminds them the fix is waiting — and tells staff the window
+   * lapsed. `dueAt` is cleared so the nudge fires exactly once.
+   */
+  @Cron(CronExpression.EVERY_HOUR)
+  async escalateLapsedResolutions() {
+    try {
+      const lapsed = await this.prisma.grievance.findMany({
+        where: {
+          status: GrievanceStatus.resolved,
+          dueAt: { not: null, lt: new Date() },
+        },
+        take: 50,
+      });
+
+      for (const g of lapsed) {
+        await this.prisma.grievance.update({
+          where: { id: g.id },
+          data: { dueAt: null, priority: g.priority + 1 },
+        });
+        await this.cache.delByPattern('grievances:*');
+
+        void this.notifyComplainant(g, {
+          title: '⏰ Still there? Your complaint awaits confirmation',
+          body: 'The transport team marked this complaint as fixed. Please confirm it is resolved, or tell us what is still wrong.',
+          type: 'grievance_confirmation_reminder',
+        });
+        void this.notifyStaff(g.loginId, g.id, {
+          title: '⌛ Confirmation window lapsed',
+          body: `A complaint from ${g.realName || g.loginId} (Route ${g.route}) was marked fixed but has not been confirmed yet.`,
+          type: 'grievance_window_lapsed',
+        });
+        this.eventEmitter.emit('grievance.updated', { ...g, dueAt: null });
+      }
+    } catch (err) {
+      // Cron must never crash the process.
     }
   }
 }

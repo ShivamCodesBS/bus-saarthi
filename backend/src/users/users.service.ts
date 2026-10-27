@@ -7,10 +7,11 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
-import { UserRole, FeeStatus } from '@prisma/client';
+import { Prisma, UserRole, FeeStatus } from '@prisma/client';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { CacheService } from '../cache/cache.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { canAssignRole } from '../common/roles';
 
 const DEFAULT_PASSWORD = 'Invertis@123';
@@ -20,6 +21,7 @@ export class UsersService {
   constructor(
     private prisma: PrismaService,
     private cache: CacheService,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -293,6 +295,18 @@ export class UsersService {
       message: 'User updated',
       user: this.sanitize(updatedUser),
     };
+  // Emit event for real-time profile updates
+  this.eventEmitter.emit('user.updated', {
+    loginId: updatedUser.loginId,
+    name: updatedUser.name,
+    profilePic: updatedUser.profilePic,
+  });
+
+  return {
+    status: 'success',
+    message: 'User updated',
+    user: this.sanitize(updatedUser),
+  };
   }
 
   async remove(loginId: string, actorRole: UserRole) {
@@ -376,6 +390,8 @@ export class UsersService {
       }
     }
 
+    // Otherwise CSV-imported users stay invisible in cached lists.
+    await this.cache.delByPattern('users:*');
     return { status: 'success', results };
   }
 
@@ -483,7 +499,10 @@ export class UsersService {
     return this.cache.remember('wake:alarms:active', 30, async () => {
       const allUsers = await this.prisma.user.findMany({
         select: { loginId: true, wakeAlarm: true, routeId: true },
-        where: { wakeAlarm: { not: undefined } },
+        // `{ not: undefined }` used to be passed here — Prisma strips it, so
+        // the query matched every user. Only rows that actually carry an
+        // alarm JSON can be active alarms.
+        where: { NOT: { wakeAlarm: { equals: Prisma.AnyNull } } },
       });
 
       return allUsers.filter((u) => {
@@ -531,6 +550,41 @@ export class UsersService {
 
     await this.cache.delByPattern('users:*');
     return { status: 'success', message: 'Face reset request submitted' };
+  }
+
+  /**
+   * Staff view of pending face-reset requests. The Settings page sets
+   * `faceResetRequestedAt`; this is what the admin/transport-incharge panels
+   * show so they can approve with the requester's details at hand.
+   */
+  async findPendingFaceResetRequests() {
+    const users = await this.prisma.user.findMany({
+      where: { faceResetRequestedAt: { not: null } },
+      select: {
+        loginId: true,
+        name: true,
+        role: true,
+        phone: true,
+        feeStatus: true,
+        routeId: true,
+        route: { select: { routeName: true, busNumber: true } },
+        faceEnrolledAt: true,
+        faceResetRequestedAt: true,
+      },
+      orderBy: { faceResetRequestedAt: 'asc' },
+    });
+    return users.map((u) => ({
+      login_id: u.loginId,
+      name: u.name,
+      role: u.role,
+      phone: u.phone,
+      fee_status: u.feeStatus,
+      route_id: u.routeId,
+      route_name: u.route?.routeName || null,
+      bus_number: u.route?.busNumber || null,
+      face_enrolled_at: u.faceEnrolledAt,
+      requested_at: u.faceResetRequestedAt,
+    }));
   }
 
   /**

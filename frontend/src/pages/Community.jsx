@@ -27,8 +27,10 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
 import axios from 'axios';
-import { BACKEND_URL } from '../config';
+import { io } from 'socket.io-client';
+import { BACKEND_URL, SOCKET_URL } from '../config';
 import { friendlyError, reportError } from '../lib/errors';
+import { useModalA11y } from '../hooks/useModalA11y';
 import BusPicker from '../components/BusPicker';
 import MediaViewer from '../components/MediaViewer';
 import { ComplaintSkeleton, MyComplaintSkeleton } from '../components/ui/skeleton';
@@ -206,6 +208,7 @@ const Community = () => {
   } = useStaleWhileRevalidate('/api/grievances', {
     cacheKey: 'community:grievances',
     staleTime: 30000, // 30 seconds
+    token: token,
     onData: (data) => {
       // Transform data to add isMine flag
       const userLoginId = user?.login_id || user?.loginId;
@@ -226,6 +229,7 @@ const Community = () => {
   } = useStaleWhileRevalidate('/api/routes', {
     cacheKey: 'community:routes',
     staleTime: 60000, // 60 seconds - routes change less frequently
+    token: token,
     onData: (routes) => {
       const map = {};
       routes.forEach((r) => {
@@ -278,6 +282,53 @@ const Community = () => {
       setComplaints(processed);
     }
   }, [complaintsData, user]);
+
+  // Connect to WebSocket for real-time community complaint updates
+  useEffect(() => {
+    if (!token) return;
+    const socket = io(SOCKET_URL, {
+      transports: ['websocket', 'polling'],
+      auth: { token },
+      reconnection: true,
+    });
+
+    const myRoute = user?.route_id || user?.routeId;
+    if (myRoute) {
+      socket.emit('join_route', { route_id: String(myRoute), login_id: user?.login_id || user?.loginId });
+    }
+    if (isAdmin) {
+      socket.emit('join_admin', { token });
+    }
+
+    socket.on('new_grievance', (newG) => {
+      const userLoginId = user?.login_id || user?.loginId;
+      const isMine = newG.loginId === userLoginId;
+      // Route-room payloads are masked by the gateway (no realName/loginId),
+      // so fall back to the authorDisplay the backend computed.
+      const formatted = {
+        ...newG,
+        isMine,
+        realName: isMine || isAdmin ? newG.realName : null,
+        authorDisplay: isMine || isAdmin
+          ? newG.realName
+          : newG.authorDisplay || (newG.isAnonymous ? 'Anonymous Passenger' : 'Passenger'),
+      };
+      setComplaints((prev) => {
+        if (prev.some((c) => c.id === formatted.id)) return prev;
+        return [formatted, ...prev];
+      });
+    });
+
+    socket.on('grievance_updated', (updatedG) => {
+      setComplaints((prev) =>
+        prev.map((c) => (c.id === updatedG.id ? { ...c, ...updatedG } : c))
+      );
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [token, user?.route_id, user?.routeId, user?.login_id, user?.loginId, isAdmin]);
 
   // Combined loading state
   const isLoading = complaintsLoading || routesLoading;
@@ -360,7 +411,20 @@ const Community = () => {
     // transport staff do that.
     const myRoute = user?.route_id || user?.routeId;
     if (!isAdmin && myRoute) {
-      list = list.filter((c) => String(c.route) === String(myRoute));
+      list = list.filter((c) => {
+        // Direct routeId match
+        if (String(c.route) === String(myRoute)) return true;
+        // Number only match (e.g. "Route 1" vs "1")
+        const cNum = String(c.route || '').replace(/\D/g, '');
+        const myNum = String(myRoute).replace(/\D/g, '');
+        if (cNum && myNum && cNum === myNum) return true;
+        // Bus number match via routeMap
+        const myBus = routeMap[myRoute]?.busNumber;
+        if (myBus && c.busNumber && String(c.busNumber).toLowerCase() === String(myBus).toLowerCase()) return true;
+        // Always show the user's own complaints
+        if (c.isMine || c.loginId === user?.login_id || c.loginId === user?.loginId) return true;
+        return false;
+      });
     }
 
     // The transport staff can narrow the list to one bus.
@@ -489,8 +553,8 @@ const Community = () => {
           },
           ...prev,
         ]);
-        // Invalidate cache so next fetch gets fresh data
-        invalidateComplaints();
+        // Invalidate cache so next fetch gets fresh data - wait for it to complete
+        await invalidateComplaints();
         setShowModal(false);
         setNewComplaintText('');
         setSelectedCategory('');
@@ -581,23 +645,35 @@ const Community = () => {
    * complainant confirms — it does NOT disappear from the queue.
    */
   const handleResolve = async (id) => {
-    const response = await axios.patch(
-      `${BACKEND_URL}/api/grievance/${id}/resolve`,
-      {},
-      { headers: { Authorization: `Bearer ${token}` } },
-    );
-    setComplaints((prev) =>
-      prev.map((c) =>
-        c.id === id
-          ? { ...c, status: 'resolved', dueAt: response.data?.data?.dueAt }
-          : c,
-      ),
-    );
-    // Invalidate cache so next fetch gets fresh data
-    invalidateComplaints();
-    toast.success(
-      'Marked as fixed. It stays open until the complainant confirms it.',
-    );
+    if (busyIds.has(id)) return;
+    setBusyIds((prev) => new Set([...prev, id]));
+    try {
+      const response = await axios.patch(
+        `${BACKEND_URL}/api/grievance/${id}/resolve`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      setComplaints((prev) =>
+        prev.map((c) =>
+          c.id === id
+            ? { ...c, status: 'resolved', dueAt: response.data?.data?.dueAt }
+            : c,
+        ),
+      );
+      // Invalidate cache so next fetch gets fresh data - wait for it to complete
+      await invalidateComplaints();
+      toast.success(
+        'Marked as fixed. It stays open until the complainant confirms it.',
+      );
+    } catch (err) {
+      toast.error(friendlyError(err, 'We could not update the complaint. Please try again.'));
+    } finally {
+      setBusyIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
   };
 
   const handleStart = async (id) => {
@@ -611,8 +687,8 @@ const Community = () => {
       setComplaints((prev) =>
         prev.map((c) => (c.id === id ? { ...c, status: 'in_progress' } : c)),
       );
-      // Invalidate cache so next fetch gets fresh data
-      invalidateComplaints();
+      // Invalidate cache so next fetch gets fresh data - wait for it to complete
+      await invalidateComplaints();
       toast.success('Marked as in progress.');
     } catch (err) {
       toast.error(friendlyError(err, 'We could not update the complaint. Please try again.'));
@@ -637,8 +713,8 @@ const Community = () => {
       setComplaints((prev) =>
         prev.map((c) => (c.id === id ? { ...c, status: 'closed' } : c)),
       );
-      // Invalidate cache so next fetch gets fresh data
-      invalidateComplaints();
+      // Invalidate cache so next fetch gets fresh data - wait for it to complete
+      await invalidateComplaints();
       toast.success('Thank you! Your complaint is now closed.');
     } catch (err) {
       toast.error(friendlyError(err, 'We could not confirm the fix. Please try again.'));
@@ -672,8 +748,8 @@ const Community = () => {
             : c,
         ),
       );
-      // Invalidate cache so next fetch gets fresh data
-      invalidateComplaints();
+      // Invalidate cache so next fetch gets fresh data - wait for it to complete
+      await invalidateComplaints();
       setRejectingId(null);
       setRejectReason('');
       toast.success('Complaint reopened. It is now at the top of the queue.');
@@ -696,8 +772,8 @@ const Community = () => {
         { hours: 24 },
         { headers: { Authorization: `Bearer ${token}` } },
       );
-      // Invalidate cache so next fetch gets fresh data
-      invalidateComplaints();
+      // Invalidate cache so next fetch gets fresh data - wait for it to complete
+      await invalidateComplaints();
       toast.success('Confirmation window extended by 24 hours.');
     } catch (err) {
       toast.error(friendlyError(err, 'We could not extend the deadline. Please try again.'));
@@ -733,6 +809,11 @@ const Community = () => {
       </span>
     );
   };
+
+  // Modal accessibility: background scroll locks, Lenis pauses, Escape closes.
+  useModalA11y(!!detailId, () => setDetailId(null));
+  useModalA11y(showModal, () => setShowModal(false));
+  useModalA11y(!!mediaOpen, () => setMediaOpen(null));
 
   return (
     <div className="min-h-screen flex flex-col relative">
@@ -1368,7 +1449,7 @@ const Community = () => {
                       </div>
                       <div style={{ minWidth: 0 }}>
                         <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 'bold', color: 'var(--text-dark)' }}>
-                          {t('yourComplaint')}
+                          {comp.category ? `${comp.category} Complaint` : t('yourComplaint')}
                         </h3>
                         <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-light)', display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
                           <Bus size={12} />
@@ -1605,9 +1686,26 @@ filteredComplaints.map((comp) => {
                           color: 'var(--text-dark)',
                         }}
                       >
-                        {/* The reporter's identity is not on the card.
-                            Staff open the complaint to see the details. */}
-                        {isMine ? t('yourComplaint') : t('anonymousPassenger')}
+                        {/* The reporter's identity is hidden from other passengers unless they opted to show their name. */}
+                        {comp.isChild ? (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                            <span style={{ color: '#7c3aed', fontWeight: 'bold' }}>{comp.realName || 'Your Child'}</span>
+                            <span style={{ fontSize: '0.72rem', fontWeight: '600', color: '#7c3aed', backgroundColor: '#f3e8ff', padding: '0.1rem 0.5rem', borderRadius: '12px' }}>
+                              Child's Complaint
+                            </span>
+                          </span>
+                        ) : isMine ? (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                            <span style={{ color: 'var(--primary-blue)', fontWeight: 'bold' }}>{t('you')}</span>
+                            <span style={{ fontSize: '0.72rem', fontWeight: '600', color: 'var(--primary-blue)', backgroundColor: 'rgba(24,119,242,0.1)', padding: '0.1rem 0.5rem', borderRadius: '12px' }}>
+                              {t('yourComplaint')}
+                            </span>
+                          </span>
+                        ) : comp.isAnonymous ? (
+                          t('anonymousPassenger')
+                        ) : (
+                          comp.authorDisplay || comp.realName || t('anonymousPassenger')
+                        )}
                       </h3>
                       <p
                         style={{
@@ -1703,9 +1801,10 @@ filteredComplaints.map((comp) => {
                 {/* Media Attachment */}
                 {comp.type === 'photo' && comp.mediaUrl && (
                   <button
-                    onClick={() =>
-                      setMediaOpen({ type: 'photo', url: comp.mediaUrl })
-                    }
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMediaOpen({ type: 'photo', url: comp.mediaUrl });
+                    }}
                     style={{
                       display: 'block',
                       width: '100%',
@@ -1738,9 +1837,10 @@ filteredComplaints.map((comp) => {
                 )}
                 {comp.type === 'video' && comp.mediaUrl && (
                   <button
-                    onClick={() =>
-                      setMediaOpen({ type: 'video', url: comp.mediaUrl })
-                    }
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMediaOpen({ type: 'video', url: comp.mediaUrl });
+                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -1795,9 +1895,10 @@ filteredComplaints.map((comp) => {
                 )}
                 {comp.type === 'audio' && comp.mediaUrl && (
                   <button
-                    onClick={() =>
-                      setMediaOpen({ type: 'audio', url: comp.mediaUrl })
-                    }
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMediaOpen({ type: 'audio', url: comp.mediaUrl });
+                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -1901,7 +2002,7 @@ filteredComplaints.map((comp) => {
                   }}
                 >
                   <button
-                    onClick={() => handleUpvote(comp.id)}
+                    onClick={(e) => { e.stopPropagation(); handleUpvote(comp.id); }}
                     disabled={processingUpvotes.has(comp.id) || isMine}
                     title={
                       isMine ? 'You cannot agree with your own complaint' : ''
@@ -2170,7 +2271,7 @@ filteredComplaints.map((comp) => {
 
         return (
           <div
-            className="modal-overlay"
+            className="modal-overlay animate-fade-in"
             onClick={() => setDetailId(null)}
             style={{
               position: 'fixed',
@@ -2184,8 +2285,9 @@ filteredComplaints.map((comp) => {
             }}
           >
             <div
-              className="modal-sheet"
+              className="modal-sheet animate-slide-up"
               onClick={(e) => e.stopPropagation()}
+              data-lenis-prevent="true"
               style={{
                 backgroundColor: 'var(--card-bg)',
                 width: '100%',
@@ -2824,7 +2926,7 @@ filteredComplaints.map((comp) => {
           }}
         >
           <div
-            className="animate-slide-up p-glass"
+            className="animate-slide-up p-glass" data-lenis-prevent="true"
             style={{
               backgroundColor: 'var(--card-bg)',
               width: '100%',
@@ -3151,6 +3253,11 @@ filteredComplaints.map((comp) => {
           </div>
         </div>
       )}
+
+      {/* Full-screen viewer for complaint attachments. Without this the
+          media buttons set state that nothing rendered — and the modal
+          scroll-lock never released. */}
+      <MediaViewer media={mediaOpen} onClose={() => setMediaOpen(null)} />
     </div>
   );
 };

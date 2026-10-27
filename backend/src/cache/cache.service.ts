@@ -127,14 +127,39 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** Remove every key matching a glob pattern (used on cache invalidation). */
+  /**
+   * Remove every key matching a glob pattern (used on cache invalidation).
+   * Uses SCAN — `KEYS` blocks the Redis event loop for the whole keyspace,
+   * which stalled every request sharing that Redis while invalidation ran.
+   */
   async delByPattern(pattern: string): Promise<void> {
     if (!this.available || !this.client) return;
     try {
-      const keys = await this.client.keys(pattern);
-      if (keys.length > 0) await this.client.del(keys);
+      let cursor = '0';
+      do {
+        const { cursor: next, keys } = await this.client.scan(cursor, {
+          MATCH: pattern,
+          COUNT: 200,
+        });
+        cursor = next;
+        if (keys.length > 0) await this.client.del(keys);
+      } while (cursor !== '0');
     } catch {
       /* ignore */
+    }
+  }
+
+  /**
+   * Set a key only if it does not exist yet, with TTL — the atomic
+   * "first caller wins" primitive for cooldowns/rate-limits.
+   */
+  async setIfNotExists(key: string, seconds: number, value = '1'): Promise<boolean> {
+    if (!this.available || !this.client) return true;
+    try {
+      const result = await this.client.set(key, value, { EX: seconds, NX: true });
+      return result === 'OK';
+    } catch {
+      return true;
     }
   }
 

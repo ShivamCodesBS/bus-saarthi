@@ -109,7 +109,9 @@ const PublicRoute = ({ children }) => {
   const { user } = useAuth();
   if (user) {
     if (user.role === 'admin') return <Navigate to="/admin-dashboard" replace />;
-    if (user.role === 'transport_incharge') return <Navigate to="/transport-incharge-dashboard" replace />;
+    // tech_admin works out of the separate tech panel; in this app they get
+    // the transport-incharge dashboard, which is the only one that admits them.
+    if (user.role === 'tech_admin' || user.role === 'transport_incharge') return <Navigate to="/transport-incharge-dashboard" replace />;
     if (user.role === 'parent') return <Navigate to="/parent-dashboard" replace />;
     return <Navigate to="/home" replace />;
   }
@@ -152,6 +154,8 @@ function App() {
       wheelMultiplier: 0.9,
       duration: 0.4,
     });
+    // Modals pause Lenis while open (see useModalA11y) — expose it globally.
+    window.__lenis = lenis;
 
     function raf(time) {
       lenis.raf(time);
@@ -159,7 +163,10 @@ function App() {
     }
     requestAnimationFrame(raf);
 
-    return () => lenis.destroy();
+    return () => {
+      lenis.destroy();
+      window.__lenis = null;
+    };
   }, []);
 
   return (
@@ -226,7 +233,7 @@ function App() {
                 <Route 
                   path="/transport-incharge-dashboard" 
                   element={
-                    <ProtectedRoute allowedRoles={['transport_incharge']}>
+                    <ProtectedRoute allowedRoles={['transport_incharge', 'admin', 'tech_admin']}>
                       <TransportInchargeDashboard />
                     </ProtectedRoute>
                   } 

@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { SyncAttendanceDto } from './dto/sync-attendance.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { CacheService } from '../cache/cache.service';
 import { getISTMidnightUTC } from '../common/utils/ist-date.util';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -11,6 +12,7 @@ export class AttendanceService {
 
   constructor(
     private prisma: PrismaService,
+    private cache: CacheService,
     private eventEmitter: EventEmitter2,
     private notificationsService: NotificationsService,
   ) {}
@@ -52,6 +54,59 @@ export class AttendanceService {
     const todayStart = getISTMidnightUTC();
     const results = { synced: 0, skipped: 0, errors: 0 };
 
+    // ---- Batch the lookups. The old implementation ran 3-4 serial queries
+    // PER STUDENT (duplicate check, user lookup, merge check, insert), so a
+    // 60-student batch meant ~240 round trips queuing on the connection pool.
+    const passengerIds = Array.from(
+      new Set(
+        records
+          .map(
+            (record) =>
+              record.passenger_id ||
+              (record as any).login_id ||
+              (record as any).student_id,
+          )
+          .filter(Boolean),
+      ),
+    );
+
+    const existingToday = await this.prisma.attendance.findMany({
+      where: { passengerId: { in: passengerIds }, timestamp: { gte: todayStart } },
+      select: { passengerId: true },
+    });
+    const alreadyBoarded = new Set(existingToday.map((a) => a.passengerId));
+
+    const passengers = await this.prisma.user.findMany({
+      where: { loginId: { in: passengerIds } },
+      select: { loginId: true, name: true, routeId: true, feeStatus: true },
+    });
+    const passengerByLogin = new Map(passengers.map((p) => [p.loginId, p]));
+
+    // Every merge into THIS route that started today, for any of the
+    // passengers' assigned routes.
+    const assignedRouteIds = Array.from(
+      new Set(
+        passengers
+          .filter((p) => p.routeId && String(p.routeId) !== String(route_id))
+          .map((p) => String(p.routeId)),
+      ),
+    );
+    const activeMerges = assignedRouteIds.length
+      ? await this.prisma.mergeEvent.findMany({
+          where: {
+            cancelledRouteId: { in: assignedRouteIds },
+            targetRouteId: String(route_id),
+            status: 'active',
+            createdAt: { gte: todayStart },
+          },
+          select: { id: true, cancelledRouteId: true },
+        })
+      : [];
+    const mergeByRoute = new Map(activeMerges.map((m) => [String(m.cancelledRouteId), m.id]));
+
+    const creates: any[] = [];
+    const events: any[] = [];
+
     for (const record of records) {
       const passengerId =
         record.passenger_id ||
@@ -64,24 +119,12 @@ export class AttendanceService {
       }
 
       try {
-        // Prevent duplicate check for today
-        const existing = await this.prisma.attendance.findFirst({
-          where: {
-            passengerId: passengerId,
-            timestamp: {
-              gte: todayStart,
-            },
-          },
-        });
-
-        if (existing) {
+        if (alreadyBoarded.has(passengerId)) {
           results.skipped++;
           continue;
         }
 
-        const passenger = await this.prisma.user.findUnique({
-          where: { loginId: passengerId },
-        });
+        const passenger = passengerByLogin.get(passengerId);
         if (!passenger) {
           this.logger.warn(`Passenger not found in database: ${passengerId}`);
           results.errors++;
@@ -96,19 +139,11 @@ export class AttendanceService {
         let mergeEventId: string | null = null;
 
         if (!isEligible && passenger.routeId) {
-          const activeMerge = await this.prisma.mergeEvent.findFirst({
-            where: {
-              cancelledRouteId: String(passenger.routeId),
-              targetRouteId: String(route_id),
-              status: 'active',
-              createdAt: { gte: todayStart },
-            },
-          });
-
-          if (activeMerge) {
+          const mergeId = mergeByRoute.get(String(passenger.routeId));
+          if (mergeId) {
             isEligible = true;
             originalRouteId = String(passenger.routeId);
-            mergeEventId = activeMerge.id;
+            mergeEventId = mergeId;
           }
         }
 
@@ -129,22 +164,23 @@ export class AttendanceService {
         const confidence =
           record.confidence ?? (record as any).match_score ?? undefined;
 
-        await this.prisma.attendance.create({
-          data: {
-            passengerId: passenger.loginId,
-            routeId: String(route_id),
-            originalRouteId,
-            mergeEventId,
-            name: passenger.name,
-            feeStatus: passenger.feeStatus,
-            confidence: confidence,
-            timestamp: timestamp,
-          },
+        creates.push({
+          passengerId: passenger.loginId,
+          routeId: String(route_id),
+          originalRouteId,
+          mergeEventId,
+          name: passenger.name,
+          feeStatus: passenger.feeStatus,
+          confidence: confidence,
+          timestamp: timestamp,
         });
 
         results.synced++;
+        // Treat as boarded for the rest of this batch — the same student
+        // appearing twice in one payload must not double-insert.
+        alreadyBoarded.add(passengerId);
 
-        const attendancePayload = {
+        events.push({
           passenger_id: passenger.loginId,
           name: passenger.name,
           route_id: String(route_id),
@@ -152,15 +188,9 @@ export class AttendanceService {
           is_merged: !!originalRouteId,
           fee_status: passenger.feeStatus,
           timestamp: timestamp.toISOString(),
-        };
-
-        // Emit event for real-time gateway (Admin & Route subscribers)
-        this.eventEmitter.emit('attendance.marked', attendancePayload);
-
-        // Notify linked parents asynchronously
-        this.notifyParentsOfBoarding(passenger, String(route_id), timestamp).catch(
-          (err) => this.logger.error(`Failed to notify parent: ${err.message}`),
-        );
+          passengerRef: passenger,
+          timestampDate: timestamp,
+        });
       } catch (err) {
         this.logger.error(
           `Error syncing attendance for ${passengerId}:`,
@@ -168,6 +198,26 @@ export class AttendanceService {
         );
         results.errors++;
       }
+    }
+
+    if (creates.length > 0) {
+      await this.prisma.attendance.createMany({ data: creates });
+
+      // Emit real-time events for Admin & Route subscribers.
+      for (const e of events) {
+        const { passengerRef, timestampDate, ...payload } = e;
+        this.eventEmitter.emit('attendance.marked', payload);
+
+        // Notify linked parents asynchronously.
+        this.notifyParentsOfBoarding(passengerRef, String(route_id), timestampDate).catch(
+          (err) => this.logger.error(`Failed to notify parent: ${err.message}`),
+        );
+      }
+
+      // Invalidate attendance caches once for the whole batch.
+      await this.cache.del('attendance:today:all');
+      await this.cache.del(`attendance:today:route:${route_id}`);
+      await this.cache.delByPattern('attendance:summary:*');
     }
 
     return {
@@ -208,76 +258,83 @@ export class AttendanceService {
 
   async getAllAttendanceToday() {
     const todayStart = getISTMidnightUTC();
-    const records = await this.prisma.attendance.findMany({
-      where: {
-        timestamp: { gte: todayStart },
-      },
-      orderBy: { timestamp: 'desc' },
-      include: {
-        passenger: {
-          select: {
-            name: true,
-            feeStatus: true,
-            routeId: true,
+    // Cache for 10 seconds since this is polled frequently by admin dashboard
+    return this.cache.remember('attendance:today:all', 10, async () => {
+      const records = await this.prisma.attendance.findMany({
+        where: {
+          timestamp: { gte: todayStart },
+        },
+        orderBy: { timestamp: 'desc' },
+        include: {
+          passenger: {
+            select: {
+              name: true,
+              feeStatus: true,
+              routeId: true,
+            },
           },
         },
-      },
-    });
+      });
 
-    return records.map((r) => {
-      const resolvedName = r.name || r.passenger?.name || r.passengerId;
-      const resolvedRoute = r.routeId || r.passenger?.routeId || '1';
-      return {
-        id: r.id,
-        passengerId: r.passengerId,
-        passenger_id: r.passengerId,
-        routeId: resolvedRoute,
-        route_id: resolvedRoute,
-        name: resolvedName,
-        passenger_name: resolvedName,
-        feeStatus: r.feeStatus || r.passenger?.feeStatus,
-        fee_status: r.feeStatus || r.passenger?.feeStatus,
-        confidence: r.confidence,
-        timestamp: r.timestamp,
-        originalRouteId: r.originalRouteId,
-        original_route_id: r.originalRouteId,
-        mergeEventId: r.mergeEventId,
-      };
+      return records.map((r) => {
+        const resolvedName = r.name || r.passenger?.name || r.passengerId;
+        const resolvedRoute = r.routeId || r.passenger?.routeId || '1';
+        return {
+          id: r.id,
+          passengerId: r.passengerId,
+          passenger_id: r.passengerId,
+          routeId: resolvedRoute,
+          route_id: resolvedRoute,
+          name: resolvedName,
+          passenger_name: resolvedName,
+          feeStatus: r.feeStatus || r.passenger?.feeStatus,
+          fee_status: r.feeStatus || r.passenger?.feeStatus,
+          confidence: r.confidence,
+          timestamp: r.timestamp,
+          originalRouteId: r.originalRouteId,
+          original_route_id: r.originalRouteId,
+          mergeEventId: r.mergeEventId,
+        };
+      });
     });
   }
 
   async getAttendanceForRoute(routeId: string) {
     const todayStart = getISTMidnightUTC();
-    const records = await this.prisma.attendance.findMany({
-      where: {
-        routeId: String(routeId),
-        timestamp: { gte: todayStart },
-      },
-      orderBy: { timestamp: 'desc' },
-      include: {
-        passenger: {
-          select: {
-            name: true,
-            feeStatus: true,
-            routeId: true,
+    const cacheKey = `attendance:today:route:${routeId}`;
+    // Cache for 10 seconds - route-specific attendance polled by route dashboard
+    return this.cache.remember(cacheKey, 10, async () => {
+      const records = await this.prisma.attendance.findMany({
+        where: {
+          routeId: String(routeId),
+          timestamp: { gte: todayStart },
+        },
+        orderBy: { timestamp: 'desc' },
+        include: {
+          passenger: {
+            select: {
+              name: true,
+              feeStatus: true,
+              routeId: true,
+            },
           },
         },
-      },
-    });
+      });
 
-    return records.map((r) => {
-      const resolvedName = r.name || r.passenger?.name || r.passengerId;
-      return {
-        ...r,
-        passengerId: r.passengerId,
-        passenger_id: r.passengerId,
-        routeId: r.routeId,
-        route_id: r.routeId,
-        name: resolvedName,
-        passenger_name: resolvedName,
-        feeStatus: r.feeStatus || r.passenger?.feeStatus,
-        fee_status: r.feeStatus || r.passenger?.feeStatus,
-      };
+      return records.map((r) => {
+        const resolvedName = r.name || r.passenger?.name || r.passengerId;
+        return {
+          ...r,
+          passengerId: r.passengerId,
+          passenger_id: r.passengerId,
+          routeId: r.routeId,
+          route_id: r.routeId,
+          name: resolvedName,
+          passenger_name: resolvedName,
+          feeStatus: r.feeStatus || r.passenger?.feeStatus,
+          fee_status: r.feeStatus || r.passenger?.feeStatus,
+        };
+      });
     });
   }
 
@@ -324,68 +381,72 @@ export class AttendanceService {
    * campus day change, not at UTC midnight.
    */
   async getAttendanceSummary(loginId: string, days = 7) {
-    const end = new Date();
-    const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
+    const cacheKey = `attendance:summary:${loginId}:${days}`;
+    // Cache for 30 seconds - profile page loads this, it's user-specific
+    return this.cache.remember(cacheKey, 30, async () => {
+      const end = new Date();
+      const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
 
-    const records = await this.prisma.attendance.findMany({
-      where: { passengerId: loginId, timestamp: { gte: start } },
-      orderBy: { timestamp: 'desc' },
-    });
+      const records = await this.prisma.attendance.findMany({
+        where: { passengerId: loginId, timestamp: { gte: start } },
+        orderBy: { timestamp: 'desc' },
+      });
 
-    // Group the records by calendar day (in the campus timezone).
-    const byDay = new Map<string, any>();
-    for (const r of records) {
-      const key = this.dayKey(r.timestamp);
-      if (!byDay.has(key)) {
-        byDay.set(key, {
-          date: key,
-          present: true,
-          count: 0,
-          firstIn: r.timestamp,
-          lastOut: r.timestamp,
-          routeId: r.routeId,
-          confidence: r.confidence,
-        });
+      // Group the records by calendar day (in the campus timezone).
+      const byDay = new Map<string, any>();
+      for (const r of records) {
+        const key = this.dayKey(r.timestamp);
+        if (!byDay.has(key)) {
+          byDay.set(key, {
+            date: key,
+            present: true,
+            count: 0,
+            firstIn: r.timestamp,
+            lastOut: r.timestamp,
+            routeId: r.routeId,
+            confidence: r.confidence,
+          });
+        }
+        const day = byDay.get(key);
+        day.count += 1;
+        if (r.timestamp < day.firstIn) day.firstIn = r.timestamp;
+        if (r.timestamp > day.lastOut) day.lastOut = r.timestamp;
+        if (r.confidence != null) day.confidence = r.confidence;
       }
-      const day = byDay.get(key);
-      day.count += 1;
-      if (r.timestamp < day.firstIn) day.firstIn = r.timestamp;
-      if (r.timestamp > day.lastOut) day.lastOut = r.timestamp;
-      if (r.confidence != null) day.confidence = r.confidence;
-    }
 
-    // Build a continuous list of the last N days, marking the ones with no
-    // record as absent.
-    const summary: any[] = [];
-    for (let i = days - 1; i >= 0; i--) {
-      const d = new Date(end.getTime() - i * 24 * 60 * 60 * 1000);
-      const key = this.dayKey(d);
-      const found = byDay.get(key);
-      summary.push(
-        found || {
-          date: key,
-          present: false,
-          count: 0,
-          firstIn: null,
-          lastOut: null,
-          routeId: null,
-          confidence: null,
+      // Build a continuous list of the last N days, marking the ones with no
+      // record as absent.
+      const summary: any[] = [];
+      for (let i = days - 1; i >= 0; i--) {
+        const d = new Date(end.getTime() - i * 24 * 60 * 60 * 1000);
+        const key = this.dayKey(d);
+        const found = byDay.get(key);
+        summary.push(
+          found || {
+            date: key,
+            present: false,
+            count: 0,
+            firstIn: null,
+            lastOut: null,
+            routeId: null,
+            confidence: null,
+          },
+        );
+      }
+
+      const presentDays = summary.filter((d) => d.present).length;
+
+      return {
+        status: 'success',
+        data: {
+          days: summary,
+          presentDays,
+          totalDays: days,
+          attendancePercent: Math.round((presentDays / days) * 100),
+          totalRecords: records.length,
         },
-      );
-    }
-
-    const presentDays = summary.filter((d) => d.present).length;
-
-    return {
-      status: 'success',
-      data: {
-        days: summary,
-        presentDays,
-        totalDays: days,
-        attendancePercent: Math.round((presentDays / days) * 100),
-        totalRecords: records.length,
-      },
-    };
+      };
+    });
   }
 
   /** A YYYY-MM-DD key in the campus timezone. */

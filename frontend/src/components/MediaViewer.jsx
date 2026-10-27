@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useModalA11y } from '../hooks/useModalA11y';
 import { X, ZoomIn, ZoomOut, Play, Image as ImageIcon, Video as VideoIcon, Mic, AlertTriangle, RotateCcw } from 'lucide-react';
 
 /**
@@ -14,6 +15,12 @@ export default function MediaViewer({ media, onClose }) {
   const [zoom, setZoom] = useState(1);
   const [status, setStatus] = useState('loading'); // loading | ready | error
   const [errorText, setErrorText] = useState('');
+
+  // Fullscreen viewer — lock the page behind it, close on Escape.
+  // Reactive to `media`: this component can stay mounted with media=null
+  // (Admin renders it unconditionally), and a constant `true` here held the
+  // body scroll-lock forever — the "page can't scroll after closing" bug.
+  useModalA11y(!!media, onClose);
   const retryKey = useRef(0);
 
   // Reset when the media changes.

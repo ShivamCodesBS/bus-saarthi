@@ -91,3 +91,41 @@ export function normalizeFeeStatus(value) {
   // "pending", "unpaid", "not paid" and anything unknown mean unpaid.
   return 'unpaid';
 }
+
+/**
+ * Format SOS alert time consistently in Indian Standard Time (IST).
+ * Prevents UTC server offsets from displaying morning times for afternoon/evening alerts.
+ */
+export function formatSosTime(timestamp, fallbackTime) {
+  if (timestamp) {
+    const d = new Date(timestamp);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleTimeString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+    }
+  }
+  if (fallbackTime && typeof fallbackTime === 'string') {
+    if (fallbackTime.includes('T') || fallbackTime.includes('-')) {
+      const d = new Date(fallbackTime);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleTimeString('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+        });
+      }
+    }
+    return fallbackTime;
+  }
+  return new Date().toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
+}

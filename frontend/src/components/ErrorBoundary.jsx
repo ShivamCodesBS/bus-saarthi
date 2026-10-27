@@ -1,5 +1,15 @@
 import React from 'react';
-import { AlertTriangle, RefreshCcw, Home } from 'lucide-react';
+import { AlertTriangle, RefreshCcw, Home, LogOut } from 'lucide-react';
+
+/** Hard sign-out that works even while the React tree is broken. */
+const forceSignOut = () => {
+  try {
+    localStorage.removeItem('bus_saarthi_user');
+  } catch {
+    /* storage unavailable — still navigate away */
+  }
+  window.location.href = '/login';
+};
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -91,6 +101,13 @@ class ErrorBoundary extends React.Component {
                 Go Home
               </button>
             </div>
+            <button
+              onClick={forceSignOut}
+              className="mt-3 flex items-center justify-center gap-2 w-full py-2.5 px-4 bg-transparent text-slate-500 dark:text-slate-400 border-none rounded-xl font-semibold text-sm transition-colors hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer"
+            >
+              <LogOut size={16} />
+              Sign Out
+            </button>
           </div>
         </div>
       );

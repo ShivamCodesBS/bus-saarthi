@@ -2,13 +2,25 @@ import { X, Users, Home, User, Settings, LogOut } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
+import { useModalA11y } from '../hooks/useModalA11y';
 import '../index.css';
 
 const HamburgerMenu = ({ isOpen, onClose }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const { t } = useLang();
+
+  // While the drawer is open the page behind it must not scroll, and the
+  // Lenis smooth-scroller must not swallow wheel events inside the drawer.
+  useModalA11y(isOpen, onClose);
+
+  const homePath =
+    user?.role === 'admin' ? '/admin-dashboard' :
+    user?.role === 'tech_admin' ? '/transport-incharge-dashboard' :
+    user?.role === 'transport_incharge' ? '/transport-incharge-dashboard' :
+    user?.role === 'parent' ? '/parent-dashboard' :
+    '/home';
 
   const isActive = (path) => location.pathname === path;
 
@@ -47,7 +59,7 @@ const HamburgerMenu = ({ isOpen, onClose }) => {
           </button>
         </div>
 
-        <div style={{ padding: '2rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', flex: 1 }}>
+        <div data-lenis-prevent="true" style={{ padding: '2rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', flex: 1, overflowY: 'auto' }}>
           <button 
             onClick={() => { onClose(); navigate('/community'); }}
             style={{
@@ -70,7 +82,7 @@ const HamburgerMenu = ({ isOpen, onClose }) => {
           </button>
 
           {[
-            { icon: Home, label: t('home'), path: '/home' },
+            { icon: Home, label: t('home'), path: homePath },
             { icon: User, label: t('profile'), path: '/profile' },
             { icon: Settings, label: t('settings'), path: '/settings' },
           ].map((item, index) => (

@@ -4,30 +4,24 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { io } from 'socket.io-client';
 import toast from 'react-hot-toast';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
 import axios from 'axios';
-import { BACKEND_URL } from '../config';
+import { BACKEND_URL, SOCKET_URL } from '../config';
 import '../index.css';
 import HamburgerMenu from '../components/HamburgerMenu';
 import Papa from 'papaparse';
-import { sanitizePayload, normalizeFeeStatus, USER_PAYLOAD_KEYS } from '../lib/utils';
+import { sanitizePayload, normalizeFeeStatus, USER_PAYLOAD_KEYS, formatSosTime } from '../lib/utils';
+import { friendlyError } from '../lib/errors';
 import UserAvatar from '../components/UserAvatar';
 import BusPicker from '../components/BusPicker';
 import MediaViewer from '../components/MediaViewer';
-import { friendlyError } from '../lib/errors';
+import NotificationBell from '../components/NotificationBell';
+import FaceResetRequests from '../components/FaceResetRequests';
 import WebRTCPlayer from '../components/WebRTCPlayer';
 import { ComplaintSkeleton, RouteSkeleton, UserRowSkeleton, StatCardSkeleton } from '../components/ui/skeleton';
 import { useStaleWhileRevalidate } from '../hooks/useStaleWhileRevalidate';
-
-// Fix for default marker icon in react-leaflet
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-});
+import { useModalA11y } from '../hooks/useModalA11y';
+import { useTripStatus } from '../hooks/useTripStatus';
+import UnifiedMap from '../components/UnifiedMap';
 
 // Grievance lifecycle states, mirroring the backend enum.
 const GRIEVANCE_STATUS = {
@@ -36,31 +30,6 @@ const GRIEVANCE_STATUS = {
   resolved:     { label: 'Awaiting Confirmation',     bg: '#e6f4ff', color: '#0958d9', Icon: Timer },
   reopened:     { label: 'Not Resolved (Reopened)',   bg: '#fff1f0', color: '#cf1322', Icon: RotateCcw },
   closed:       { label: 'Closed - Confirmed',        bg: '#e6fae6', color: '#28a745', Icon: CheckCircle2 },
-};
-
-// Custom Bus Icon
-const busIcon = new L.Icon({
-  iconUrl: 'https://cdn-icons-png.flaticon.com/512/3448/3448339.png',
-  iconSize: [35, 35],
-  iconAnchor: [17, 17],
-});
-
-// Component to handle map container resizing
-const MapResizer = () => {
-  const map = useMap();
-  useEffect(() => {
-    const t1 = setTimeout(() => map.invalidateSize(), 100);
-    const t2 = setTimeout(() => map.invalidateSize(), 500);
-    const ro = new ResizeObserver(() => map.invalidateSize());
-    const container = map.getContainer();
-    if (container) ro.observe(container);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      if (container) ro.unobserve(container);
-    };
-  }, [map]);
-  return null;
 };
 
 // Format time helper (moved outside component to avoid impure function warning)
@@ -91,7 +60,7 @@ const formatTime = (createdAtStr) => {
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
-  const { logout, user } = useAuth();
+  const { logout, user, updateUser } = useAuth();
 
   // State for Navigation
   const [activeTab, setActiveTab] = useState('overview');
@@ -100,6 +69,9 @@ const AdminDashboard = () => {
 
   // State for Data
   const [sosAlerts, setSosAlerts] = useState([]);
+  // Last known position of EVERY bus (routeId -> fix), so the map can show
+  // the whole fleet, not just the selected route.
+  const [busPositions, setBusPositions] = useState({});
   const [liveAttendance, setLiveAttendance] = useState([]);
   const [usersList, setUsersList] = useState([]);
   const [grievances, setGrievances] = useState([]);
@@ -125,6 +97,8 @@ const AdminDashboard = () => {
 
   // Specific Route Complaints Modal
   const [showRouteComplaintsModal, setShowRouteComplaintsModal] = useState(false);
+  // Full-screen media viewer for complaint attachments (photo/video/audio).
+  const [fullScreenMedia, setFullScreenMedia] = useState(null);
 
   // Grievance triage state
   const [grievanceFilter, setGrievanceFilter] = useState('all');
@@ -169,12 +143,8 @@ const AdminDashboard = () => {
   // Fleet Tracking State
   const [selectedRoute, setSelectedRoute] = useState('1');
   const [busLocation, setBusLocation] = useState([28.3180, 79.4670]);
-  const [mapCenter, setMapCenter] = useState([28.3180, 79.4670]);
-  const [mapZoom, setMapZoom] = useState(15);
   const [isBusActive, setIsBusActive] = useState(false);
-  const [autoFollow, setAutoFollow] = useState(true);
-  const telemetryTimeoutRef = useRef(null);
-  const mapInstance = useRef(null);
+  const [busTelemetry, setBusTelemetry] = useState(null);
   const selectedRouteRef = useRef(selectedRoute);
   // The socket effect closes over the token; a ref keeps it in sync without
   // tearing down and re-creating the socket on every token change.
@@ -204,64 +174,6 @@ const AdminDashboard = () => {
   });
   const [isMerging, setIsMerging] = useState(false);
   const [selectedMergeCity, setSelectedMergeCity] = useState('All');
-
-  // Notifications State
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [hasUnread, setHasUnread] = useState(false);
-  const [seenIds, setSeenIds] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('admin_seen_notif_ids') || '[]'); } 
-    catch { return []; }
-  });
-
-  // Media Modal State
-  const [fullScreenMedia, setFullScreenMedia] = useState(null);
-
-  /**
-   * The notification feed. It used to be built inside a render-phase IIFE
-   * that also scheduled a `setHasUnread` via `setTimeout` — a state update
-   * during render, which re-ran the whole build on every render.
-   */
-  const notifications = useMemo(() => {
-    const busFor = (route) => {
-      const r = routesList.find(
-        (x) => String(x.routeId || x.route_id) === String(route),
-      );
-      return r?.bus?.busNumber || r?.busNumber || r?.bus_number;
-    };
-
-    return [
-      ...sosAlerts.map((alert) => ({
-        id: `sos-${alert.id}`,
-        type: 'sos',
-        title: `SOS Alert - Route ${alert.route} (Bus ${busFor(alert.route) || 'Unknown'})`,
-        message: `${alert.passenger} (ID: ${alert.login_id}) initiated SOS at ${alert.time}.`,
-        time: alert.time,
-        icon: (
-          <AlertOctagon size={20} className="text-red-500 shrink-0 mt-0.5" />
-        ),
-        bg: 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-900/50',
-        textTitle: 'text-red-600 dark:text-red-400',
-        textDesc: 'text-red-500 dark:text-red-300',
-      })),
-      ...grievances
-        .filter((g) => g.status === 'pending' || g.status === 'reopened')
-        .map((g) => ({
-          id: `grievance-${g.id}`,
-          type: 'grievance',
-          title: `New Complaint (Route ${g.route} - Bus ${busFor(g.route) || 'Unknown'})`,
-          message:
-            (g.isAnonymous ? '🕵️ Anonymous complaint: ' : '') +
-            g.text.substring(0, 60) + (g.text.length > 60 ? '...' : ''),
-          time: formatTime(g.createdAt),
-          icon: (
-            <MessageSquare size={20} className="text-orange-500 shrink-0 mt-0.5" />
-          ),
-          bg: 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-900/50',
-          textTitle: 'text-orange-600 dark:text-orange-400',
-          textDesc: 'text-orange-500 dark:text-red-300',
-        })),
-    ];
-    }, [sosAlerts, grievances, routesList]);
 
   // Combined & deduplicated list of today's boarded passengers (seeded + live)
   const combinedBoardings = useMemo(() => {
@@ -307,24 +219,25 @@ const AdminDashboard = () => {
     return Array.from(seenPassengers.values());
   }, [attendanceLogs, liveAttendance, usersList]);
 
-  // Flag unread notifications in an effect rather than during render.
   useEffect(() => {
-    if (showNotifications) return;
-    const hasNew = notifications.some((n) => !seenIds.includes(n.id));
-    if (hasNew) {
-      setTimeout(() => setHasUnread(true), 0);
+    if (!user?.token) {
+      console.warn('No token available, skipping WebSocket connection');
+      return;
     }
-  }, [notifications, seenIds, showNotifications]);
-
-  useEffect(() => {
     // Connect WebSockets
-    const socket = io(BACKEND_URL, {
-      transports: ['websocket', 'polling']
+    const socket = io(SOCKET_URL, {
+      transports: ['websocket', 'polling'],
+      auth: { token: user.token },
+      reconnection: true,
+      // Never give up — a capped retry count left the fleet map dead
+      // whenever the backend cold-start outlasted the retries.
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
     });
 
     socket.on('connect', () => {
       console.log('Admin connected to socket server');
-      socket.emit('join_admin', { token: tokenRef.current });
+      socket.emit('join_admin', { token: user.token });
     });
 
     socket.on('connect_error', (err) => {
@@ -332,12 +245,13 @@ const AdminDashboard = () => {
     });
 
     socket.on('sos_alert', (data) => {
+      const alertTime = formatSosTime(data.timestamp, data.time);
       const newAlert = {
         id: `${data.login_id}-${data.timestamp || data.time}`,
         route: data.route,
         passenger: data.passenger,
         login_id: data.login_id,
-        time: data.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        time: alertTime,
         timestamp: data.timestamp || new Date().toISOString(),
       };
       setSosAlerts(prev => {
@@ -386,31 +300,65 @@ const AdminDashboard = () => {
     });
 
     socket.on('live_telemetry', (data) => {
+      // Track every bus for the fleet view, then handle the selected one.
+      if (data.route_id && data.location?.lat && data.location?.lng) {
+        setBusPositions((prev) => ({
+          ...prev,
+          [String(data.route_id)]: {
+            lat: data.location.lat,
+            lng: data.location.lng,
+            updatedAt: data.timestamp || new Date().toISOString(),
+          },
+        }));
+      }
       // Only process telemetry for the currently selected route
       if (data.route_id && String(data.route_id) !== String(selectedRouteRef.current)) return;
-      
+
       if (data.location && data.location.lat && data.location.lng) {
         const newLocation = [data.location.lat, data.location.lng];
         setBusLocation(newLocation);
         setIsBusActive(true);
-        if (autoFollow) {
-          setMapCenter(newLocation);
-        }
-        if (telemetryTimeoutRef.current) clearTimeout(telemetryTimeoutRef.current);
-        telemetryTimeoutRef.current = setTimeout(() => {
-          setIsBusActive(false);
-        }, 15000);
+      }
+      if (data.speed !== undefined || data.heading !== undefined || data.comfort !== undefined) {
+        setBusTelemetry({
+          speed: data.speed || 0,
+          heading: data.heading || 0,
+          comfort: data.comfort || 'Smooth',
+          lastUpdated: new Date().toISOString()
+        });
       }
     });
 
     socket.on('merge_executed', (data) => {
       toast.success(`Bus Merge Active: ${data.cancelledRoute?.routeName || 'Route'} merged into ${data.targetRoute?.routeName || 'Route'}`, { id: 'admin_merge_exec' });
-      setActiveMerges(prev => [data.mergeEvent, ...prev.filter(m => m.id !== data.mergeEvent?.id)]);
+      const mergeEvent = data.mergeEvent || data.merge;
+      if (mergeEvent) {
+        setActiveMerges(prev => {
+          // Avoid duplicates by checking ID
+          if (prev.some(m => m.id === mergeEvent.id)) return prev;
+          return [mergeEvent, ...prev];
+        });
+      }
     });
 
     socket.on('merge_undone', (data) => {
-      toast.success(`Bus Merge Restored: ${data.merge?.cancelledRouteName || 'Route'} is active again`, { id: 'admin_merge_undone' });
-      setActiveMerges(prev => prev.filter(m => m.id !== data.merge?.id));
+      toast.success(`Bus Merge Restored: ${data.mergeEvent?.cancelledRouteName || data.merge?.cancelledRouteName || 'Route'} is active again`, { id: 'admin_merge_undone' });
+      const mergeEvent = data.mergeEvent || data.merge;
+      if (mergeEvent) {
+        setActiveMerges(prev => prev.filter(m => m.id !== mergeEvent.id));
+      }
+    });
+
+    // A plain cancellation (no replacement bus) arrives with status
+    // 'cancelled' — it belongs in the same Active Merges list.
+    socket.on('bus_cancelled', (data) => {
+      const mergeEvent = data.mergeEvent || data.merge;
+      if (!mergeEvent) return;
+      toast.error(`Bus Cancelled: ${mergeEvent.cancelledRouteName || 'Route'} has no replacement bus today`, { id: 'admin_bus_cancelled' });
+      setActiveMerges(prev => {
+        if (prev.some(m => m.id === mergeEvent.id)) return prev;
+        return [mergeEvent, ...prev];
+      });
     });
 
     setSocketInstance(socket);
@@ -429,15 +377,25 @@ const AdminDashboard = () => {
       // Leave the previous route room before joining the new one, otherwise
       // the server keeps broadcasting telemetry for stale routes to this
       // socket and the room membership grows without bound.
-      socketInstance.emit('unsubscribe_route', {
-        route_id: previousRouteRef.current,
-      });
+      if (previousRouteRef.current != null) {
+        socketInstance.emit('unsubscribe_route', { route_id: previousRouteRef.current });
+      }
       socketInstance.emit('join_route', { route_id: selectedRoute });
       previousRouteRef.current = selectedRoute;
-      setTimeout(() => setIsBusActive(false), 0);
-      if (telemetryTimeoutRef.current) clearTimeout(telemetryTimeoutRef.current);
+      setIsBusActive(false);
+      setBusTelemetry(null);
     }
   }, [selectedRoute, socketInstance]);
+
+  // The admin tracks the WHOLE fleet: join a room per route so every bus's
+  // telemetry reaches the fleet map.
+  useEffect(() => {
+    if (!socketInstance || routesList.length === 0) return;
+    routesList.forEach((r) => {
+      const id = String(r.routeId || r.route_id);
+      if (id) socketInstance.emit('join_route', { route_id: id });
+    });
+  }, [socketInstance, routesList]);
 
   // Stale-while-revalidate hooks for each data type - fast cached load, then live update
   const {
@@ -448,6 +406,7 @@ const AdminDashboard = () => {
   } = useStaleWhileRevalidate('/api/routes', {
     cacheKey: 'admin:routes',
     staleTime: 60000,
+    token: user?.token, // Pass initial token
     onData: (routes) => {
       setRoutesList(routes);
       
@@ -486,6 +445,7 @@ const AdminDashboard = () => {
   } = useStaleWhileRevalidate('/api/admin/grievances', {
     cacheKey: 'admin:grievances',
     staleTime: 30000,
+    token: user?.token,
     onData: (data) => setGrievances(data),
   });
 
@@ -497,6 +457,7 @@ const AdminDashboard = () => {
   } = useStaleWhileRevalidate('/api/users', {
     cacheKey: 'admin:users',
     staleTime: 60000,
+    token: user?.token,
     onData: (data) => setUsersList(data),
   });
 
@@ -508,6 +469,7 @@ const AdminDashboard = () => {
   } = useStaleWhileRevalidate('/api/attendance', {
     cacheKey: 'admin:attendance',
     staleTime: 30000,
+    token: user?.token,
     onData: (data) => setAttendanceLogs(data),
   });
 
@@ -518,6 +480,7 @@ const AdminDashboard = () => {
   } = useStaleWhileRevalidate('/api/merge/active', {
     cacheKey: 'admin:merges:active',
     staleTime: 30000,
+    token: user?.token,
     onData: (data) => setActiveMerges(data),
   });
 
@@ -528,6 +491,7 @@ const AdminDashboard = () => {
   } = useStaleWhileRevalidate('/api/merge/suggestions', {
     cacheKey: 'admin:merges:suggestions',
     staleTime: 60000,
+    token: user?.token,
     onData: (data) => setMergeSuggestions(data),
   });
 
@@ -538,35 +502,36 @@ const AdminDashboard = () => {
   } = useStaleWhileRevalidate('/api/merge/history', {
     cacheKey: 'admin:merges:history',
     staleTime: 60000,
+    token: user?.token,
     onData: (data) => setMergeHistory(data),
   });
 
   const {
     data: sosData,
+    isLoading: sosLoading,
     refetch: refetchSos,
     setToken: setSosToken,
   } = useStaleWhileRevalidate('/api/sos/active', {
     cacheKey: 'admin:sos',
     staleTime: 10000,
-    onData: (data) => { if (data.length > 0) setSosAlerts(data); },
+    token: user?.token,
+    onData: (data) => {
+      if (Array.isArray(data) && data.length > 0) {
+        const formatted = data.map((alert) => ({
+          ...alert,
+          time: formatSosTime(alert.timestamp, alert.time),
+        }));
+        setSosAlerts(formatted);
+      }
+    },
   });
 
-  // Update tokens when user changes
-  useEffect(() => {
-    if (user?.token) {
-      setRoutesToken(user.token);
-      setGrievancesToken(user.token);
-      setUsersToken(user.token);
-      setAttendanceToken(user.token);
-      setActiveMergesToken(user.token);
-      setMergeSuggestionsToken(user.token);
-      setMergeHistoryToken(user.token);
-      setSosToken(user.token);
-    }
-  }, [user?.token, setRoutesToken, setGrievancesToken, setUsersToken, setAttendanceToken, setActiveMergesToken, setMergeSuggestionsToken, setMergeHistoryToken, setSosToken]);
+  // No need for token sync useEffect - tokens passed directly to hooks
 
-  // Combined loading state
-  const combinedLoading = routesLoading || grievancesLoading || usersLoading || attendanceLoading;
+  // Combined loading state - only true if NO cached data exists (initial load)
+  // If data exists but is stale, we show the cached data and fetch in background
+  const hasCachedData = routesData || grievancesData || usersData || attendanceData || activeMergesData || mergeSuggestionsData || mergeHistoryData || sosData;
+  const combinedLoading = !hasCachedData && (routesLoading || grievancesLoading || usersLoading || attendanceLoading || sosLoading);
 
   const handleLogout = () => {
     logout();
@@ -609,6 +574,16 @@ const AdminDashboard = () => {
         if (res.data.status === 'success') {
           toast.success(res.data.message || 'Bus merged successfully!');
           if (res.data.warning) toast(res.data.warning, { icon: '⚠️' });
+          
+          // IMMEDIATELY update activeMerges from API response for instant UI feedback
+          if (res.data.data) {
+            setActiveMerges(prev => {
+              const newMerge = res.data.data;
+              // Avoid duplicates by checking ID
+              if (prev.some(m => m.id === newMerge.id)) return prev;
+              return [newMerge, ...prev];
+            });
+          }
         }
       } else {
         // Cancel bus (no merge)
@@ -617,16 +592,27 @@ const AdminDashboard = () => {
         if (res.data.status === 'success') {
           toast.success(res.data.message || 'Bus cancelled successfully!');
           if (res.data.warning) toast(res.data.warning, { icon: '⚠️' });
+          
+          // IMMEDIATELY update activeMerges from API response for instant UI feedback
+          if (res.data.data) {
+            setActiveMerges(prev => {
+              const newMerge = res.data.data;
+              if (prev.some(m => m.id === newMerge.id)) return prev;
+              return [newMerge, ...prev];
+            });
+          }
         }
       }
       
       setMergeFormData({ cancelled_route_id: '', target_route_id: '', reason: 'low_attendance', notes: '', mode: 'merge' });
       
-      // Invalidate merge caches - they'll refetch on next render
-      refetchActiveMerges();
-      refetchMergeSuggestions();
-      refetchMergeHistory();
-      refetchRoutes(); // Routes may have changed
+      // Invalidate merge caches - wait for all refetches to complete so UI updates instantly
+      await Promise.all([
+        refetchActiveMerges(),
+        refetchMergeSuggestions(),
+        refetchMergeHistory(),
+        refetchRoutes(), // Routes may have changed
+      ]);
     } catch (err) {
       toast.error(friendlyError(err, 'Failed to process bus operation'));
     } finally {
@@ -641,14 +627,16 @@ const AdminDashboard = () => {
       const res = await axios.post(`${BACKEND_URL}/api/merge/${mergeId}/undo`, {}, authHeaders);
       if (res.data.status === 'success') {
         toast.success(res.data.message || 'Merge undone successfully!');
-        const [mRes, sRes, hRes] = await Promise.all([
-          axios.get(`${BACKEND_URL}/api/merge/active`, authHeaders),
-          axios.get(`${BACKEND_URL}/api/merge/suggestions`, authHeaders),
-          axios.get(`${BACKEND_URL}/api/merge/history`, authHeaders),
+        
+        // IMMEDIATELY remove the undone merge from activeMerges for instant UI feedback
+        setActiveMerges(prev => prev.filter(m => m.id !== mergeId));
+        
+        // Also refetch to ensure consistency - wait for all to complete
+        await Promise.all([
+          refetchActiveMerges(),
+          refetchMergeSuggestions(),
+          refetchMergeHistory(),
         ]);
-        setActiveMerges(mRes.data?.data || []);
-        setMergeSuggestions(sRes.data?.data || []);
-        setMergeHistory(hRes.data?.data || []);
       }
     } catch (err) {
       toast.error(friendlyError(err, 'Failed to undo merge'));
@@ -661,6 +649,9 @@ const AdminDashboard = () => {
       target_route_id: String(targetId),
       reason: 'low_attendance',
       notes: 'Auto-suggested merge due to low attendance',
+      // The form may have been left in cancel mode — a quick merge must
+      // never execute as a cancellation.
+      mode: 'merge',
     });
     setActiveTab('merge');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -681,8 +672,8 @@ const AdminDashboard = () => {
             : g,
         ),
       );
-      // Invalidate grievances cache
-      refetchGrievances();
+      // Invalidate grievances cache - wait for refetch to complete so UI updates instantly
+      await refetchGrievances();
       toast.success(
         'Marked as fixed. The complaint stays open until the complainant confirms it.',
       );
@@ -709,8 +700,8 @@ const AdminDashboard = () => {
       setGrievances((prev) =>
         prev.map((g) => (g.id === id ? { ...g, status: 'in_progress' } : g)),
       );
-      // Invalidate grievances cache
-      refetchGrievances();
+      // Invalidate grievances cache - wait for refetch to complete so UI updates instantly
+      await refetchGrievances();
       toast.success('Marked as in progress. The complainant has been notified.');
     } catch (err) {
       toast.error(friendlyError(err, 'Failed to update complaint'));
@@ -732,8 +723,8 @@ const AdminDashboard = () => {
         { hours: 24 },
         { headers: { Authorization: `Bearer ${user?.token}` } },
       );
-      // Invalidate grievances cache
-      refetchGrievances();
+      // Invalidate grievances cache - wait for refetch to complete so UI updates instantly
+      await refetchGrievances();
       toast.success('Confirmation window extended by 24 hours.');
     } catch (err) {
       toast.error(friendlyError(err, 'Failed to extend deadline'));
@@ -751,8 +742,8 @@ const AdminDashboard = () => {
     try {
       await axios.delete(`${BACKEND_URL}/api/grievance/${id}`, { headers: { Authorization: `Bearer ${user?.token}` } });
       setGrievances((prev) => prev.filter((g) => g.id !== id));
-      // Invalidate grievances cache
-      refetchGrievances();
+      // Invalidate grievances cache - wait for refetch to complete so UI updates instantly
+      await refetchGrievances();
     } catch (err) {
       toast.error(friendlyError(err, "Failed to delete complaint"));
     }
@@ -764,8 +755,8 @@ const AdminDashboard = () => {
     try {
       await axios.delete(`${BACKEND_URL}/api/users/${login_id}`, { headers: { Authorization: `Bearer ${user?.token}` } });
       setUsersList((prev) => prev.filter((u) => u.loginId !== login_id));
-      // Invalidate users cache
-      refetchUsers();
+      // Invalidate users cache - wait for refetch to complete so UI updates instantly
+      await refetchUsers();
       toast.success("User deleted successfully!");
     } catch (err) {
       toast.error(friendlyError(err, "Failed to delete user"));
@@ -796,6 +787,20 @@ const AdminDashboard = () => {
         if (!payload.password) delete payload.password;
         await axios.put(`${BACKEND_URL}/api/users/${editingUser.login_id || editingUser.loginId}`, payload, authHeaders);
         toast.success("User updated successfully!");
+        // Editing your own account: refresh the auth context immediately so
+        // the header, menus, and profile pages show the new values (the
+        // socket broadcast is the backup path for other devices).
+        const selfLoginId = user?.login_id || user?.loginId;
+        if (selfLoginId && (editingUser.login_id || editingUser.loginId) === selfLoginId) {
+          updateUser({
+            name: payload.name ?? user.name,
+            phone: payload.phone ?? user.phone,
+            email: payload.email ?? user.email,
+            bloodGroup: payload.bloodGroup ?? user.bloodGroup,
+            address: payload.address ?? user.address,
+            dob: payload.dob ?? user.dob,
+          });
+        }
       } else {
         await axios.post(`${BACKEND_URL}/api/users`, payload, authHeaders);
         toast.success("User created successfully!");
@@ -816,8 +821,8 @@ const AdminDashboard = () => {
         }
       }
       setShowUserModal(false);
-      // Invalidate users cache - will refetch on next render
-      refetchUsers();
+      // Invalidate users cache - wait for refetch to complete so UI updates instantly
+      await refetchUsers();
     } catch (err) {
       toast.error(friendlyError(err, "Failed to save user"));
     }
@@ -890,8 +895,8 @@ const AdminDashboard = () => {
       setBulkUploadData([]);
       setBulkUploadErrors([]);
       
-      // Invalidate users cache - will refetch on next render
-      refetchUsers();
+      // Invalidate users cache - wait for refetch to complete so UI updates instantly
+      await refetchUsers();
     } catch (err) {
       toast.error(friendlyError(err, "Failed to process bulk upload"));
     }
@@ -923,8 +928,8 @@ const AdminDashboard = () => {
         newEditingUser.face_enrolled_at = null;
         setEditingUser(newEditingUser);
       }
-      // Invalidate users cache
-      refetchUsers();
+      // Invalidate users cache - wait for refetch to complete so UI updates instantly
+      await refetchUsers();
       toast.success("Face data removed successfully!");
     } catch (err) {
       toast.error(friendlyError(err, "Failed to delete face data"));
@@ -949,8 +954,8 @@ const AdminDashboard = () => {
     try {
       await axios.delete(`${BACKEND_URL}/api/routes/${route_id}`, { headers: { Authorization: `Bearer ${user?.token}` } });
       setRoutesList((prev) => prev.filter((r) => String(r.routeId || r.route_id) !== String(route_id)));
-      // Invalidate routes cache
-      refetchRoutes();
+      // Invalidate routes cache - wait for refetch to complete so UI updates instantly
+      await refetchRoutes();
     } catch (err) {
       toast.error(friendlyError(err, "Failed to delete route"));
     }
@@ -972,8 +977,8 @@ const AdminDashboard = () => {
         await axios.post(`${BACKEND_URL}/api/routes`, routeFormData, authHeaders);
       }
       setShowRouteModal(false);
-      // Invalidate routes cache - will refetch on next render
-      refetchRoutes();
+      // Invalidate routes cache - wait for refetch to complete so UI updates instantly
+      await refetchRoutes();
     } catch (err) {
       toast.error(friendlyError(err, "Failed to save route"));
     }
@@ -1012,7 +1017,7 @@ const AdminDashboard = () => {
         title: 'Admin Notice',
         message: broadcastMessage,
         sender: user?.name || 'Admin'
-      });
+      }, { headers: { Authorization: `Bearer ${user?.token}` } });
       toast.success('Global Broadcast sent to all passengers!');
       setBroadcastMessage('');
     } catch (err) {
@@ -1021,6 +1026,59 @@ const AdminDashboard = () => {
       setIsBroadcasting(false);
     }
   };
+
+  // Honest trip status: offline / active / moving, with a grace period so
+  // a red light does not flip the card back and forth.
+  const tripStatus = useTripStatus(busTelemetry);
+
+  // Last DB-recorded GPS fix for the selected route — shown when the bus is
+  // offline, plus a dedicated "Last Seen" detail card.
+  const { data: lastKnownData } = useStaleWhileRevalidate(
+    `/api/telemetry/last/${selectedRoute}`,
+    { cacheKey: `admin:last-loc:${selectedRoute}`, staleTime: 15000, token: user?.token },
+  );
+  const lastKnown = useMemo(() => {
+    const d = lastKnownData?.data;
+    if (!d?.lat || !d?.lng) return null;
+    return { position: [d.lat, d.lng], timestamp: d.timestamp, speed: d.speed };
+  }, [lastKnownData]);
+
+  // Offline: put the marker where the bus was last actually seen.
+  useEffect(() => {
+    if (!isBusActive && lastKnown) {
+      setBusLocation(lastKnown.position);
+    }
+  }, [isBusActive, lastKnown]);
+
+  // Fleet markers for the map: every bus EXCEPT the one being tracked
+  // (the tracked bus gets the large marker).
+  const fleetBuses = useMemo(() => {
+    const now = Date.now();
+    return Object.entries(busPositions)
+      .map(([routeId, pos]) => {
+        const route = routesList.find(
+          (r) => String(r.routeId || r.route_id) === String(routeId),
+        );
+        const name = route?.routeName || route?.route_name || `Route ${routeId}`;
+        const busNo = route?.busNumber || route?.bus_number || route?.bus?.busNumber;
+        return {
+          id: String(routeId),
+          position: [pos.lat, pos.lng],
+          label: `Route ${routeId} · ${name}${busNo ? ` (Bus ${busNo})` : ''}`,
+          live: now - new Date(pos.updatedAt).getTime() < 15000,
+        };
+      })
+      .filter((b) => b.id !== String(selectedRoute));
+  }, [busPositions, routesList, selectedRoute]);
+
+  // Modal accessibility: the background stops scrolling, the Lenis
+  // smooth-scroller pauses, and Escape closes the open popup.
+  useModalA11y(showUserModal, () => setShowUserModal(false));
+  useModalA11y(showBulkUploadModal, () => { setShowBulkUploadModal(false); setBulkUploadData([]); setBulkUploadErrors([]); });
+  useModalA11y(showRouteModal, () => setShowRouteModal(false));
+  useModalA11y(showRouteComplaintsModal, () => setShowRouteComplaintsModal(false));
+  useModalA11y(!!viewingUser, () => setViewingUser(null));
+  useModalA11y(!!viewingRouteDetails, () => setViewingRouteDetails(null));
 
   return (
     <div className="min-h-screen flex flex-col relative">
@@ -1041,70 +1099,7 @@ const AdminDashboard = () => {
         </div>
 
         <div className="flex items-center gap-2 md:gap-4 shrink-0">
-          <div className="relative">
-            {(() => {
-              const allNotifications = notifications;
-              const currentIds = allNotifications.map(n => n.id);
-
-              return (
-                <>
-                  <button 
-                    onClick={() => {
-                      setShowNotifications(!showNotifications);
-                      if (!showNotifications) {
-                        setHasUnread(false);
-                        const newIds = allNotifications.map(n => n.id);
-                        setSeenIds(newIds);
-                        localStorage.setItem('admin_seen_notif_ids', JSON.stringify(newIds));
-                      }
-                    }} 
-                    className={`relative bg-transparent border-none cursor-pointer text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors p-1 ${hasUnread ? 'animate-bell-ring text-red-500 dark:text-red-400' : ''}`}
-                  >
-                    <Bell size={24} />
-                    {hasUnread && (
-                      <span style={{
-                        position: 'absolute', top: '0', right: '0', width: '10px', height: '10px',
-                        backgroundColor: 'red', borderRadius: '50%', border: '2px solid white', animation: 'pulse 1.5s infinite'
-                      }}></span>
-                    )}
-                  </button>
-                  {showNotifications && (
-                    <div className="absolute top-12 right-0 w-80 sm:w-96 bg-white dark:bg-slate-900 shadow-2xl rounded-2xl border border-slate-200 dark:border-slate-700 p-4 z-50 animate-fade-in">
-                      <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 m-0">
-                          Notifications {allNotifications.length > 0 && `(${allNotifications.length})`}
-                        </h3>
-                        <button onClick={() => setShowNotifications(false)} className="bg-transparent border-none cursor-pointer p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
-                          <X size={20} className="text-slate-500 dark:text-slate-400" />
-                        </button>
-                      </div>
-                      <div className="flex flex-col gap-3 max-h-[350px] overflow-y-auto hide-scrollbar">
-                        {allNotifications.length > 0 ? (
-                          allNotifications.map(notification => (
-                            <div key={notification.id} className={`p-3 border rounded-xl flex gap-3 items-start ${notification.bg}`}>
-                              {notification.icon}
-                              <div className="min-w-0 flex-1">
-                                <div className="flex justify-between items-start gap-2">
-                                  <p className={`m-0 text-sm font-bold truncate ${notification.textTitle}`}>{notification.title}</p>
-                                  <span className={`text-[10px] whitespace-nowrap mt-0.5 ${notification.textDesc}`}>{notification.time}</span>
-                                </div>
-                                <p className={`m-0 text-xs mt-1 leading-relaxed ${notification.textDesc}`}>{notification.message}</p>
-                              </div>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="text-center py-6 text-slate-500 dark:text-slate-400">
-                            <Bell size={32} className="mx-auto mb-2 opacity-50" />
-                            <p className="m-0 text-sm font-medium">No new notifications</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </>
-              );
-            })()}
-          </div>
+          <NotificationBell user={user} token={user?.token} />
 
           {/* PROFILE DROPDOWN (Desktop only) */}
           <div className="relative hidden lg:block">
@@ -1237,7 +1232,7 @@ const AdminDashboard = () => {
                   Bus {routesList.find(r => String(r.route_id) === String(sosAlerts[0].route))?.bus_number || 'Unknown'} (Route {sosAlerts[0].route}) • Driver: {usersList.find(u => u.login_id === routesList.find(r => String(r.routeId || r.route_id) === String(sosAlerts[0].route))?.driverId)?.name || 'Unknown'}
                 </p>
                 <p style={{ margin: 0, fontSize: '0.85rem', color: '#a8071a' }}>
-                  Initiated by {sosAlerts[0].passenger} (ID: {sosAlerts[0].login_id}) • {sosAlerts[0].time}{sosAlerts[0].timestamp ? ` (${formatTime(sosAlerts[0].timestamp)})` : ''}
+                  Initiated by {sosAlerts[0].passenger} (ID: {sosAlerts[0].login_id}) • {formatSosTime(sosAlerts[0].timestamp, sosAlerts[0].time)}{sosAlerts[0].timestamp ? ` (${formatTime(sosAlerts[0].timestamp)})` : ''}
                 </p>
               </div>
             </div>
@@ -1327,71 +1322,28 @@ const AdminDashboard = () => {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch w-full">
               {/* Left side: Map */}
               <div className="glass p-glass rounded-3xl overflow-hidden min-h-[400px] border-2 border-blue-600 relative z-[1] w-full">
-                {/* Status indicator */}
-                <div className="absolute top-3 left-3 right-3 z-10 flex justify-between items-start pointer-events-none">
-                  <div className="pointer-events-auto">
-                    <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-white/90 backdrop-blur-sm shadow-lg border ${
-                      isBusActive ? 'border-green-200 text-green-700' : 'border-orange-200 text-orange-700'
-                    }`}>
-                      <span className={`w-2 h-2 rounded-full ${isBusActive ? 'bg-green-500 animate-pulse' : 'bg-orange-500'}`} />
-                      {isBusActive ? 'LIVE' : 'OFFLINE'}
-                    </div>
-                  </div>
-                  <div className="pointer-events-auto ml-auto">
-                    <button
-                      onClick={() => {
-                        setAutoFollow(true);
-                        setMapCenter(busLocation);
-                        setMapZoom(16);
-                      }}
-                      title="Recenter on bus"
-                      className="p-2 rounded-full bg-white/90 backdrop-blur-sm shadow-lg border border-slate-200 hover:bg-slate-50 transition-all"
-                    >
-                      <div className="w-8 h-8 flex items-center justify-center">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-blue-600">
-                          <circle cx="12" cy="12" r="3" />
-                          <path d="M12 2v2M12 20v2M2 12h2M20 12h2" />
-                        </svg>
-                      </div>
-                    </button>
-                  </div>
-                </div>
-
-                <MapContainer 
-                  center={mapCenter} 
-                  zoom={mapZoom} 
-                  style={{ height: '100%', width: '100%', position: 'absolute', top: 0, left: 0 }}
-                  zoomControl={false}
-                  whenCreated={(map) => { mapInstance.current = map; }}
-                >
-                  <MapResizer />
-                  <TileLayer
-                    url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
-                    attribution='&copy; Google Maps'
-                  />
-                  <Marker position={busLocation} icon={busIcon}>
-                    <Popup><b>Route {selectedRoute} (Bus {routesList.find(r => String(r.routeId || r.route_id) === String(selectedRoute))?.busNumber || routesList.find(r => String(r.routeId || r.route_id) === String(selectedRoute))?.bus_number || 'Unknown'})</b><br />Live Location</Popup>
-                  </Marker>
-                </MapContainer>
-
-                {/* Auto-follow toggle */}
-                <div className="absolute bottom-3 right-3 z-10 pointer-events-auto">
-                  <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-white/90 backdrop-blur-sm shadow-lg border border-slate-200 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={autoFollow}
-                      onChange={(e) => {
-                        setAutoFollow(e.target.checked);
-                        if (e.target.checked) {
-                          setMapCenter(busLocation);
-                          setMapZoom(16);
-                        }
-                      }}
-                      className="w-4 h-4 accent-blue-600 cursor-pointer"
-                    />
-                    <span>Auto-follow bus</span>
-                  </label>
-                </div>
+                <UnifiedMap
+                  busLocation={busLocation}
+                  routeInfo={routesList.find(r => String(r.routeId || r.route_id) === String(selectedRoute))}
+                  telemetry={busTelemetry}
+                  isLive={isBusActive}
+                  initialZoom={15}
+                  height="100%"
+                  minHeight="400px"
+                  busLabel={`Route ${selectedRoute} (Bus ${routesList.find(r => String(r.routeId || r.route_id) === String(selectedRoute))?.busNumber || routesList.find(r => String(r.routeId || r.route_id) === String(selectedRoute))?.bus_number || 'Unknown'})`}
+                  showFullscreenButton={true}
+                  showAutoFollowToggle={true}
+                  showRecenterButton={true}
+                  showTelemetryPanel={true}
+                  showRoutePolyline={true}
+                  showDestinationMarker={true}
+                  buses={fleetBuses}
+                  lastKnown={lastKnown}
+                  onSelectBus={(id) => {
+                    setSelectedRoute(String(id));
+                    toast.success(`Now tracking ${fleetBuses.find((b) => b.id === String(id))?.label || `Route ${id}`}`);
+                  }}
+                />
               </div>
 
               {/* Right side: Stats for selected bus */}
@@ -1428,14 +1380,46 @@ const AdminDashboard = () => {
                     </div>
 
                     <div className="glass p-6 rounded-2xl flex items-center gap-4 flex-1">
-                      <div className={`${isBusActive ? 'bg-green-50 text-green-600 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400'} p-4 rounded-xl shrink-0`}>
-                        {isBusActive ? <CheckCircle2 size={28} /> : <AlertOctagon size={28} />}
+                      <div className={`${
+                        tripStatus === 'moving' ? 'bg-green-50 text-green-600 dark:bg-green-900/30 dark:text-green-400'
+                          : tripStatus === 'active' ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400'
+                          : 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400'
+                      } p-4 rounded-xl shrink-0`}>
+                        {tripStatus === 'offline' ? <AlertOctagon size={28} /> : <CheckCircle2 size={28} />}
                       </div>
                       <div className="min-w-0">
                         <p className="text-slate-500 dark:text-slate-400 text-sm font-semibold m-0 truncate">Route Status</p>
-                        <h3 className={`text-xl md:text-2xl font-bold m-0 truncate ${isBusActive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                          {isBusActive ? 'Active & Running' : 'Inactive'}
+                        <h3 className={`text-xl md:text-2xl font-bold m-0 truncate ${
+                          tripStatus === 'moving' ? 'text-green-600 dark:text-green-400'
+                            : tripStatus === 'active' ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-red-600 dark:text-red-400'
+                        }`}>
+                          {tripStatus === 'moving' ? 'Active & Running' : tripStatus === 'active' ? 'Active' : 'Inactive'}
                         </h3>
+                      </div>
+                    </div>
+
+                    <div className="glass p-6 rounded-2xl flex items-center gap-4 flex-1">
+                      <div className={`${
+                        lastKnown ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500'
+                      } p-4 rounded-xl shrink-0`}>
+                        <History size={28} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-slate-500 dark:text-slate-400 text-sm font-semibold m-0 truncate">Last Seen (Route {selectedRoute})</p>
+                        {lastKnown ? (
+                          <>
+                            <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 m-0">
+                              {formatTime(lastKnown.timestamp)}
+                            </h3>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 m-0 mt-0.5 truncate">
+                              {lastKnown.position[0].toFixed(4)}, {lastKnown.position[1].toFixed(4)}
+                              {lastKnown.speed != null ? ` · ${Math.round(lastKnown.speed)} km/h` : ''}
+                            </p>
+                          </>
+                        ) : (
+                          <h3 className="text-lg font-bold text-slate-500 m-0">No GPS record yet</h3>
+                        )}
                       </div>
                     </div>
                   </>
@@ -1622,6 +1606,9 @@ const AdminDashboard = () => {
               </div>
             </div>
 
+            {/* Face reset requests raised from user Settings pages */}
+            <FaceResetRequests user={user} onChanged={refetchUsers} />
+
             {/* Sub-Tabs for filtering Passengers, Drivers, Admins, Transport Incharges */}
             <div className="flex flex-wrap gap-3 mb-6">
               {[
@@ -1711,17 +1698,6 @@ const AdminDashboard = () => {
                               <span style={{ backgroundColor: '#e6fae6', color: '#28a745', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 'bold' }}>Yes</span>
                             ) : (
                               <span style={{ backgroundColor: '#fff1f0', color: '#cf1322', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 'bold' }}>No</span>
-                            )}
-                          </td>
-                        )}
-                        {userFilter === 'passenger' && (
-                          <td style={{ padding: '1rem', textAlign: 'center' }}>
-                            {u.faceResetRequestedAt || u.face_reset_requested_at ? (
-                              <span style={{ backgroundColor: '#fff3cd', color: '#856404', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold', border: '1px solid #ffeeba' }}>
-                                🔄 Reset Requested
-                              </span>
-                            ) : (
-                              <span style={{ color: 'var(--text-light)', fontSize: '0.75rem' }}>—</span>
                             )}
                           </td>
                         )}
@@ -2226,6 +2202,7 @@ const AdminDashboard = () => {
                         {routesList
                           .filter(r => selectedMergeCity === 'All' || (r.city || 'Bareilly') === selectedMergeCity)
                           .filter(r => !activeMerges.some(m => String(m.cancelledRouteId) === String(r.routeId || r.route_id)))
+                          .filter(r => !activeMerges.some(m => m.status === 'active' && String(m.targetRouteId) === String(r.routeId || r.route_id)))
                           .map(r => (
                             <option key={r.routeId || r.route_id} value={r.routeId || r.route_id}>
                               {r.routeName || r.route_name} (Bus {r.busNumber || r.bus_number}) • {r.city || 'Bareilly'}
@@ -2257,6 +2234,7 @@ const AdminDashboard = () => {
                             return String(r.routeId || r.route_id) !== String(mergeFormData.cancelled_route_id);
                           })
                           .filter(r => !activeMerges.some(m => String(m.cancelledRouteId) === String(r.routeId || r.route_id)))
+                          .filter(r => !activeMerges.some(m => m.status === 'active' && String(m.targetRouteId) === String(r.routeId || r.route_id)))
                           .map(r => (
                             <option key={r.routeId || r.route_id} value={r.routeId || r.route_id}>
                               {r.routeName || r.route_name} (Bus {r.busNumber || r.bus_number}) • Cap: {r.seatingCapacity || 50}
@@ -2365,10 +2343,11 @@ const AdminDashboard = () => {
                   <button
                     type="submit"
                     disabled={isMerging || !mergeFormData.cancelled_route_id || (mergeFormData.mode === 'merge' && !mergeFormData.target_route_id)}
-                    className="mt-2 w-full py-3 px-4 disabled:opacity-50 text-white rounded-xl font-bold transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 cursor-pointer border-none
-                      {mergeFormData.mode === 'merge'
+                    className={`mt-2 w-full py-3 px-4 disabled:opacity-50 text-white rounded-xl font-bold transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 cursor-pointer border-none ${
+                      mergeFormData.mode === 'merge'
                         ? 'bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700'
-                        : 'bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700'}"
+                        : 'bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700'
+                    }`}
                   >
                     {mergeFormData.mode === 'merge' ? <GitMerge size={18} /> : <Trash2 size={18} />}
                     {isMerging ? 'Executing...' : (mergeFormData.mode === 'merge' ? 'Execute Bus Merge & Notify Passengers' : 'Cancel Bus & Notify Passengers')}
@@ -2394,42 +2373,55 @@ const AdminDashboard = () => {
                     </div>
                   ) : (
                     <div className="flex flex-col gap-3 max-h-[420px] overflow-y-auto pr-1">
-                      {activeMerges.map(merge => (
-                        <div
-                          key={merge.id}
-                          className="p-4 rounded-2xl border border-orange-200 dark:border-orange-900/50 bg-gradient-to-br from-orange-50/60 to-white/90 dark:from-slate-800/80 dark:to-slate-800/40 flex flex-col gap-2.5 shadow-sm"
-                        >
-                          <div className="flex justify-between items-start">
-                            <div className="flex items-center gap-1.5">
-                              <span className="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded">CANCELLED</span>
-                              <span className="font-bold text-xs text-slate-800 dark:text-slate-200">{merge.cancelledRouteName}</span>
-                            </div>
-                            <span className="text-[10px] font-semibold text-slate-400">
-                              {formatTime(merge.mergedAt || merge.createdAt)}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300 bg-white/70 dark:bg-slate-900/60 p-2 rounded-xl border border-slate-100 dark:border-slate-800">
-                            <span className="text-red-500 font-bold">Bus {merge.cancelledBusNumber || merge.cancelledRouteId}</span>
-                            <ArrowRight size={14} className="text-orange-500 shrink-0" />
-                            <span className="text-emerald-600 dark:text-emerald-400 font-bold">Bus {merge.targetBusNumber || merge.targetRouteId} ({merge.targetRouteName})</span>
-                          </div>
-
-                          <div className="flex justify-between items-center text-[11px] text-slate-500 dark:text-slate-400 pt-1">
-                            <span>Moved: <strong className="text-slate-700 dark:text-slate-200">{merge.studentsMoved || 0} students</strong></span>
-                            <span className="capitalize bg-slate-100 dark:bg-slate-700/60 px-2 py-0.5 rounded-full font-medium">
-                              {(merge.reason || 'low_attendance').replace(/_/g, ' ')}
-                            </span>
-                          </div>
-
-                          <button
-                            onClick={() => handleUndoMerge(merge.id)}
-                            className="mt-1 w-full py-1.5 px-3 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400 text-xs font-bold rounded-xl border border-red-200 dark:border-red-800/40 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                      {activeMerges.map(merge => {
+                        const isCancelledOnly = merge.status === 'cancelled' || (merge.cancelledRouteId === merge.targetRouteId);
+                        return (
+                          <div
+                            key={merge.id}
+                            className={`p-4 rounded-2xl border flex flex-col gap-2.5 shadow-sm ${
+                              isCancelledOnly
+                                ? 'border-red-200 dark:border-red-900/50 bg-gradient-to-br from-red-50/60 to-white/90 dark:from-slate-800/80 dark:to-slate-800/40'
+                                : 'border-orange-200 dark:border-orange-900/50 bg-gradient-to-br from-orange-50/60 to-white/90 dark:from-slate-800/80 dark:to-slate-800/40'
+                            }`}
                           >
-                            <Undo2 size={13} /> Undo Merge & Restore Route
-                          </button>
-                        </div>
-                      ))}
+                            <div className="flex justify-between items-start">
+                              <div className="flex items-center gap-1.5">
+                                <span className="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded">
+                                  {isCancelledOnly ? 'CANCELLED' : 'MERGED'}
+                                </span>
+                                <span className="font-bold text-xs text-slate-800 dark:text-slate-200">{merge.cancelledRouteName}</span>
+                              </div>
+                              <span className="text-[10px] font-semibold text-slate-400">
+                                {formatTime(merge.mergedAt || merge.createdAt)}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300 bg-white/70 dark:bg-slate-900/60 p-2 rounded-xl border border-slate-100 dark:border-slate-800">
+                              <span className="text-red-500 font-bold">Bus {merge.cancelledBusNumber || merge.cancelledRouteId}</span>
+                              <ArrowRight size={14} className="text-orange-500 shrink-0" />
+                              {isCancelledOnly ? (
+                                <span className="text-red-500 font-bold">NO REPLACEMENT BUS</span>
+                              ) : (
+                                <span className="text-emerald-600 dark:text-emerald-400 font-bold">Bus {merge.targetBusNumber || merge.targetRouteId} ({merge.targetRouteName})</span>
+                              )}
+                            </div>
+
+                            <div className="flex justify-between items-center text-[11px] text-slate-500 dark:text-slate-400 pt-1">
+                              <span>Moved: <strong className="text-slate-700 dark:text-slate-200">{merge.studentsMoved || 0} students</strong></span>
+                              <span className="capitalize bg-slate-100 dark:bg-slate-700/60 px-2 py-0.5 rounded-full font-medium">
+                                {(merge.reason || 'low_attendance').replace(/_/g, ' ')}
+                              </span>
+                            </div>
+
+                            <button
+                              onClick={() => handleUndoMerge(merge.id)}
+                              className="mt-1 w-full py-1.5 px-3 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400 text-xs font-bold rounded-xl border border-red-200 dark:border-red-800/40 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                              <Undo2 size={13} /> {isCancelledOnly ? 'Undo Cancellation & Restore Route' : 'Undo Merge & Restore Route'}
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -2500,7 +2492,7 @@ const AdminDashboard = () => {
               <button onClick={() => setShowRouteComplaintsModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={24} color="var(--text-dark)" /></button>
             </div>
 
-            <div style={{ padding: '1.5rem', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div data-lenis-prevent="true" style={{ padding: '1.5rem', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               {grievances.filter(g => String(g.route) === String(selectedRoute) && g.status === 'pending').length === 0 ? (
                 <p style={{ textAlign: 'center', color: 'var(--text-light)', marginTop: '2rem' }}>No pending complaints for this route! ðŸŽ‰</p>
               ) : (
@@ -2521,12 +2513,12 @@ const AdminDashboard = () => {
                     <p style={{ margin: 0, color: 'var(--text-dark)' }}>{comp.text}</p>
                     {/* Media Attachment */}
                     {comp.type === 'photo' && (comp.media_url || comp.mediaUrl) && (
-                      <div style={{ borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: '#f8f9fa', display: 'flex', justifyContent: 'center' }}>
+                      <div onClick={() => setFullScreenMedia({ type: 'photo', url: comp.media_url || comp.mediaUrl })} style={{ borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: '#f8f9fa', display: 'flex', justifyContent: 'center', cursor: 'zoom-in' }}>
                         <img src={comp.media_url || comp.mediaUrl} alt="Complaint Attachment" style={{ width: '100%', height: 'auto', display: 'block', maxHeight: '400px', objectFit: 'contain' }} />
                       </div>
                     )}
                     {comp.type === 'video' && (comp.media_url || comp.mediaUrl) && (
-                      <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: 'black', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <div onClick={() => setFullScreenMedia({ type: 'video', url: comp.media_url || comp.mediaUrl })} style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: 'black', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                         <video src={comp.media_url || comp.mediaUrl} controls style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'contain' }} />
                       </div>
                     )}
@@ -2552,7 +2544,7 @@ const AdminDashboard = () => {
 
       {/* View Route Details Modal (Eye Button) */}
       {viewingRouteDetails && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
           <div className="animate-slide-up glass p-glass" data-lenis-prevent="true" style={{ width: '100%', maxWidth: '600px', borderRadius: '20px', backgroundColor: 'var(--card-bg)', maxHeight: '90vh', overflowY: 'auto' }}>
             <div className="flex justify-between items-center mb-6 border-b border-slate-200 dark:border-slate-700 pb-4">
               <h2 className="text-xl sm:text-2xl font-bold text-slate-800 dark:text-slate-100 m-0">Vehicle & Route Details</h2>
@@ -2616,8 +2608,8 @@ const AdminDashboard = () => {
 
       {/* View User Details Modal (Eye Button) */}
       {viewingUser && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="animate-slide-up glass p-glass" style={{ width: '100%', maxWidth: '600px', borderRadius: '20px', backgroundColor: 'var(--card-bg)', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+          <div className="animate-slide-up glass p-glass" data-lenis-prevent="true" style={{ width: '100%', maxWidth: '600px', borderRadius: '20px', backgroundColor: 'var(--card-bg)', maxHeight: '90vh', overflowY: 'auto' }}>
             <div className="flex justify-between items-center mb-6 border-b border-slate-200 dark:border-slate-700 pb-4">
               <h2 className="text-xl sm:text-2xl font-bold text-slate-800 dark:text-slate-100 m-0">User Profile</h2>
               <button onClick={() => setViewingUser(null)} className="text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 bg-transparent border-none cursor-pointer"><X size={24} /></button>
@@ -2791,7 +2783,7 @@ const AdminDashboard = () => {
 
       {/* Bulk Upload Modal */}
       {showBulkUploadModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
           <div className="animate-slide-up glass p-glass" data-lenis-prevent="true" style={{ width: '100%', maxWidth: '800px', borderRadius: '20px', backgroundColor: 'var(--card-bg)', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl sm:text-2xl font-bold text-slate-800 dark:text-slate-100 m-0 flex items-center gap-2">
@@ -2868,7 +2860,7 @@ const AdminDashboard = () => {
 
       {/* Add/Edit User Modal */}
       {showUserModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
           <div className="animate-slide-up glass p-glass" data-lenis-prevent="true" style={{ width: '100%', maxWidth: '500px', maxHeight: '90vh', overflowY: 'auto', borderRadius: '20px', backgroundColor: 'var(--card-bg)' }}>
             <h2 style={{ marginBottom: '1.5rem', color: 'var(--text-dark)' }}>{editingUser ? 'Edit User' : 'Add New User'}</h2>
             <form onSubmit={handleSaveUser} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -2882,12 +2874,23 @@ const AdminDashboard = () => {
               </div>
               <div>
                 <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Password {editingUser && '(Leave blank to keep current)'}</label>
-                <input required={!editingUser} type="text" value={userFormData.password} onChange={e => setUserFormData({ ...userFormData, password: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
+                <input required={!editingUser} type="password" autoComplete="new-password" value={userFormData.password} onChange={e => setUserFormData({ ...userFormData, password: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
               </div>
               <div className="flex flex-col sm:flex-row gap-4">
                 <div style={{ flex: 1 }}>
                   <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Role</label>
-                  <select value={userFormData.role} onChange={e => setUserFormData({ ...userFormData, role: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }}>
+                  <select value={userFormData.role} onChange={e => {
+                    const role = e.target.value;
+                    setUserFormData(prev => ({
+                      ...prev,
+                      role,
+                      // Only passengers and drivers belong to a route —
+                      // dropping the role used to silently keep the stale
+                      // route assignment in the payload.
+                      route_id: (role === 'passenger' || role === 'driver') ? prev.route_id : '',
+                      fee_status: role === 'passenger' ? prev.fee_status : 'paid',
+                    }));
+                  }} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }}>
                     <option value="passenger">Student / Passenger</option>
                     <option value="teacher">Teacher / Staff</option>
                     <option value="parent">Parent</option>
@@ -2896,15 +2899,18 @@ const AdminDashboard = () => {
                     <option value="admin">Admin</option>
                   </select>
                 </div>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Route</label>
-                  <select value={userFormData.route_id} onChange={e => setUserFormData({ ...userFormData, route_id: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: 'var(--card-bg)' }}>
-                    {routesList.map(r => (
-                      <option key={r.routeId || r.route_id} value={r.routeId || r.route_id}>Route {r.routeId || r.route_id} - {r.routeName || r.route_name} (Bus: {r.busNumber || r.bus_number})</option>
-                    ))}
-                    {routesList.length === 0 && <option value="">No Routes Found</option>}
-                  </select>
-                </div>
+                {(userFormData.role === 'passenger' || userFormData.role === 'driver') && (
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Route {userFormData.role === 'passenger' ? '' : '(Optional)'}</label>
+                    <select value={userFormData.route_id} onChange={e => setUserFormData({ ...userFormData, route_id: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: 'var(--card-bg)' }}>
+                      {userFormData.role === 'driver' && <option value="">Not Assigned</option>}
+                      {routesList.map(r => (
+                        <option key={r.routeId || r.route_id} value={r.routeId || r.route_id}>Route {r.routeId || r.route_id} - {r.routeName || r.route_name} (Bus: {r.busNumber || r.bus_number})</option>
+                      ))}
+                      {routesList.length === 0 && <option value="">No Routes Found</option>}
+                    </select>
+                  </div>
+                )}
               </div>
               {userFormData.role === 'teacher' && (
                 <div>
@@ -3022,9 +3028,6 @@ const AdminDashboard = () => {
               )}
               <div className="flex flex-col sm:flex-row gap-4 mt-4">
                 <button type="button" onClick={() => setShowUserModal(false)} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', background: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Cancel</button>
-                {editingUser && (editingUser.faceEnrolledAt || editingUser.face_enrolled_at || editingUser.aws_face_id || editingUser.awsFaceId) && (
-                  <button type="button" onClick={() => handleRemoveFace(editingUser.login_id || editingUser.loginId)} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '1px solid #cf1322', background: '#fff1f0', color: '#cf1322', cursor: 'pointer', fontWeight: 'bold' }}>Remove Face</button>
-                )}
                 {editingUser && (editingUser.faceResetRequestedAt || editingUser.face_reset_requested_at) && (
                   <button type="button" onClick={async () => {
                     const loginId = editingUser.login_id || editingUser.loginId;
@@ -3049,7 +3052,7 @@ const AdminDashboard = () => {
 
       {/* Add/Edit Route Modal */}
       {showRouteModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
           <div className="animate-slide-up glass p-glass" data-lenis-prevent="true" style={{ width: '100%', maxWidth: '500px', maxHeight: '90vh', overflowY: 'auto', borderRadius: '20px', backgroundColor: 'var(--card-bg)' }}>
             <h2 style={{ marginBottom: '1.5rem', color: 'var(--text-dark)' }}>{editingRoute ? 'Edit Route' : 'Add New Route'}</h2>
             <form onSubmit={handleSaveRoute} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>

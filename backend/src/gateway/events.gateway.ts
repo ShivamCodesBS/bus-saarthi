@@ -30,8 +30,10 @@ export class EventsGateway
 
   private logger: Logger = new Logger('EventsGateway');
 
-  // Track online users: loginId -> socketId
-  private onlineUsers = new Map<string, string>();
+  // Per-route throttle for the wake-alarm engine (it otherwise runs a
+  // users-table query on every single GPS point).
+  private lastWakeAlarmCheck = new Map<string, number>();
+  private static WAKE_ALARM_CHECK_INTERVAL_MS = 5000;
 
   constructor(
     private jwtService: JwtService,
@@ -43,19 +45,37 @@ export class EventsGateway
     this.logger.log('WebSocket Gateway Initialized');
   }
 
+  /**
+   * Verify the JWT the client passed in `auth.token` (or the Authorization
+   * header). Authenticated sockets are auto-joined to `user_<login_id>` so
+   * targeted events (personal notifications, profile updates, grievance
+   * updates on your own complaint) reach every tab without the client having
+   * to join anything. Anonymous sockets are allowed — the deployed Flutter
+   * bus app and public route tracking connect without a JWT.
+   */
   handleConnection(client: Socket, ...args: any[]) {
-    this.logger.log(`Client connected: ${client.id}`);
+    const token =
+      client.handshake?.auth?.token ||
+      client.handshake?.headers?.authorization?.replace(/^Bearer\s+/i, '');
+    if (!token) return;
+
+    try {
+      const decoded: any = this.jwtService.verify(token);
+      const loginId = decoded?.login_id || decoded?.loginId;
+      if (loginId) {
+        client.data.loginId = loginId;
+        client.data.role = decoded.role;
+        client.join(`user_${loginId}`);
+      }
+    } catch {
+      this.logger.warn(
+        `Client ${client.id} presented an invalid token — treated as anonymous`,
+      );
+    }
   }
 
   handleDisconnect(client: Socket) {
-    this.logger.log(`Client disconnected: ${client.id}`);
-    // Remove from online users map
-    for (const [loginId, socketId] of this.onlineUsers.entries()) {
-      if (socketId === client.id) {
-        this.onlineUsers.delete(loginId);
-        break;
-      }
-    }
+    // Rooms are cleaned up automatically by socket.io.
   }
 
   @SubscribeMessage('join_route')
@@ -66,14 +86,15 @@ export class EventsGateway
     const routeId = typeof payload === 'object' ? payload.route_id : payload;
     client.join(`route_${routeId}`);
 
-    // Track user's socket if they include loginId
-    const loginId = payload?.login_id || payload?.loginId;
-    if (loginId) {
-      this.onlineUsers.set(loginId, client.id);
+    // Sockets that authenticated on connection are already in their
+    // `user_<login_id>` room. Anonymous clients may still identify
+    // themselves here for backward compatibility.
+    const loginId =
+      client.data?.loginId || payload?.login_id || payload?.loginId;
+    if (loginId && !client.data?.loginId) {
       client.join(`user_${loginId}`);
     }
 
-    this.logger.log(`Client ${client.id} joined route_${routeId}`);
     return { event: 'subscribed', data: routeId };
   }
 
@@ -107,12 +128,12 @@ export class EventsGateway
       }
 
       client.join('admin_room');
-      this.logger.log(`Client ${client.id} joined admin_room`);
       return { event: 'subscribed', data: 'admin_room' };
     } catch (error) {
-      this.logger.warn(
-        `Failed admin join for client ${client.id}: ${error.message}`,
-      );
+      this.logger.warn(`Failed admin join for client ${client.id}: ${error.message}`);
+      // Tell the client instead of silently killing the connection —
+      // a silent disconnect looks exactly like "the dashboard is broken".
+      client.emit('admin_join_failed', { message: error.message });
       client.disconnect();
     }
   }
@@ -148,8 +169,8 @@ export class EventsGateway
     };
     this.server.to(`route_${routeId}`).emit('live_telemetry', formattedPayload);
 
-    // Run wake alarm engine on every GPS update from bus
-    await this.checkWakeAlarms(lat, lng, routeId);
+    // Run wake alarm engine on GPS updates from bus (throttled per route)
+    this.maybeCheckWakeAlarms(lat, lng, routeId);
   }
 
   @OnEvent('system.metrics')
@@ -189,7 +210,7 @@ export class EventsGateway
 
     // Check wake alarms for all users on this route
     if (lat && lng) {
-      await this.checkWakeAlarms(lat, lng, payload.route_id);
+      this.maybeCheckWakeAlarms(lat, lng, payload.route_id);
     }
   }
 
@@ -204,7 +225,7 @@ export class EventsGateway
   @OnEvent('merge.executed')
   handleMergeExecuted(payload: any) {
     const { mergeEvent, cancelledRoute, targetRoute, cancelledStudentCount } = payload;
-    
+
     // Broadcast to admin room (Transport Incharge & Admin dashboards)
     this.server.to('admin_room').emit('merge_executed', payload);
 
@@ -213,34 +234,35 @@ export class EventsGateway
       mergeEventId: mergeEvent.id,
       cancelledRouteId: mergeEvent.cancelledRouteId,
       newRouteId: mergeEvent.targetRouteId,
-      newBusNumber: targetRoute.busNumber,
-      newRouteName: targetRoute.routeName,
+      newBusNumber: targetRoute?.busNumber,
+      newRouteName: targetRoute?.routeName,
       reason: mergeEvent.reason,
-      message: `Your bus (${cancelledRoute.busNumber}) has been cancelled. Please board Bus ${targetRoute.busNumber} (${targetRoute.routeName}).`,
+      message: `Your bus (${cancelledRoute?.busNumber || mergeEvent.cancelledRouteName || 'assigned'}) has been cancelled. Please board Bus ${targetRoute?.busNumber || 'the replacement'} (${targetRoute?.routeName || 'replacement route'}).`,
     });
 
     // Broadcast to students/drivers on the target route
     this.server.to(`route_${mergeEvent.targetRouteId}`).emit('students_incoming', {
-      fromRoute: cancelledRoute.routeName,
-      fromBus: cancelledRoute.busNumber,
+      fromRoute: cancelledRoute?.routeName,
+      fromBus: cancelledRoute?.busNumber,
       fromRouteId: mergeEvent.cancelledRouteId,
       count: cancelledStudentCount,
-      message: `${cancelledStudentCount} students from ${cancelledRoute.routeName} (Bus ${cancelledRoute.busNumber}) are merged into your bus.`,
+      message: `${cancelledStudentCount ?? 'Some'} students from ${cancelledRoute?.routeName || 'another route'} (Bus ${cancelledRoute?.busNumber || '—'}) are merged into your bus.`,
     });
   }
 
   @OnEvent('merge.undone')
   handleMergeUndone(payload: any) {
-    const { merge } = payload;
+    // Support both field names for backward compatibility
+    const mergeEvent = payload.mergeEvent || payload.merge;
     
     this.server.to('admin_room').emit('merge_undone', payload);
-    this.server.to(`route_${merge.cancelledRouteId}`).emit('route_restored', {
-      cancelledRouteId: merge.cancelledRouteId,
-      message: `Your original bus route (${merge.cancelledRouteName}) has been restored.`,
+    this.server.to(`route_${mergeEvent.cancelledRouteId}`).emit('route_restored', {
+      cancelledRouteId: mergeEvent.cancelledRouteId,
+      message: `Your original bus route (${mergeEvent.cancelledRouteName}) has been restored.`,
     });
-    this.server.to(`route_${merge.targetRouteId}`).emit('students_removed', {
-      fromRouteId: merge.cancelledRouteId,
-      message: `Merge with ${merge.cancelledRouteName} was undone.`,
+    this.server.to(`route_${mergeEvent.targetRouteId}`).emit('students_removed', {
+      fromRouteId: mergeEvent.cancelledRouteId,
+      message: `Merge with ${mergeEvent.cancelledRouteName} was undone.`,
     });
   }
 
@@ -293,6 +315,40 @@ export class EventsGateway
     this.server.emit('global_broadcast', payload);
   }
 
+  @OnEvent('grievance.created')
+  handleGrievanceCreated(grievance: any) {
+    // Route rooms are joined by any student on that bus — never leak the
+    // reporter's real name/login there. The admin room gets the full record.
+    this.server.to(`route_${grievance.route}`).emit('new_grievance', this.maskGrievance(grievance));
+    this.server.to('admin_room').emit('new_grievance', grievance);
+  }
+
+  @OnEvent('grievance.updated')
+  handleGrievanceUpdated(grievance: any) {
+    this.server.to(`route_${grievance.route}`).emit('grievance_updated', this.maskGrievance(grievance));
+    this.server.to('admin_room').emit('grievance_updated', grievance);
+    if (grievance.loginId) {
+      // The reporter may follow their own complaint from another tab.
+      this.server.to(`user_${grievance.loginId}`).emit('grievance_updated', grievance);
+    }
+  }
+
+  /**
+   * Strip identity fields before broadcasting a grievance to a route room.
+   * The login id is always removed; the reporter's name survives only when
+   * they chose NOT to post anonymously (that is what the toggle means).
+   */
+  private maskGrievance(grievance: any) {
+    if (!grievance || typeof grievance !== 'object') return grievance;
+    const { loginId, login_id, realName, ...rest } = grievance;
+    if (grievance.isAnonymous) {
+      // When anonymous, strip realName entirely from route-room payload
+      return rest;
+    }
+    // Not anonymous: keep realName (already in rest)
+    return rest;
+  }
+
   /**
    * Deliver a personal in-app notification to the user's open tabs.
    * The persistent record lives in the `notifications` table; this is the
@@ -301,18 +357,46 @@ export class EventsGateway
   @OnEvent('notification.created')
   handleNotificationCreated(payload: any) {
     if (!payload?.login_id) return;
-    const socketId = this.onlineUsers.get(payload.login_id);
-    if (socketId) {
-      this.server.to(socketId).emit('notification', payload);
-    }
-    // Also broadcast on a per-login channel so tabs that joined the route
-    // room still receive it.
+    // One emit to the user's room covers every tab and device. The payload
+    // carries the created notification row (id, created_at) so the client
+    // can mark it read later.
     this.server.to(`user_${payload.login_id}`).emit('notification', payload);
   }
 
   /**
+   * Handle user profile updates and broadcast to the user's open tabs.
+   * This ensures the admin dashboard, profile page, and other tabs
+   * all stay in sync when an admin updates a user's details.
+   */
+  @OnEvent('user.updated')
+  handleUserUpdated(payload: any) {
+    if (!payload?.loginId) return;
+    const { loginId, name, profilePic } = payload;
+
+    // The user's room reaches every tab/device of that user.
+    this.server.to(`user_${loginId}`).emit('profile_update', {
+      login_id: loginId,
+      name,
+      profile_pic: profilePic,
+    });
+  }
+
+  /**
+   * Throttled entry point — GPS can arrive several times per second, but the
+   * alarm check hits the users table, so it runs at most once every few
+   * seconds per route.
+   */
+  private maybeCheckWakeAlarms(busLat: number, busLng: number, routeId: string) {
+    const now = Date.now();
+    const last = this.lastWakeAlarmCheck.get(String(routeId)) || 0;
+    if (now - last < EventsGateway.WAKE_ALARM_CHECK_INTERVAL_MS) return;
+    this.lastWakeAlarmCheck.set(String(routeId), now);
+    void this.checkWakeAlarms(busLat, busLng, routeId);
+  }
+
+  /**
    * Server-side wake alarm engine.
-   * Runs on every telemetry event. Compares bus location vs saved user location.
+   * Runs on telemetry events (throttled). Compares bus location vs saved user location.
    * Fires Web Push if bus is within user's set threshold km.
    * User's phone GPS does NOT need to be on — we use their saved location.
    */
@@ -336,10 +420,6 @@ export class EventsGateway
         const distanceKm = distanceMeters / 1000;
 
         if (distanceKm <= alarm.thresholdKm) {
-          this.logger.log(
-            `Wake alarm triggered for ${u.loginId}: bus is ${distanceKm.toFixed(2)}km away`,
-          );
-
           // 1. Send Web Push Notification (works even if app/browser is closed)
           await this.notificationsService.sendPushNotification(u.loginId, {
             title: '🚌 Your Bus is Near!',
@@ -348,16 +428,13 @@ export class EventsGateway
             badge: '/icons/bus-72x72.png',
             tag: 'wake-alarm',
             requireInteraction: true,
-          });
+          }).catch(() => {});
 
-          // 2. If user's browser tab is currently open, also emit socket event
-          const socketId = this.onlineUsers.get(u.loginId);
-          if (socketId) {
-            this.server.to(socketId).emit('wake_alarm_trigger', {
-              distanceKm: parseFloat(distanceKm.toFixed(2)),
-              message: `Bus is ${distanceKm.toFixed(1)}km away!`,
-            });
-          }
+          // 2. If the user has a tab open, ring the in-app alarm
+          this.server.to(`user_${u.loginId}`).emit('wake_alarm_trigger', {
+            distanceKm: parseFloat(distanceKm.toFixed(2)),
+            message: `Bus is ${distanceKm.toFixed(1)}km away!`,
+          });
 
           // 3. Mark alarm as fired for today — preserves push subscription
           await this.usersService.markAlarmFired(u.loginId, today);

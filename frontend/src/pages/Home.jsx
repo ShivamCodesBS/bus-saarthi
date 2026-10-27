@@ -1,9 +1,6 @@
 import toast from 'react-hot-toast';
-import { useState, useEffect, useRef } from 'react';
-import { Bus, Menu, MapPin, Phone, User, Maximize2, X, Compass, Activity, Navigation, Wind, AlertOctagon, Bell, AlarmClock, Users, Home as HomeIcon, Settings, LogOut, MessageSquare, GitMerge, Trash2 } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { Bus, Menu, MapPin, Phone, User, X, Compass, Activity, Navigation, Wind, AlertOctagon, Bell, AlarmClock, Users, Home as HomeIcon, Settings, LogOut, MessageSquare, GitMerge, Trash2 } from 'lucide-react';
 import HamburgerMenu from '../components/HamburgerMenu';
 import UserAvatar from '../components/UserAvatar';
 import WakeAlarmModal from '../components/WakeAlarmModal';
@@ -19,75 +16,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { friendlyError } from '../lib/errors';
-
-// Fix for default marker icon in react-leaflet
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-});
-
-// Custom Bus Icon
-const busIcon = new L.Icon({
-  iconUrl: 'https://cdn-icons-png.flaticon.com/512/3448/3448339.png',
-  iconSize: [35, 35],
-  iconAnchor: [17, 17],
-});
-
-// Component to handle map container resizing and CSS animations
-const MapResizer = () => {
-  const map = useMap();
-  useEffect(() => {
-    // Invalidate size after delay to account for CSS transition-all duration-500
-    const t1 = setTimeout(() => map.invalidateSize(), 100);
-    const t2 = setTimeout(() => map.invalidateSize(), 550);
-    
-    // Robust resize handling
-    const ro = new ResizeObserver(() => {
-      map.invalidateSize();
-    });
-    const container = map.getContainer();
-    if (container) ro.observe(container);
-    
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      if (container) ro.unobserve(container);
-    };
-  }, [map]);
-  return null;
-};
-
-const STOP_COORDS = {
-  // Bareilly Core
-  'Civil Lines': [28.3615, 79.4180],
-  'Rajendra Nagar': [28.3610, 79.4501],
-  'DD Puram': [28.3715, 79.4452],
-  'Pilibhit Bypass': [28.3842, 79.4310],
-  'Invertis University': [28.3180, 79.4670],
-  'labela chowk': [28.3500, 79.4200],
-  'police line': [28.3550, 79.4250],
-  'Chauki Chauraha': [28.3580, 79.4120],
-  'Satellite Bus Stand': [28.3440, 79.4420],
-  'Bareilly Mod': [28.2500, 79.5200],
-  // Shahjahanpur Hubs
-  'Shahjahanpur': [27.8805, 79.9140],
-  'Shahjahanpur Bus Stand': [27.8820, 79.9100],
-  'Roza Junction': [27.8350, 79.9200],
-  'Tilhar': [28.0200, 79.7300],
-  'Miranpur Katra': [28.1100, 79.6200],
-  // Badaun Hubs
-  'Badaun': [28.0300, 79.1200],
-  'Badaun Road': [28.2000, 79.2800],
-  'Ujhani': [28.0100, 79.0100],
-  'Dataganj': [27.9400, 79.3500],
-  // Pilibhit & Others
-  'Pilibhit': [28.6300, 79.8000],
-  'Bisalpur': [28.3000, 79.8000],
-  'Nawabganj': [28.5400, 79.6300],
-  'Faridpur': [28.2100, 79.5400],
-};
+import { STOP_COORDS } from '../lib/stopCoords';
+import { useStaleWhileRevalidate } from '../hooks/useStaleWhileRevalidate';
+import { useModalA11y } from '../hooks/useModalA11y';
+import UnifiedMap from '../components/UnifiedMap';
 
 const Home = () => {
   const navigate = useNavigate();
@@ -126,8 +58,6 @@ const Home = () => {
     return t(dir.toLowerCase());
   };
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [showMap, setShowMap] = useState(false);
-  const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [telemetry, setTelemetry] = useState(null);
   const [alarmSet, setAlarmSet] = useState(() => localStorage.getItem('wake_alarm_enabled') === 'true');
   const [alarmLoading, setAlarmLoading] = useState(false);
@@ -139,6 +69,7 @@ const Home = () => {
   const sosTimeoutRef = useRef(null);
   const sosIntervalRef = useRef(null);
 
+  const [showMap, setShowMap] = useState(false);
   const [crowdStatus, setCrowdStatus] = useState({ filled: 0, total: 50, status: 'Loading...' });
 
   // Real Data State
@@ -147,7 +78,7 @@ const Home = () => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [hasUnread, setHasUnread] = useState(false);
   const [seenIds, setSeenIds] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('passenger_seen_notif_ids') || '[]'); } 
+    try { return JSON.parse(localStorage.getItem('passenger_seen_notif_ids') || '[]'); }
     catch { return []; }
   });
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -162,16 +93,37 @@ const Home = () => {
   // Initial Bus Location (Example: Near Invertis University, Bareilly)
   const [busLocation, setBusLocation] = useState([28.3180, 79.4670]);
   const [mapCenter, setMapCenter] = useState([28.3180, 79.4670]);
-  const [mapZoom, setMapZoom] = useState(15);
   const [isLive, setIsLive] = useState(false);
   const [autoFollow, setAutoFollow] = useState(true);
   const telemetryTimeoutRef = useRef(null);
-  const mapInstance = useRef(null);
 
   // Dynamic Effective Route ID: Switches instantly to newRouteId when merged, or keeps original if cancelled
   const effectiveRouteId = mergeInfo?.isCancelled 
     ? (user?.routeId || user?.route_id || '4')
     : (mergeInfo?.newRouteId || user?.routeId || user?.route_id || '4');
+
+  // Ref for current effective route ID so socket handlers always see the latest value
+  const effectiveRouteIdRef = useRef(effectiveRouteId);
+  effectiveRouteIdRef.current = effectiveRouteId;
+
+  // Last DB-recorded GPS fix for the route. While the bus is offline the
+  // marker sits at the last place it was actually seen, not a default pin.
+  const { data: lastKnownData } = useStaleWhileRevalidate(
+    `/api/telemetry/last/${effectiveRouteId}`,
+    { cacheKey: `home:last-loc:${effectiveRouteId}`, staleTime: 15000, token: user?.token },
+  );
+  const lastKnown = useMemo(() => {
+    const d = lastKnownData?.data;
+    if (!d?.lat || !d?.lng) return null;
+    return { position: [d.lat, d.lng], timestamp: d.timestamp, speed: d.speed };
+  }, [lastKnownData]);
+
+  // While offline, show the bus at its last DB position.
+  useEffect(() => {
+    if (!isLive && lastKnown) {
+      setBusLocation(lastKnown.position);
+    }
+  }, [isLive, lastKnown]);
 
   // Connect to Socket.IO for real-time telemetry updates and fetch initial status
   useEffect(() => {
@@ -279,21 +231,57 @@ const Home = () => {
     // Socket.io connection for live data
     const socket = io(SOCKET_URL, {
       transports: ['websocket', 'polling'],
+      auth: { token: user?.token },
       reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000
+      // No attempt cap — capping at 5 made the map go permanently dead when
+      // the backend cold-start took longer than the retries allowed.
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      // Add randomization to prevent thundering herd on backend recovery
+      randomizationFactor: 0.5,
     });
 
     socket.on('connect', () => {
+      console.log('✅ Socket connected');
       const loginId = user?.loginId || user?.login_id;
       socket.emit('join_route', { route_id: effectiveRouteId, login_id: loginId });
+    });
+
+    socket.on('connect_error', (err) => {
+      console.warn('⚠️ Socket connection error:', err.message);
+      // Show user-friendly reconnection feedback
+      toast('📡 Reconnecting to live tracking...', {
+        duration: 2000,
+        icon: '🔄',
+        id: 'socket-reconnect',
+        style: { borderRadius: '12px', fontWeight: 600 },
+      });
+    });
+
+    socket.on('reconnect', (attemptNumber) => {
+      console.log(`✅ Socket reconnected after ${attemptNumber} attempts`);
+      toast.success('Live tracking restored!', {
+        duration: 3000,
+        id: 'socket-reconnect',
+        icon: '✅',
+      });
+    });
+
+    socket.on('disconnect', (reason) => {
+      console.warn('⚠️ Socket disconnected:', reason);
+      if (reason === 'io server disconnect') {
+        // Server disconnected, try to reconnect
+        socket.connect();
+      }
     });
 
     let telemetryTimeout;
 
     // Listen for live telemetry data
     socket.on('live_telemetry', (data) => {
-      if (data.route_id && String(data.route_id) !== String(effectiveRouteId)) return;
+      // Use ref to always get current effective route ID (avoids stale closure)
+      const currentRouteId = effectiveRouteIdRef.current;
+      if (data.route_id && String(data.route_id) !== String(currentRouteId)) return;
       if (data.location && data.location.lat && data.location.lng) {
         setBusLocation([data.location.lat, data.location.lng]);
         setIsLive(true);
@@ -309,10 +297,12 @@ const Home = () => {
       });
 
       if (telemetryTimeoutRef.current) clearTimeout(telemetryTimeoutRef.current);
+      // Extended timeout: 30s instead of 15s for better mobile network resilience
+      // Prevents map from showing "OFFLINE" during brief signal gaps at traffic signals
       telemetryTimeoutRef.current = setTimeout(() => {
         setTelemetry(null);
         setIsLive(false);
-      }, 5000);
+      }, 30000);
     });
 
     socket.on('live_attendance', () => {
@@ -321,6 +311,11 @@ const Home = () => {
 
     // Listen for real-time bus merge event
     socket.on('your_route_merged', (data) => {
+      // Leave the old route room before joining the new one
+      const oldRouteId = effectiveRouteIdRef.current;
+      if (oldRouteId && data.newRouteId && String(oldRouteId) !== String(data.newRouteId)) {
+        socket.emit('unsubscribe_route', { route_id: oldRouteId });
+      }
       setMergeInfo(data);
       toast.error(`🚌 BUS MERGED: ${data.message}`, { duration: 10000 });
       if (data.newRouteId) {
@@ -330,6 +325,11 @@ const Home = () => {
 
     // Listen for route restored event
     socket.on('route_restored', () => {
+      // Leave the merged route room before rejoining original
+      const mergedRouteId = effectiveRouteIdRef.current;
+      if (mergedRouteId) {
+        socket.emit('unsubscribe_route', { route_id: mergedRouteId });
+      }
       setMergeInfo(null);
       toast.success('Your original bus route has been restored!', { duration: 6000 });
       const homeRouteId = user?.routeId || user?.route_id || '4';
@@ -412,10 +412,10 @@ const Home = () => {
 
     return () => {
       clearInterval(crowdInterval);
-      if (telemetryTimeout) clearTimeout(telemetryTimeout);
+      if (telemetryTimeoutRef.current) clearTimeout(telemetryTimeoutRef.current);
       setTimeout(() => socket.disconnect(), 500);
     };
-  }, [user, effectiveRouteId]);
+  }, [user, effectiveRouteId, user?.token]);
 
 
   const acknowledgeBroadcast = () => {
@@ -531,6 +531,9 @@ const Home = () => {
       [28.3400, 79.4900],
     ];
   })();
+
+  // The global broadcast popup is modal — lock the page behind it.
+  useModalA11y(!!activeBroadcast, acknowledgeBroadcast);
 
   return (
     <div className="min-h-screen w-full flex flex-col bg-transparent text-slate-900 dark:text-slate-50 transition-colors duration-300">
@@ -648,7 +651,7 @@ const Home = () => {
                           <X size={18} className="text-slate-500 dark:text-slate-400" />
                         </button>
                       </div>
-                      <div className="flex flex-col gap-3 max-h-[350px] overflow-y-auto hide-scrollbar">
+                      <div className="flex flex-col gap-3 max-h-[350px] overflow-y-auto hide-scrollbar" data-lenis-prevent="true">
                     {allNotifications.length > 0 ? (
                       allNotifications.map(notification => (
                         <div key={notification.id} className={`p-3 border rounded-xl flex gap-3 items-start ${notification.bg}`}>
@@ -794,13 +797,12 @@ const Home = () => {
 
         {/* BENTO GRID */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 transition-all duration-500">
-          
-          {/* LEFT COLUMN: Info & Telemetry
-              When the map is hidden the content must FILL the row. The old
-              `lg:col-start-3` left the first two of twelve grid columns
-              permanently empty, which made the whole page read as a narrow
-              strip floating in dead space on a wide screen. */}
-          <div className={`${showMap ? 'lg:col-span-6 xl:col-span-5' : 'lg:col-span-12 xl:col-span-12'} flex flex-col gap-8 transition-all duration-500`}>
+
+          {/* LEFT COLUMN: Info & Telemetry.
+              Stays a 12-col grid in BOTH modes so the map always sits beside
+              the content on wide screens — the old ternary dropped to
+              grid-cols-1 with the map open and threw it full-width below. */}
+          <div className={`${showMap ? 'lg:col-span-6 xl:col-span-5' : 'lg:col-span-12 xl:col-span-12'} flex flex-col gap-8 transition-all duration-500 min-w-0`}>
             
             {/* With the map hidden the column is wide, so the cards sit
                 side by side instead of one tall narrow stack. */}
@@ -894,58 +896,6 @@ const Home = () => {
               </CardContent>
             </Card>
 
-            {/* LIVE TELEMETRY CARD */}
-            <Card className="rounded-3xl border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl">
-              <CardHeader className="border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50 pb-5 px-6 pt-6">
-                <CardTitle className="flex justify-between items-center text-lg font-bold text-blue-700 dark:text-blue-400">
-                  {t('liveSensors')}
-                  <Badge variant="outline" className={`font-semibold px-3 py-1 text-sm ${telemetry ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-900' : 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-900'}`}>
-                    {telemetry && <span className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span>}
-                    {telemetry ? t('sensorLive') : t('sensorOffline')}
-                  </Badge>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-6">
-                {telemetry ? (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl flex flex-col gap-2 border border-slate-100 dark:border-slate-700">
-                      <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-[13px] font-semibold capitalize tracking-wide">
-                        <Activity size={16} className="text-blue-500" /> Speed
-                      </div>
-                      <div className="text-2xl font-black text-slate-900 dark:text-white">
-                        {telemetry.speed.toFixed(1)} <span className="text-sm font-semibold text-slate-500">km/h</span>
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl flex flex-col gap-2 border border-slate-100 dark:border-slate-700">
-                      <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-[13px] font-semibold capitalize tracking-wide">
-                        <Compass size={16} className="text-orange-500" /> Direction
-                      </div>
-                      <div className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2 mt-1">
-                        <Navigation size={18} style={{ transform: `rotate(${telemetry.heading}deg)` }} className="text-slate-700 dark:text-slate-300 transition-transform duration-500" />
-                        {getDirection(telemetry.heading)}
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-50 dark:bg-slate-800 p-4 px-5 rounded-2xl col-span-2 flex justify-between items-center border border-slate-100 dark:border-slate-700">
-                      <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-sm font-semibold capitalize tracking-wide">
-                        <Wind size={18} className={telemetry.comfort === 'Smooth' ? 'text-green-500' : 'text-orange-500'} /> {t('rideComfort')}
-                      </div>
-                      <div className={`text-base font-bold ${telemetry.comfort === 'Smooth' ? 'text-green-600 dark:text-green-400' : 'text-orange-500'}`}>
-                        {translateComfort(telemetry.comfort)}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-8 text-center bg-red-50 dark:bg-red-950/20 rounded-2xl border-2 border-dashed border-red-200 dark:border-red-900/50 flex flex-col items-center gap-2">
-                    <AlertOctagon size={32} className="text-red-500 mb-2 opacity-50" />
-                    <p className="m-0 font-bold text-red-600 dark:text-red-400">{t('sensorsNotConnected')}</p>
-                    <p className="m-0 text-sm text-red-500/70 dark:text-red-400/70">{t('waitingForHardware')}</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
             {!showMap && (
               <Button
                 variant="secondary"
@@ -967,7 +917,18 @@ const Home = () => {
                    <div className="absolute left-2 top-2 bottom-4 w-0.5 bg-slate-200 dark:bg-slate-700 z-0"></div>
                    
                    {(() => {
-                      const stopsArray = routeInfo?.stops ? routeInfo.stops.split(',').map(s => s.trim()) : ['Civil Lines', 'Rajendra Nagar', 'DD Puram', 'Invertis University'];
+                      // stops may arrive as a JSON array string, a comma
+                      // list, or an array — normalise before rendering.
+                      const parseStops = (raw) => {
+                        if (!raw) return ['Civil Lines', 'Rajendra Nagar', 'DD Puram', 'Invertis University'];
+                        if (Array.isArray(raw)) return raw.map((s) => (typeof s === 'object' && s) ? (s.name || s.stopName) : String(s));
+                        try {
+                          const parsed = JSON.parse(raw);
+                          if (Array.isArray(parsed)) return parsed.map((s) => (typeof s === 'object' && s) ? (s.name || s.stopName) : String(s));
+                        } catch { /* plain comma list */ }
+                        return String(raw).split(',').map((s) => s.trim().replace(/^["\']+|["\']+$/g, ''));
+                      };
+                      const stopsArray = parseStops(routeInfo?.stops);
 
                       const getDistance = (lat1, lon1, lat2, lon2) => {
                         const R = 6371;
@@ -1024,94 +985,38 @@ const Home = () => {
 
           </div>
 
-          {/* RIGHT COLUMN: Real Leaflet Map */}
-          <div className={`lg:col-span-6 xl:col-span-7 flex-col min-h-[450px] h-full ${showMap ? 'flex animate-in slide-in-from-right-8 fade-in duration-500' : 'hidden'}`}>
-            <Card className="rounded-3xl border-4 border-blue-500/20 shadow-lg overflow-hidden flex-1 relative flex flex-col bg-slate-100 dark:bg-slate-800">
+          {/* RIGHT COLUMN: Real Leaflet Map — fixed height, and min-h-0 on
+              every flex level so the map host fills the card exactly. */}
+          <div className={`lg:col-span-6 xl:col-span-7 h-[520px] xl:h-[640px] min-h-0 ${showMap ? 'flex animate-in slide-in-from-right-8 fade-in duration-500' : 'hidden'}`}>
+            <Card className="rounded-3xl border-4 border-blue-500/20 shadow-lg overflow-hidden flex-1 relative flex flex-col min-h-0 bg-slate-100 dark:bg-slate-800">
               <div className="bg-blue-600/95 backdrop-blur-md text-white p-3 px-5 flex justify-between items-center z-10 shrink-0">
                 <h3 className="font-bold flex items-center gap-2 text-sm">
-                  <MapPin size={16} /> GPS Tracking: <span className="text-orange-200 font-medium">Live</span>
+                  <MapPin size={16} /> GPS Tracking
                 </h3>
-                <div className="flex gap-2">
-                  <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 h-8 w-8 rounded-full" onClick={() => setIsMapExpanded(true)} title="Expand Map">
-                    <Maximize2 size={16} />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 h-8 w-8 rounded-full" onClick={() => setShowMap(false)} title="Close Map">
-                    <X size={16} />
-                  </Button>
-                </div>
+                <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 h-8 w-8 rounded-full" onClick={() => setShowMap(false)} title="Close Map">
+                  <X size={16} />
+                </Button>
               </div>
-
-              <div className="flex-1 relative z-0">
-                {/* Status indicator */}
-                <div className="absolute top-3 left-3 right-3 z-10 flex justify-between items-start pointer-events-none">
-                  <div className="pointer-events-auto">
-                    <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-white/90 backdrop-blur-sm shadow-lg border ${
-                      isLive ? 'border-green-200 text-green-700' : 'border-orange-200 text-orange-700'
-                    }`}>
-                      <span className={`w-2 h-2 rounded-full ${isLive ? 'bg-green-500 animate-pulse' : 'bg-orange-500'}`} />
-                      {isLive ? 'LIVE' : 'OFFLINE'}
-                    </div>
-                  </div>
-                  <div className="pointer-events-auto ml-auto">
-                    <button
-                      onClick={() => {
-                        setAutoFollow(true);
-                        setMapCenter(busLocation);
-                        setMapZoom(16);
-                      }}
-                      title="Recenter on bus"
-                      className="p-2 rounded-full bg-white/90 backdrop-blur-sm shadow-lg border border-slate-200 hover:bg-slate-50 transition-all"
-                    >
-                      <div className="w-8 h-8 flex items-center justify-center">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-blue-600">
-                          <circle cx="12" cy="12" r="3" />
-                          <path d="M12 2v2M12 20v2M2 12h2M20 12h2" />
-                        </svg>
-                      </div>
-                    </button>
-                  </div>
-                </div>
-
-                <MapContainer 
-                  center={mapCenter} 
-                  zoom={mapZoom} 
-                  style={{ height: '100%', width: '100%' }} 
-                  zoomControl={false}
-                  whenCreated={(map) => { mapInstance.current = map; }}
-                >
-                  <MapResizer />
-                  <TileLayer
-                    url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
-                    attribution='&copy; Google Maps'
-                  />
-                  
-                  {/* Bus Marker */}
-                  <Marker position={busLocation} icon={busIcon}>
-                    <Popup>
-                      <b>Bus {routeInfo?.busNumber || routeInfo?.bus_number || 'UP 25 AB 1234'}</b><br />
-                      Speed: {telemetry ? telemetry.speed.toFixed(0) : 0} km/h<br />
-                      {isLive ? '🟢 Live' : '🟠 Offline'}
-                    </Popup>
-                  </Marker>
-                </MapContainer>
-
-                {/* Auto-follow toggle */}
-                <div className="absolute bottom-3 right-3 z-10 pointer-events-auto">
-                  <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-white/90 backdrop-blur-sm shadow-lg border border-slate-200 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={autoFollow}
-                      onChange={(e) => {
-                        setAutoFollow(e.target.checked);
-                        if (e.target.checked) {
-                          setMapCenter(busLocation);
-                          setMapZoom(16);
-                        }
-                      }}
-                      className="w-4 h-4 accent-blue-600 cursor-pointer"
-                    />
-                    <span>Auto-follow bus</span>
-                  </label>
+              <div className="flex-1 relative z-0 min-h-0">
+                {/* Absolute host: the map fills the card exactly, immune to
+                    percentage-height chains anywhere up the tree. */}
+                <div className="absolute inset-0 z-0">
+                <UnifiedMap
+                  busLocation={busLocation}
+                  routeInfo={routeInfo}
+                  telemetry={telemetry}
+                  isLive={isLive}
+                  initialZoom={15}
+                  height="100%"
+                  busLabel={`Bus ${routeInfo?.busNumber || routeInfo?.bus_number || 'UP 25 AB 1234'}`}
+                  lastKnown={lastKnown}
+                  showFullscreenButton={true}
+                  showAutoFollowToggle={true}
+                  showRecenterButton={true}
+                  showTelemetryPanel={true}
+                  showRoutePolyline={true}
+                  showDestinationMarker={true}
+                />
                 </div>
               </div>
             </Card>
@@ -1127,36 +1032,7 @@ const Home = () => {
         </div>
       </main>
 
-      {/* EXPANDED MAP MODAL */}
-      {isMapExpanded && (
-        <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-md z-[100] flex flex-col animate-in fade-in duration-200">
-          <div className="p-4 md:px-6 flex justify-between items-center bg-blue-700 text-white shrink-0 shadow-md">
-            <h2 className="font-bold flex items-center gap-2 text-lg">
-              <MapPin size={20} /> Full Screen Tracking
-            </h2>
-            <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 rounded-full" onClick={() => setIsMapExpanded(false)}>
-              <X size={24} />
-            </Button>
-          </div>
-          <div className="flex-1 z-0 relative">
-            <MapContainer center={busLocation} zoom={15} style={{ height: '100%', width: '100%' }}>
-              <MapResizer />
-              <TileLayer
-                url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
-                attribution='&copy; Google Maps'
-              />
-              <Marker position={busLocation} icon={busIcon}>
-                <Popup><b>Bus {routeInfo?.busNumber || routeInfo?.bus_number || 'UP 25 AB 1234'}</b><br />Speed: {telemetry ? telemetry.speed.toFixed(0) : 0} km/h</Popup>
-              </Marker>
-              <Polyline positions={dynamicRoutePolyline} color="#0056b3" weight={6} />
-              <Marker position={dynamicRoutePolyline[dynamicRoutePolyline.length - 1]}>
-                <Popup>Destination</Popup>
-              </Marker>
-            </MapContainer>
-          </div>
-        </div>
-      )}
-
+      
       {/* GLOBAL BROADCAST POPUP */}
       {activeBroadcast && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[200] flex items-center justify-center p-4 animate-in fade-in duration-300">
@@ -1172,7 +1048,7 @@ const Home = () => {
             </div>
             <div className="p-5 flex flex-col gap-4 bg-slate-50 dark:bg-slate-900/50">
               <p className="text-xs text-slate-500 text-center font-medium">
-                {t('sentBy')}: {activeBroadcast.sender} • {new Date(activeBroadcast.timestamp).toLocaleTimeString()}
+                {t('sentBy')}: {activeBroadcast.sender} • {new Date(activeBroadcast.timestamp).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })}
               </p>
               <Button onClick={acknowledgeBroadcast} size="lg" className="w-full rounded-2xl font-bold shadow-md h-12">
                 {t('acknowledgeClose')}

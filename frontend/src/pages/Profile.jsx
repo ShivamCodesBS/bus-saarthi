@@ -34,6 +34,9 @@ import { useLang } from '../context/LanguageContext';
 import '../index.css';
 import { friendlyError } from '../lib/errors';
 import UserAvatar from '../components/UserAvatar';
+import { useStaleWhileRevalidate } from '../hooks/useStaleWhileRevalidate';
+import { ProfileSkeleton, AttendanceGridSkeleton } from '../components/ui/skeleton';
+import { setCacheData } from '../hooks/useStaleWhileRevalidate';
 
 /** How each role is presented. The fields shown come from the User model. */
 const ROLE_META = {
@@ -93,77 +96,60 @@ const Profile = () => {
   const { t } = useLang();
   const fileInputRef = useRef(null);
 
-  const [profile, setProfile] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [attendance, setAttendance] = useState(null);
-  const [showIdCard, setShowIdCard] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [showIdCard, setShowIdCard] = useState(false); // ADD THIS
 
   const loginId = user?.loginId || user?.login_id || user?.id;
   const role = user?.role || 'passenger';
   const roleMeta = ROLE_META[role] || ROLE_META.passenger;
   const RoleIcon = roleMeta.Icon;
 
-  /**
-   * Load the profile from the server.
-   *
-   * The session in localStorage only holds the login-time snapshot, so the
-   * fee status, the picture and the route shown here were stale — a
-   * passenger whose fee was changed to unpaid still saw "Fee Paid" until
-   * they signed in again. `/api/users/me` is the live record.
-   */
-  const loadProfile = useCallback(async () => {
-    if (!loginId) {
-      setIsLoading(false);
-      return;
-    }
-    try {
-      const res = await axios.get(`${BACKEND_URL}/api/users/me`, {
-        headers: { Authorization: `Bearer ${user?.token}` },
-      });
-      setProfile(res.data);
-
-      // Keep the cached session in step with the server copy.
+  // Stale-while-revalidate for profile data
+  const {
+    data: profile,
+    isLoading: profileLoading,
+    isStale: profileStale,
+    refetch: refetchProfile,
+    setToken: setProfileToken,
+  } = useStaleWhileRevalidate('/api/users/me', {
+    cacheKey: 'user:profile',
+    staleTime: 60000, // 60 seconds
+    skip: !loginId,
+    token: user?.token, // Pass initial token
+    networkFirst: true, // Never flash the cached pic/name before fresh data lands
+    onData: (data) => {
+      // Keep localStorage session in sync
       if (user) {
         login({
           ...user,
-          profile_pic: res.data.profilePic ?? user.profile_pic,
-          fee_status: res.data.feeStatus ?? user.fee_status,
-          route_id: res.data.routeId ?? user.route_id,
-          name: res.data.name ?? user.name,
+          profile_pic: data.profilePic ?? user.profile_pic,
+          fee_status: data.feeStatus ?? user.fee_status,
+          route_id: data.routeId ?? user.route_id,
+          name: data.name ?? user.name,
         });
       }
-    } catch (err) {
-      console.error('Failed to load profile', err);
-      toast.error(
-        friendlyError(err, 'We could not load your profile. Please try again.'),
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  }, [loginId, user?.token]);
+    },
+  });
 
-  /**
-   * Load the attendance summary. The raw records are one per boarding; the
-   * summary is a per-day present/absent list, which is what this page shows.
-   */
-  const loadAttendance = useCallback(async () => {
-    if (!loginId) return;
-    try {
-      const res = await axios.get(
-        `${BACKEND_URL}/api/attendance/user/${loginId}/summary?days=7`,
-        { headers: { Authorization: `Bearer ${user?.token}` } },
-      );
-      setAttendance(res.data?.data ?? null);
-    } catch (err) {
-      console.error('Failed to load attendance', err);
-    }
-  }, [loginId, user?.token]);
+  // Stale-while-revalidate for attendance summary
+  const {
+    data: attendance,
+    isLoading: attendanceLoading,
+    isStale: attendanceStale,
+    refetch: refetchAttendance,
+    setToken: setAttendanceToken,
+  } = useStaleWhileRevalidate(`/api/attendance/user/${loginId}/summary?days=7`, {
+    cacheKey: `user:attendance:${loginId}`,
+    staleTime: 30000, // 30 seconds
+    skip: !loginId,
+    token: user?.token, // Pass initial token
+    networkFirst: true, // Same reason as the profile: no stale grid flash
+  });
 
-  useEffect(() => {
-    loadProfile();
-    loadAttendance();
-  }, [loadProfile, loadAttendance]);
+  // No need for token sync useEffect - tokens passed directly to hooks
+
+  // Show skeleton while initial load, then show cached data immediately
+  const isInitialLoading = profileLoading && !profile;
 
   const handleProfilePicUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -181,7 +167,9 @@ const Profile = () => {
         { headers: { Authorization: `Bearer ${user?.token}` } },
       );
       if (res.data.status === 'success') {
-        setProfile((p) => ({ ...p, profilePic: res.data.url }));
+        // Update cache immediately for instant UI feedback (disk entry too,
+        // so the next visit doesn't flash the pre-upload picture)
+        setCacheData('user:profile', { ...profile, profilePic: res.data.url }, user?.token);
         login({ ...user, profile_pic: res.data.url });
         toast.success('Profile picture updated!', { id: loadingToast });
       } else {
@@ -196,7 +184,6 @@ const Profile = () => {
       );
     } finally {
       setIsUploading(false);
-      // Allow the same file to be selected again.
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -380,8 +367,12 @@ const Profile = () => {
           alignItems: 'start',
         }}
       >
-        {/* ── Identity card ─────────────────────────────────────── */}
-        <section
+        {isInitialLoading ? (
+          <ProfileSkeleton />
+        ) : (
+          <>
+            {/* ── Identity card ─────────────────────────────────────── */}
+            <section
           className="glass"
           style={{
             borderRadius: '18px',
@@ -942,21 +933,13 @@ const Profile = () => {
                   )}
                 </>
               ) : (
-                <p
-                  style={{
-                    margin: 0,
-                    fontSize: '0.88rem',
-                    color: 'var(--text-light)',
-                  }}
-                >
-                  {isLoading
-                    ? 'Loading attendance…'
-                    : 'No attendance has been recorded for you yet. It appears here once the bus scanner recognises you.'}
-                </p>
+                <AttendanceGridSkeleton />
               )}
             </Section>
           )}
         </div>
+          </>
+        )}
       </main>
     </div>
   );
