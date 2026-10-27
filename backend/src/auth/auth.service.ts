@@ -1,6 +1,7 @@
 import {
   Injectable,
   UnauthorizedException,
+  ConflictException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UserRole } from '@prisma/client';
@@ -42,12 +43,20 @@ export class AuthService {
       select: USER_SELECT,
     });
 
-    // Fallback: allow signing in with a registered phone number.
+    // Fallback: allow signing in with a registered phone number, but never
+    // select an arbitrary account if legacy data contains duplicate numbers.
     if (!user) {
-      user = await this.prisma.user.findFirst({
+      const phoneMatches = await this.prisma.user.findMany({
         where: { phone: login_id },
         select: USER_SELECT,
+        take: 2,
       });
+      if (phoneMatches.length > 1) {
+        throw new ConflictException(
+          'This phone number is linked to multiple accounts. Sign in with your login ID or contact the transport office.',
+        );
+      }
+      user = phoneMatches[0] ?? null;
     }
 
     if (!user) {
