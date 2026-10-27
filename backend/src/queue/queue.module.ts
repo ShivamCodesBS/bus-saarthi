@@ -15,7 +15,24 @@ const logger = new Logger('QueueModule');
       }),
       inject: [ConfigService],
     }),
-    BullModule.registerQueue({ name: 'telemetry' }),
+    // `enableOfflineQueue: false` makes commands reject immediately when
+    // Redis is unreachable instead of buffering forever — TelemetryService
+    // catches that rejection and writes the batch straight to the database
+    // (Render boots without a Redis; without this every telemetry write
+    // would hang until the request timeout).
+    // NOTE: @nestjs/bullmq merges queue options with the shared config via a
+    // shallow spread, so `connection` here must repeat host/port.
+    BullModule.registerQueueAsync({
+      name: 'telemetry',
+      useFactory: (configService: ConfigService) => ({
+        connection: {
+          host: configService.get('REDIS_HOST') || 'localhost',
+          port: configService.get('REDIS_PORT') || 6379,
+          enableOfflineQueue: false,
+        },
+      }),
+      inject: [ConfigService],
+    }),
   ],
   exports: [BullModule],
 })
