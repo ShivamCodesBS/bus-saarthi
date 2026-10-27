@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "812213121872",
+    "project_id": "invertis-bus-saarthi",
+    "storage_bucket": "invertis-bus-saarthi.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:812213121872:android:217253d398307aea137255",
+        "android_client_info": {
+          "package_name": "com.bussaarthi.bus_saarthi_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDFC5Sr-90VCNwYZFAMhTyxlaRRzIb-opI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

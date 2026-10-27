@@ -103,12 +103,16 @@ export class ParentsService {
     }
 
     const digits = (parentPhone || childLoginId).replace(/\D/g, '');
-    const base = digits ? `P${digits.slice(-6)}` : `P${childLoginId.replace(/^[A-Za-z]/, '')}`;
+    const base = digits
+      ? `P${digits.slice(-6)}`
+      : `P${childLoginId.replace(/^[A-Za-z]/, '')}`;
 
     // Ensure uniqueness by appending a counter if needed.
     let candidate = base;
     let suffix = 1;
-    while (await this.prisma.user.findUnique({ where: { loginId: candidate } })) {
+    while (
+      await this.prisma.user.findUnique({ where: { loginId: candidate } })
+    ) {
       suffix += 1;
       candidate = `${base}${suffix}`;
     }
@@ -195,7 +199,9 @@ export class ParentsService {
       orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
     });
 
-    const nicknameByChild = new Map(links.map((l) => [l.childLoginId, l.nickname]));
+    const nicknameByChild = new Map(
+      links.map((l) => [l.childLoginId, l.nickname]),
+    );
 
     return grievances.map((g) => ({
       id: g.id,
@@ -220,10 +226,7 @@ export class ParentsService {
     }));
   }
 
-  async getChildGrievancesFor(
-    parentLoginId: string,
-    childLoginId: string,
-  ) {
+  async getChildGrievancesFor(parentLoginId: string, childLoginId: string) {
     await this.verifyParentChildLink(parentLoginId, childLoginId);
     const all = await this.getChildGrievances(parentLoginId);
     return all.filter((g) => g.loginId === childLoginId);
@@ -327,23 +330,22 @@ export class ParentsService {
       throw new BadRequestException('Child not found or not a passenger');
     }
 
-    try {
-      await this.prisma.leave.upsert({
-        where: {
-          loginId_date: {
-            loginId: childLoginId,
-            date: new Date(dateStr),
-          },
-        },
-        update: {},
-        create: {
+    // Parent leave uses the same Leave row and (loginId, date) key as the
+    // student's /api/leave endpoint. It is an idempotent notice only: leave
+    // does not create or suppress an attendance/boarding record.
+    await this.prisma.leave.upsert({
+      where: {
+        loginId_date: {
           loginId: childLoginId,
           date: new Date(dateStr),
         },
-      });
-    } catch (e: any) {
-      // Prisma unique constraint or duplicate handled cleanly
-    }
+      },
+      update: {},
+      create: {
+        loginId: childLoginId,
+        date: new Date(dateStr),
+      },
+    });
 
     return {
       status: 'success',
@@ -351,10 +353,7 @@ export class ParentsService {
     };
   }
 
-  async verifyParentChildLink(
-    parentLoginId: string,
-    childLoginId: string,
-  ) {
+  async verifyParentChildLink(parentLoginId: string, childLoginId: string) {
     const link = await this.prisma.parentChildLink.findUnique({
       where: {
         parentLoginId_childLoginId: {

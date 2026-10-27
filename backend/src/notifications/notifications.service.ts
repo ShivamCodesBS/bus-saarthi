@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as webpush from 'web-push';
+import { initializeApp, getApps } from 'firebase-admin/app';
+import { getMessaging } from 'firebase-admin/messaging';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CacheService } from '../cache/cache.service';
@@ -9,6 +11,7 @@ import { CacheService } from '../cache/cache.service';
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
   private pushEnabled = false;
+  private fcmEnabled = false;
 
   constructor(
     private prisma: PrismaService,
@@ -31,6 +34,67 @@ export class NotificationsService {
         'VAPID keys missing. Web push disabled — in-app notifications still work.',
       );
     }
+
+    // ── FCM (Android app) ──────────────────────────────────────────────
+    // The service-account JSON is provided as a single environment string
+    // (the whole file content) so it survives platform env-var interfaces.
+    const serviceAccountJson = this.configService.get<string>(
+      'FIREBASE_SERVICE_ACCOUNT_JSON',
+    );
+    if (serviceAccountJson) {
+      try {
+        const serviceAccount = JSON.parse(serviceAccountJson);
+        if (!getApps().length) {
+          initializeApp({ credential: serviceAccount });
+        }
+        this.fcmEnabled = true;
+        this.logger.log('FCM enabled — Android push notifications active.');
+      } catch (err: any) {
+        this.logger.error(
+          `FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON — FCM disabled. ${err?.message}`,
+        );
+      }
+    } else {
+      this.logger.warn(
+        'FIREBASE_SERVICE_ACCOUNT_JSON missing. Android (FCM) push disabled — in-app notifications still work.',
+      );
+    }
+  }
+
+  /**
+   * Send a push to one stored subscription, choosing the transport by
+   * device type: FCM for Android devices, web-push for browsers.
+   * Returns false when the record is dead and should be deleted.
+   */
+  private async deliverToSubscription(
+    deviceType: string,
+    subscription: any,
+    payload: any,
+  ): Promise<boolean> {
+    if (deviceType === 'android') {
+      const token = subscription?.token ?? subscription?.fcmToken;
+      if (!token || typeof token !== 'string') {
+        this.logger.warn('Android subscription has no FCM token — dropping record.');
+        return false;
+      }
+      // web-push payload shape and FCM notification shape are close enough;
+      // keep the same fields so both platforms show the same content.
+      await getMessaging().send({
+        token,
+        notification: {
+          title: payload.title ?? 'Bus Saarthi',
+          body: payload.body ?? '',
+        },
+        data: Object.fromEntries(
+          Object.entries(payload.data ?? {}).map(([k, v]) => [k, String(v)]),
+        ),
+        android: { priority: 'high' as const },
+      });
+      return true;
+    }
+
+    await webpush.sendNotification(subscription as any, JSON.stringify(payload));
+    return true;
   }
 
   async subscribe(
@@ -107,7 +171,7 @@ export class NotificationsService {
   }
 
   async sendPushNotification(loginId: string, payload: any) {
-    if (!this.pushEnabled) return;
+    if (!this.pushEnabled && !this.fcmEnabled) return;
 
     const subs = await this.prisma.pushSubscription.findMany({
       where: { loginId },
@@ -115,13 +179,20 @@ export class NotificationsService {
 
     for (const sub of subs) {
       try {
-        await webpush.sendNotification(
-          sub.subscription as any,
-          JSON.stringify(payload),
+        const alive = await this.deliverToSubscription(
+          sub.deviceType,
+          sub.subscription,
+          payload,
         );
+        if (!alive) {
+          await this.prisma.pushSubscription.delete({ where: { id: sub.id } });
+        }
       } catch (err: any) {
         if (err.statusCode === 410 || err.statusCode === 404) {
           // The browser unsubscribed — drop the dead record.
+          await this.prisma.pushSubscription.delete({ where: { id: sub.id } });
+        } else if (err.code?.startsWith('messaging/')) {
+          // FCM token is invalid or unregistered — drop the dead record.
           await this.prisma.pushSubscription.delete({ where: { id: sub.id } });
         } else {
           this.logger.error(`Failed to send push to ${loginId}:`, err);
@@ -154,14 +225,19 @@ export class NotificationsService {
     const allSubs = await this.prisma.pushSubscription.findMany();
 
     for (const sub of allSubs) {
-      if (!this.pushEnabled) break;
       try {
-        await webpush.sendNotification(
-          sub.subscription as any,
-          JSON.stringify(payload),
+        const alive = await this.deliverToSubscription(
+          sub.deviceType,
+          sub.subscription,
+          payload,
         );
+        if (!alive) {
+          await this.prisma.pushSubscription.delete({ where: { id: sub.id } });
+        }
       } catch (err: any) {
         if (err.statusCode === 410 || err.statusCode === 404) {
+          await this.prisma.pushSubscription.delete({ where: { id: sub.id } });
+        } else if (err.code?.startsWith('messaging/')) {
           await this.prisma.pushSubscription.delete({ where: { id: sub.id } });
         }
       }

@@ -115,7 +115,7 @@ export class GrievancesService {
     options: { status?: string; route?: string; onlyMine?: boolean } = {},
   ) {
     const staff = isStaff(role);
-    
+
     // Build cache key based on query parameters
     const cacheKey = `grievances:${loginId}:${role}:${JSON.stringify(options)}`;
 
@@ -470,7 +470,11 @@ export class GrievancesService {
       },
     );
 
-    return { status: 'success', message: 'Thank you for confirming', data: updated };
+    return {
+      status: 'success',
+      message: 'Thank you for confirming',
+      data: updated,
+    };
   }
 
   /**
@@ -583,12 +587,39 @@ export class GrievancesService {
     return grievance;
   }
 
+  private async assertReporterOrLinkedParent(
+    actorLoginId: string,
+    reporterLoginId: string,
+    action: 'confirm' | 'reopen',
+  ) {
+    if (actorLoginId === reporterLoginId) return;
+
+    const link = await this.prisma.parentChildLink.findUnique({
+      where: {
+        parentLoginId_childLoginId: {
+          parentLoginId: actorLoginId,
+          childLoginId: reporterLoginId,
+        },
+      },
+      select: { parentLoginId: true },
+    });
+    if (!link) {
+      throw new ForbiddenException(
+        `Only the complainant or their linked parent can ${action} this complaint`,
+      );
+    }
+  }
+
   private async notifyComplainant(
     grievance: { id: string; loginId: string },
     payload: { title: string; body: string; type: string },
   ) {
     try {
-      await this.notificationsService.notifyUser(grievance.loginId, grievance.id, payload);
+      await this.notificationsService.notifyUser(
+        grievance.loginId,
+        grievance.id,
+        payload,
+      );
     } catch {
       /* notification delivery must not fail the request */
     }
@@ -608,7 +639,11 @@ export class GrievancesService {
       const staff = await this.prisma.user.findMany({
         where: {
           role: {
-            in: [UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin],
+            in: [
+              UserRole.admin,
+              UserRole.transport_incharge,
+              UserRole.tech_admin,
+            ],
           },
         },
         select: { loginId: true },
@@ -634,7 +669,11 @@ export class GrievancesService {
       const staff = await this.prisma.user.findMany({
         where: {
           role: {
-            in: [UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin],
+            in: [
+              UserRole.admin,
+              UserRole.transport_incharge,
+              UserRole.tech_admin,
+            ],
           },
         },
         select: { loginId: true },
