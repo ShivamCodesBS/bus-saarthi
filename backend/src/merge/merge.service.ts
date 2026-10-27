@@ -31,155 +31,164 @@ export class MergeService {
    * Driver calls TI on phone → TI merges from dashboard.
    */
   async createMerge(dto: CreateMergeDto, initiatedBy: string) {
-    // ── Step 1: Validate routes exist ──────────────────────
-    const cancelledRoute = await this.prisma.route.findUnique({
-      where: { routeId: dto.cancelled_route_id },
-    });
-    const targetRoute = await this.prisma.route.findUnique({
-      where: { routeId: dto.target_route_id },
-    });
+    // Run all DB operations in a transaction for atomicity
+    return this.prisma.$transaction(async (tx) => {
+      // ── Step 1: Validate routes exist ──────────────────────
+      const cancelledRoute = await tx.route.findUnique({
+        where: { routeId: dto.cancelled_route_id },
+      });
+      const targetRoute = await tx.route.findUnique({
+        where: { routeId: dto.target_route_id },
+      });
 
-    if (!cancelledRoute) {
-      throw new NotFoundException(
-        `Cancelled route ${dto.cancelled_route_id} not found`,
+      if (!cancelledRoute) {
+        throw new NotFoundException(
+          `Cancelled route ${dto.cancelled_route_id} not found`,
+        );
+      }
+      if (!targetRoute) {
+        throw new NotFoundException(
+          `Target route ${dto.target_route_id} not found`,
+        );
+      }
+
+      // Same route check
+      if (dto.cancelled_route_id === dto.target_route_id) {
+        throw new BadRequestException('Cannot merge a route into itself');
+      }
+
+      // Same city check
+      if (cancelledRoute.city !== targetRoute.city) {
+        throw new BadRequestException(
+          `Cannot merge routes from different cities (${cancelledRoute.city} ≠ ${targetRoute.city})`,
+        );
+      }
+
+      // Already cancelled check
+      const existingMerge = await tx.mergeEvent.findFirst({
+        where: {
+          cancelledRouteId: dto.cancelled_route_id,
+          status: { in: ['active', 'cancelled'] },
+          createdAt: { gte: getISTMidnightUTC() },
+        },
+      });
+      if (existingMerge) {
+        throw new ConflictException(
+          `Route ${dto.cancelled_route_id} is already cancelled/merged today`,
+        );
+      }
+
+      // Check if target route is itself cancelled
+      const targetMerge = await tx.mergeEvent.findFirst({
+        where: {
+          cancelledRouteId: dto.target_route_id,
+          status: { in: ['active', 'cancelled'] },
+          createdAt: { gte: getISTMidnightUTC() },
+        },
+      });
+      if (targetMerge) {
+        throw new BadRequestException(
+          `Target route ${dto.target_route_id} is itself cancelled. Choose an active route.`,
+        );
+      }
+
+      // ── Step 2: Capacity calculation ──────────────────────
+      const todayStart = getISTMidnightUTC();
+
+      const cancelledStudentCount = await tx.user.count({
+        where: { routeId: dto.cancelled_route_id, role: 'passenger' },
+      });
+
+      const targetCurrentAttendance = await tx.attendance.count({
+        where: { routeId: dto.target_route_id, timestamp: { gte: todayStart } },
+      });
+
+      const targetCapacity = targetRoute.seatingCapacity || 50;
+      const projectedTotal = targetCurrentAttendance + cancelledStudentCount;
+      const isOverCapacity = projectedTotal > targetCapacity;
+
+      // ── Step 3: Create MergeEvent ─────────────────────────
+      const expiresAt = getNextISTMidnightUTC();
+
+      const mergeEvent = await tx.mergeEvent.create({
+        data: {
+          cancelledRouteId: dto.cancelled_route_id,
+          targetRouteId: dto.target_route_id,
+          reason: dto.reason || 'low_attendance',
+          status: 'active',
+          initiatedBy,
+          studentsMoved: cancelledStudentCount,
+          cancelledBusNumber: cancelledRoute.busNumber,
+          targetBusNumber: targetRoute.busNumber,
+          cancelledRouteName: cancelledRoute.routeName,
+          targetRouteName: targetRoute.routeName,
+          notes: dto.notes || null,
+          expiresAt,
+        },
+      });
+
+      this.logger.log(
+        `Merge created: ${cancelledRoute.routeName} (${cancelledRoute.busNumber}) → ${targetRoute.routeName} (${targetRoute.busNumber}) | ${cancelledStudentCount} students | by ${initiatedBy}`,
       );
-    }
-    if (!targetRoute) {
-      throw new NotFoundException(
-        `Target route ${dto.target_route_id} not found`,
+
+      // ── Step 4: Transfer already-marked attendance ────────
+      const transferred = await tx.attendance.updateMany({
+        where: {
+          routeId: dto.cancelled_route_id,
+          timestamp: { gte: todayStart },
+        },
+        data: {
+          originalRouteId: dto.cancelled_route_id,
+          routeId: dto.target_route_id,
+          mergeEventId: mergeEvent.id,
+        },
+      });
+
+      this.logger.log(
+        `Transferred ${transferred.count} attendance records from ${dto.cancelled_route_id} to ${dto.target_route_id}`,
       );
-    }
 
-    // Same route check
-    if (dto.cancelled_route_id === dto.target_route_id) {
-      throw new BadRequestException('Cannot merge a route into itself');
-    }
+      // ── Step 5: Create broadcast ────────────────────────────
+      const reasonText = (dto.reason || 'low_attendance').replace(/_/g, ' ');
+      await tx.broadcast.create({
+        data: {
+          title: '🔀 Bus Merge Notice',
+          message: `${cancelledRoute.routeName} (Bus ${cancelledRoute.busNumber}) has been merged into ${targetRoute.routeName} (Bus ${targetRoute.busNumber}) due to ${reasonText}. Affected students please board Bus ${targetRoute.busNumber}.`,
+        },
+      });
 
-    // Same city check
-    if (cancelledRoute.city !== targetRoute.city) {
-      throw new BadRequestException(
-        `Cannot merge routes from different cities (${cancelledRoute.city} ≠ ${targetRoute.city})`,
+      // Transaction committed successfully - now do async operations
+      // These run AFTER transaction commits so they don't block the DB
+      this.eventEmitter.emit('merge.executed', {
+        mergeEvent,
+        cancelledRoute,
+        targetRoute,
+        cancelledStudentCount,
+        isOverCapacity,
+        projectedTotal,
+        targetCapacity,
+      });
+
+      // Fire-and-forget notifications
+      void this.sendMergeNotifications(
+        dto.cancelled_route_id,
+        dto.target_route_id,
+        cancelledRoute,
+        targetRoute,
       );
-    }
 
-    // Already cancelled check
-    const existingMerge = await this.findActiveMergeForCancelledRoute(
-      dto.cancelled_route_id,
-    );
-    if (existingMerge) {
-      throw new ConflictException(
-        `Route ${dto.cancelled_route_id} is already cancelled/merged today`,
-      );
-    }
+      await this.invalidateMergeCaches();
 
-    // Check if target route is itself cancelled
-    const targetMerge = await this.findActiveMergeForCancelledRoute(
-      dto.target_route_id,
-    );
-    if (targetMerge) {
-      throw new BadRequestException(
-        `Target route ${dto.target_route_id} is itself cancelled. Choose an active route.`,
-      );
-    }
-
-    // ── Step 2: Capacity calculation ──────────────────────
-    const todayStart = getISTMidnightUTC();
-
-    const cancelledStudentCount = await this.prisma.user.count({
-      where: { routeId: dto.cancelled_route_id, role: 'passenger' },
-    });
-
-    const targetCurrentAttendance = await this.prisma.attendance.count({
-      where: { routeId: dto.target_route_id, timestamp: { gte: todayStart } },
-    });
-
-    const targetCapacity = targetRoute.seatingCapacity || 50;
-    const projectedTotal = targetCurrentAttendance + cancelledStudentCount;
-    const isOverCapacity = projectedTotal > targetCapacity;
-
-    // ── Step 3: Create MergeEvent ─────────────────────────
-    const expiresAt = getNextISTMidnightUTC();
-
-    const mergeEvent = await this.prisma.mergeEvent.create({
-      data: {
-        cancelledRouteId: dto.cancelled_route_id,
-        targetRouteId: dto.target_route_id,
-        reason: dto.reason || 'low_attendance',
-        status: 'active',
-        initiatedBy,
-        studentsMoved: cancelledStudentCount,
-        cancelledBusNumber: cancelledRoute.busNumber,
-        targetBusNumber: targetRoute.busNumber,
-        cancelledRouteName: cancelledRoute.routeName,
-        targetRouteName: targetRoute.routeName,
-        notes: dto.notes || null,
-        expiresAt,
-      },
-    });
-
-    this.logger.log(
-      `Merge created: ${cancelledRoute.routeName} (${cancelledRoute.busNumber}) → ${targetRoute.routeName} (${targetRoute.busNumber}) | ${cancelledStudentCount} students | by ${initiatedBy}`,
-    );
-
-    // ── Step 4: Transfer already-marked attendance ────────
-    const transferred = await this.prisma.attendance.updateMany({
-      where: {
-        routeId: dto.cancelled_route_id,
-        timestamp: { gte: todayStart },
-      },
-      data: {
-        originalRouteId: dto.cancelled_route_id,
-        routeId: dto.target_route_id,
-        mergeEventId: mergeEvent.id,
-      },
-    });
-
-    this.logger.log(
-      `Transferred ${transferred.count} attendance records from ${dto.cancelled_route_id} to ${dto.target_route_id}`,
-    );
-
-    // ── Step 5: Emit real-time events ─────────────────────
-    this.eventEmitter.emit('merge.executed', {
-      mergeEvent,
-      cancelledRoute,
-      targetRoute,
-      cancelledStudentCount,
-      isOverCapacity,
-      projectedTotal,
-      targetCapacity,
-    });
-
-    // ── Step 6: Send push notifications ───────────────────
-    // Fire-and-forget: this fans out one push per student and per parent,
-    // which took tens of seconds for a full route and blew the request
-    // timeout while the merge itself had already succeeded.
-    void this.sendMergeNotifications(
-      dto.cancelled_route_id,
-      dto.target_route_id,
-      cancelledRoute,
-      targetRoute,
-    );
-
-    // ── Step 7: Auto-broadcast ────────────────────────────
-    const reasonText = (dto.reason || 'low_attendance').replace(/_/g, ' ');
-    await this.prisma.broadcast.create({
-      data: {
-        title: '🔀 Bus Merge Notice',
-        message: `${cancelledRoute.routeName} (Bus ${cancelledRoute.busNumber}) has been merged into ${targetRoute.routeName} (Bus ${targetRoute.busNumber}) due to ${reasonText}. Affected students please board Bus ${targetRoute.busNumber}.`,
-      },
-    });
-
-    await this.invalidateMergeCaches();
-
-    return {
-      status: 'success',
-      message: `Merged ${cancelledRoute.routeName} into ${targetRoute.routeName}`,
-      data: mergeEvent,
-      transferredAttendance: transferred.count,
-      warning: isOverCapacity
-        ? `⚠️ Target bus may be overcrowded (${projectedTotal}/${targetCapacity})`
-        : null,
-    };
+      return {
+        status: 'success',
+        message: `Merged ${cancelledRoute.routeName} into ${targetRoute.routeName}`,
+        data: mergeEvent,
+        transferredAttendance: transferred.count,
+        warning: isOverCapacity
+          ? `⚠️ Target bus may be overcrowded (${projectedTotal}/${targetCapacity})`
+          : null,
+      };
+    }); // End transaction
   }
 
   private async invalidateMergeCaches() {
@@ -197,66 +206,68 @@ export class MergeService {
    * "Undo Cancellation" button in the dashboard actually works.
    */
   async undoMerge(mergeId: string, undoneBy: string) {
-    const merge = await this.prisma.mergeEvent.findUnique({
-      where: { id: mergeId },
-    });
+    return this.prisma.$transaction(async (tx) => {
+      const merge = await tx.mergeEvent.findUnique({
+        where: { id: mergeId },
+      });
 
-    if (!merge) {
-      throw new NotFoundException('Merge event not found');
-    }
-    if (merge.status !== 'active' && merge.status !== 'cancelled') {
-      throw new BadRequestException(
-        `Cannot undo merge with status "${merge.status}"`,
+      if (!merge) {
+        throw new NotFoundException('Merge event not found');
+      }
+      if (merge.status !== 'active' && merge.status !== 'cancelled') {
+        throw new BadRequestException(
+          `Cannot undo merge with status "${merge.status}"`,
+        );
+      }
+
+      const todayStart = getISTMidnightUTC();
+
+      // 1. Revert attendance records back to original route
+      const reverted = await tx.attendance.updateMany({
+        where: {
+          mergeEventId: mergeId,
+          timestamp: { gte: todayStart },
+        },
+        data: {
+          routeId: merge.cancelledRouteId,
+          originalRouteId: null,
+          mergeEventId: null,
+        },
+      });
+
+      // 2. Mark merge as undone
+      await tx.mergeEvent.update({
+        where: { id: mergeId },
+        data: { status: 'undone', unmergedAt: new Date() },
+      });
+
+      this.logger.log(
+        `Merge undone: ${merge.cancelledRouteName} restored | ${reverted.count} records reverted | by ${undoneBy}`,
       );
-    }
 
-    const todayStart = getISTMidnightUTC();
+      // Transaction committed - now async operations
+      this.eventEmitter.emit('merge.undone', {
+        mergeEvent: merge,
+        undoneBy,
+        revertedCount: reverted.count,
+      });
 
-    // 1. Revert attendance records back to original route
-    const reverted = await this.prisma.attendance.updateMany({
-      where: {
-        mergeEventId: mergeId,
-        timestamp: { gte: todayStart },
-      },
-      data: {
-        routeId: merge.cancelledRouteId,
-        originalRouteId: null,
-        mergeEventId: null,
-      },
-    });
+      // Broadcast
+      await tx.broadcast.create({
+        data: {
+          title: '↩️ Merge Reversed',
+          message: `${merge.cancelledRouteName} (Bus ${merge.cancelledBusNumber}) has been restored. Students on this route, please board your original bus.`,
+        },
+      });
 
-    // 2. Mark merge as undone
-    await this.prisma.mergeEvent.update({
-      where: { id: mergeId },
-      data: { status: 'undone', unmergedAt: new Date() },
-    });
+      await this.invalidateMergeCaches();
 
-    this.logger.log(
-      `Merge undone: ${merge.cancelledRouteName} restored | ${reverted.count} records reverted | by ${undoneBy}`,
-    );
-
-    // 3. Emit events
-    this.eventEmitter.emit('merge.undone', {
-      mergeEvent: merge,
-      undoneBy,
-      revertedCount: reverted.count,
-    });
-
-    // 4. Broadcast
-    await this.prisma.broadcast.create({
-      data: {
-        title: '↩️ Merge Reversed',
-        message: `${merge.cancelledRouteName} (Bus ${merge.cancelledBusNumber}) has been restored. Students on this route, please board your original bus.`,
-      },
-    });
-
-    await this.invalidateMergeCaches();
-
-    return {
-      status: 'success',
-      message: `Merge undone. ${merge.cancelledRouteName} restored.`,
-      revertedRecords: reverted.count,
-    };
+      return {
+        status: 'success',
+        message: `Merge undone. ${merge.cancelledRouteName} restored.`,
+        revertedRecords: reverted.count,
+      };
+    }); // End transaction
   }
 
   /**
@@ -544,81 +555,86 @@ export class MergeService {
    * This creates a mergeEvent with status 'cancelled' and no target route.
    */
   async cancelBus(dto: CreateBusCancelDto, initiatedBy: string) {
-    const cancelledRoute = await this.prisma.route.findUnique({
-      where: { routeId: dto.cancelled_route_id },
-    });
+    return this.prisma.$transaction(async (tx) => {
+      const cancelledRoute = await tx.route.findUnique({
+        where: { routeId: dto.cancelled_route_id },
+      });
 
-    if (!cancelledRoute) {
-      throw new NotFoundException(
-        `Route ${dto.cancelled_route_id} not found`,
+      if (!cancelledRoute) {
+        throw new NotFoundException(
+          `Route ${dto.cancelled_route_id} not found`,
+        );
+      }
+
+      // Already cancelled check
+      const existingMerge = await tx.mergeEvent.findFirst({
+        where: {
+          cancelledRouteId: dto.cancelled_route_id,
+          status: { in: ['active', 'cancelled'] },
+          createdAt: { gte: getISTMidnightUTC() },
+        },
+      });
+      if (existingMerge) {
+        throw new ConflictException(
+          `Route ${dto.cancelled_route_id} is already cancelled/merged today`,
+        );
+      }
+
+      const todayStart = getISTMidnightUTC();
+      const expiresAt = getNextISTMidnightUTC();
+
+      const cancelledStudentCount = await tx.user.count({
+        where: { routeId: dto.cancelled_route_id, role: 'passenger' },
+      });
+
+      // Create a merge event with status 'cancelled' (no target route)
+      const mergeEvent = await tx.mergeEvent.create({
+        data: {
+          cancelledRouteId: dto.cancelled_route_id,
+          targetRouteId: dto.cancelled_route_id, // Same route to indicate no merge
+          reason: dto.reason || 'bus_cancelled',
+          status: 'cancelled',
+          initiatedBy,
+          studentsMoved: 0,
+          cancelledBusNumber: cancelledRoute.busNumber,
+          targetBusNumber: cancelledRoute.busNumber,
+          cancelledRouteName: cancelledRoute.routeName,
+          targetRouteName: cancelledRoute.routeName,
+          notes: dto.notes || null,
+          expiresAt,
+        },
+      });
+
+      this.logger.log(
+        `Bus cancelled: ${cancelledRoute.routeName} (${cancelledRoute.busNumber}) | 0 students moved (cancelled only) | by ${initiatedBy}`,
       );
-    }
 
-    // Already cancelled check
-    const existingMerge = await this.findActiveMergeForCancelledRoute(
-      dto.cancelled_route_id,
-    );
-    if (existingMerge) {
-      throw new ConflictException(
-        `Route ${dto.cancelled_route_id} is already cancelled/merged today`,
-      );
-    }
+      // Transaction committed - async operations
+      void this.sendBusCancelNotifications(dto.cancelled_route_id, cancelledRoute);
 
-    const todayStart = getISTMidnightUTC();
-    const expiresAt = getNextISTMidnightUTC();
+      // Auto-broadcast
+      const reasonText = (dto.reason || 'bus_cancelled').replace(/_/g, ' ');
+      await tx.broadcast.create({
+        data: {
+          title: '🚌 Bus Cancelled Notice',
+          message: `${cancelledRoute.routeName} (Bus ${cancelledRoute.busNumber}) has been cancelled today due to ${reasonText}. No replacement bus is available.`,
+        },
+      });
 
-    const cancelledStudentCount = await this.prisma.user.count({
-      where: { routeId: dto.cancelled_route_id, role: 'passenger' },
-    });
+      // Emit events for real-time UI
+      this.eventEmitter.emit('bus.cancelled', {
+        mergeEvent,
+        cancelledRoute,
+        cancelledStudentCount,
+      });
 
-    // Create a merge event with status 'cancelled' (no target route)
-    const mergeEvent = await this.prisma.mergeEvent.create({
-      data: {
-        cancelledRouteId: dto.cancelled_route_id,
-        targetRouteId: dto.cancelled_route_id, // Same route to indicate no merge
-        reason: dto.reason || 'bus_cancelled',
-        status: 'cancelled',
-        initiatedBy,
-        studentsMoved: 0,
-        cancelledBusNumber: cancelledRoute.busNumber,
-        targetBusNumber: cancelledRoute.busNumber,
-        cancelledRouteName: cancelledRoute.routeName,
-        targetRouteName: cancelledRoute.routeName,
-        notes: dto.notes || null,
-        expiresAt,
-      },
-    });
-
-    this.logger.log(
-      `Bus cancelled: ${cancelledRoute.routeName} (${cancelledRoute.busNumber}) | 0 students moved (cancelled only) | by ${initiatedBy}`,
-    );
-
-    // Notify students on cancelled route (fire-and-forget — same reason as
-    // the merge fan-out above).
-    void this.sendBusCancelNotifications(dto.cancelled_route_id, cancelledRoute);
-
-    // Auto-broadcast
-    const reasonText = (dto.reason || 'bus_cancelled').replace(/_/g, ' ');
-    await this.prisma.broadcast.create({
-      data: {
-        title: '🚌 Bus Cancelled Notice',
-        message: `${cancelledRoute.routeName} (Bus ${cancelledRoute.busNumber}) has been cancelled today due to ${reasonText}. No replacement bus is available.`,
-      },
-    });
-
-    // Emit events for real-time UI
-    this.eventEmitter.emit('bus.cancelled', {
-      mergeEvent,
-      cancelledRoute,
-      cancelledStudentCount,
-    });
-
-    return {
-      status: 'success',
-      message: `Bus ${cancelledRoute.busNumber} (${cancelledRoute.routeName}) cancelled. No replacement bus.`,
-      data: mergeEvent,
-      warning: 'No replacement bus - students cannot board any bus today.',
-    };
+      return {
+        status: 'success',
+        message: `Bus ${cancelledRoute.busNumber} (${cancelledRoute.routeName}) cancelled. No replacement bus.`,
+        data: mergeEvent,
+        warning: 'No replacement bus - students cannot board any bus today.',
+      };
+    }); // End transaction
   }
 
   /**
