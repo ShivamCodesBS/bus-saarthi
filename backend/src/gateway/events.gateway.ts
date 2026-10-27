@@ -9,7 +9,7 @@ import {
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger } from '@nestjs/common';
+import { Logger, Inject } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { JwtService } from '@nestjs/jwt';
 import { UserRole } from '@prisma/client';
@@ -17,6 +17,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { UsersService } from '../users/users.service';
 import { ConfigService } from '@nestjs/config';
 import { haversineDistance } from '../common/utils/haversine.util';
+import { TelemetryService } from '../telemetry/telemetry.service';
+import { TelemetryBatchDto } from '../telemetry/dto/telemetry-batch.dto';
 
 @WebSocketGateway({
   // CORS is configured dynamically in afterInit to match main.ts logic
@@ -39,6 +41,7 @@ export class EventsGateway
     private notificationsService: NotificationsService,
     private usersService: UsersService,
     private configService: ConfigService,
+    @Inject(TelemetryService) private telemetryService: TelemetryService,
   ) {}
 
   afterInit(server: Server) {
@@ -190,21 +193,45 @@ export class EventsGateway
     const lat = payload?.lat ?? payload?.latitude;
     const lng = payload?.lng ?? payload?.longitude;
     const routeId = payload?.route_id ?? payload?.routeId;
+    const gpsSpeedKnots = payload?.gps_speed_knots;
+    const mpuSpeedKmh = payload?.mpu_speed_kmh;
+    const headingDeg = payload?.heading_deg ?? payload?.heading;
+    const comfort = payload?.comfort || 'Smooth';
+    const timestamp = payload?.timestamp ? new Date(payload.timestamp) : new Date();
+
     if (!lat || !lng || !routeId) return;
+
+    // Persist to DB so getLastTelemetry works even after restart/offline
+    try {
+      const batchDto: TelemetryBatchDto = {
+        route_id: String(routeId),
+        data: [{
+          lat,
+          lng,
+          gps_speed_knots: gpsSpeedKnots ?? (mpuSpeedKmh ? mpuSpeedKmh / 1.852 : 0),
+          mpu_speed_kmh: mpuSpeedKmh ?? (gpsSpeedKnots ? gpsSpeedKnots * 1.852 : 0),
+          heading_deg: headingDeg ?? 0,
+          timestamp: timestamp.toISOString(),
+        }],
+      };
+      await this.telemetryService.addBatchToQueue(batchDto);
+    } catch (e) {
+      this.logger.warn(`[Socket] Failed to persist telemetry for route ${routeId}: ${e.message}`);
+    }
 
     // Broadcast live location to all route subscribers (web dashboard, etc.)
     const formattedPayload = {
       route_id: String(routeId),
       location: { lat, lng },
       speed:
-        typeof payload?.mpu_speed_kmh === 'number'
-          ? payload.mpu_speed_kmh
+        typeof mpuSpeedKmh === 'number'
+          ? mpuSpeedKmh
           : typeof payload?.speed === 'number'
             ? payload.speed
-            : (payload?.gps_speed_knots ?? 0) * 1.852,
-      heading: payload?.heading_deg ?? payload?.heading,
-      comfort: payload?.comfort || 'Smooth',
-      timestamp: payload?.timestamp || new Date().toISOString(),
+            : (gpsSpeedKnots ?? 0) * 1.852,
+      heading: headingDeg,
+      comfort,
+      timestamp: timestamp.toISOString(),
     };
     this.server.to(`route_${routeId}`).emit('live_telemetry', formattedPayload);
 

@@ -341,6 +341,8 @@ const UnifiedMap = ({
   
   // Handle map interaction - disable auto-follow when user drags/zooms
   const handleMapInteraction = useCallback((map) => {
+    if (!map) return () => {};
+    
     const onMoveStart = () => {
       isUserInteractingRef.current = true;
       clearTimeout(interactionTimeoutRef.current);

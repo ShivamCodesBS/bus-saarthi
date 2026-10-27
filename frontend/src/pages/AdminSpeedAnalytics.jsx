@@ -24,8 +24,8 @@ export default function AdminSpeedAnalytics() {
       const res = await axios.get(`${BACKEND_URL}/api/telemetry/history/${routeId}?date=${date}`, {
         headers: { Authorization: `Bearer ${user?.token}` }
       });
-      // Handle NestJS direct response vs axios wrapping
-      setData(res.data?.data ? res.data : res.data);
+      // Backend returns the telemetry data directly (not wrapped in data property)
+      setData(res.data);
     } catch (err) {
       console.error(err);
       toast.error('Failed to load telemetry history');

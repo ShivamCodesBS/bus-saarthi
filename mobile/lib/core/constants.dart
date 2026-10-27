@@ -53,7 +53,8 @@ class AppConstants {
   );
 
   // Sensor intervals
-  static const int sensorIntervalMs = 250; // Ultra-low latency telemetry: 250ms for live speedometer
+  // GPS is typically 1Hz; accelerometer/compass can be faster but we publish telemetry at 1Hz
+  static const int sensorIntervalMs = 1000; // 1Hz telemetry publish rate
 
   // ── Face Recognition (ArcFace — on-device) ───────────────────────────────
   // Interval between face recognition attempts
