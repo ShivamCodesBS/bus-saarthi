@@ -580,12 +580,13 @@ const UnifiedMap = ({
     <>
       <MapResizer onMapReady={handleMapReady} />
       
-      {/* Tile Layer - Google Maps */}
+      {/* Tile Layer - OpenStreetMap (free, no API key required) */}
       <TileLayer
-        url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
-        attribution='&copy; Google Maps'
-        maxZoom={20}
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        maxZoom={19}
         minZoom={3}
+        subdomains={['a', 'b', 'c']}
       />
       
       {/* Route Polyline — show the planned route but NOT lines connected to 
