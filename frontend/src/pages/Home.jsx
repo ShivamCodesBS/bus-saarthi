@@ -125,11 +125,6 @@ const Home = () => {
     }
   }, [isLive, lastKnown]);
 
-  // Dynamic Effective Route ID: Switches instantly to newRouteId when merged, or keeps original if cancelled
-  const effectiveRouteId = mergeInfo?.isCancelled 
-    ? (user?.routeId || user?.route_id || '4')
-    : (mergeInfo?.newRouteId || user?.routeId || user?.route_id || '4');
-
   // Connect to Socket.IO for real-time telemetry updates and fetch initial status
   useEffect(() => {
     const authHeaders = { headers: { Authorization: `Bearer ${user?.token}` } };
