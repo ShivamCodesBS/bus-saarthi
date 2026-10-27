@@ -1,15 +1,26 @@
 import { Module, Logger } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
+import { ConfigService } from '@nestjs/config';
 
 const logger = new Logger('QueueModule');
 
-// BullMQ/Redis is optional for local development.
-// If Redis is not available, the queue module will be empty and telemetry
-// will process synchronously instead of through a queue.
-@Module({})
+@Module({
+  imports: [
+    BullModule.forRootAsync({
+      useFactory: (configService: ConfigService) => ({
+        connection: {
+          host: configService.get('REDIS_HOST') || 'localhost',
+          port: configService.get('REDIS_PORT') || 6379,
+        },
+      }),
+      inject: [ConfigService],
+    }),
+    BullModule.registerQueue({ name: 'telemetry' }),
+  ],
+  exports: [BullModule],
+})
 export class QueueModule {
   constructor() {
-    logger.log(
-      'Queue module loaded (Redis/BullMQ disabled for local dev mode)',
-    );
+    logger.log('Queue module loaded with BullMQ/Redis');
   }
 }

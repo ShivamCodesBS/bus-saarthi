@@ -3,12 +3,15 @@ import { TelemetryBatchDto } from './dto/telemetry-batch.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { getISTMidnightUTC } from '../common/utils/ist-date.util';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 
 @Injectable()
 export class TelemetryService {
   constructor(
     private prisma: PrismaService,
     private eventEmitter: EventEmitter2,
+    @InjectQueue('telemetry') private telemetryQueue: Queue,
   ) {}
 
   async addBatchToQueue(batchDto: TelemetryBatchDto) {
@@ -27,35 +30,32 @@ export class TelemetryService {
       return { status: 'success', received: 0, note: 'Route is cancelled today due to merge' };
     }
 
-    // Process directly (no Redis queue needed for local dev)
-    const entities = data.map((item: any) => ({
-      routeId: route_id,
-      latitude: item.lat,
-      longitude: item.lng,
-      gpsSpeedKnots: item.gps_speed_knots,
-      mpuSpeedKmh: item.mpu_speed_kmh,
-      headingDeg: item.heading_deg,
-      timestamp: new Date(item.timestamp),
-    }));
+    // Add to BullMQ queue with retry options
+    await this.telemetryQueue.add('process-telemetry', { route_id, data }, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 1000 },
+      removeOnComplete: 100,
+      removeOnFail: 50,
+    });
 
-    if (entities.length > 0) {
-      await this.prisma.telemetry.createMany({ data: entities });
-    }
-
-    // Broadcast live location to Gateway
-    if (data.length > 0) {
-      const latest = data[data.length - 1];
-      this.eventEmitter.emit('telemetry.live', {
-        route_id,
-        ...latest,
-      });
-    }
-
-    return { status: 'success', received: data.length };
+    return { status: 'queued', received: data.length };
   }
 
   async getLatestStatus(routeId: string) {
     const todayStart = getISTMidnightUTC();
+    
+    // Get capacity from route or bus
+    const route = await this.prisma.route.findUnique({
+      where: { routeId },
+      select: { 
+        seatingCapacity: true,
+        bus: { select: { seatingCapacity: true } }
+      }
+    });
+    
+    // Priority: Route.seatingCapacity > Bus.seatingCapacity > default 50
+    const total = route?.seatingCapacity ?? route?.bus?.seatingCapacity ?? 50;
+
     const filled = await this.prisma.attendance.count({
       where: {
         routeId,
@@ -63,10 +63,9 @@ export class TelemetryService {
       },
     });
 
-    const total = 50; // default total bus capacity
     let status = 'Low';
-    if (filled >= 50) status = 'Over Crowd';
-    else if (filled > 25) status = 'Medium';
+    if (filled >= total) status = 'Over Crowd';
+    else if (filled > total / 2) status = 'Medium';
 
     return {
       status: 'success',

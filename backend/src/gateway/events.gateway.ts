@@ -15,12 +15,11 @@ import { JwtService } from '@nestjs/jwt';
 import { UserRole } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 import { UsersService } from '../users/users.service';
+import { ConfigService } from '@nestjs/config';
 import { haversineDistance } from '../common/utils/haversine.util';
 
 @WebSocketGateway({
-  cors: {
-    origin: '*', // Adjust to your needs
-  },
+  // CORS is configured dynamically in afterInit to match main.ts logic
 })
 export class EventsGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
@@ -39,10 +38,50 @@ export class EventsGateway
     private jwtService: JwtService,
     private notificationsService: NotificationsService,
     private usersService: UsersService,
+    private configService: ConfigService,
   ) {}
 
   afterInit(server: Server) {
     this.logger.log('WebSocket Gateway Initialized');
+
+    // Configure CORS dynamically to match main.ts logic
+    const extraOrigins = (this.configService.get<string>('CORS_ORIGINS') || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    const allowedOrigins = new Set([
+      'http://localhost:5173',
+      'http://localhost:5174',
+      'http://127.0.0.1:5173',
+      'http://127.0.0.1:5174',
+      'http://127.0.0.1:5199',
+      ...extraOrigins,
+    ]);
+
+    server.engine.on('headers', (headers, req) => {
+      const origin = req.headers.origin;
+      if (!origin || allowedOrigins.has(origin)) {
+        headers['access-control-allow-origin'] = origin || '*';
+        headers['access-control-allow-credentials'] = 'true';
+        return;
+      }
+      try {
+        const host = new URL(origin).hostname;
+        if (
+          host.endsWith('.vercel.app') ||
+          origin.startsWith('http://192.168.') ||
+          origin.startsWith('http://10.')
+        ) {
+          headers['access-control-allow-origin'] = origin;
+          headers['access-control-allow-credentials'] = 'true';
+          return;
+        }
+      } catch {
+        // Invalid origin - reject silently
+      }
+      // Reject: don't set CORS headers
+    });
   }
 
   /**

@@ -25,6 +25,20 @@ export class GrievancesService {
   ) {}
 
   /**
+   * Normalize cache options for consistent key generation.
+   * Sorts keys and converts Date objects to ISO strings.
+   */
+  private normalizeCacheOptions(options: Record<string, any>): string {
+    const normalized = { ...options };
+    Object.keys(normalized).forEach((key) => {
+      if (normalized[key] instanceof Date) {
+        normalized[key] = normalized[key].toISOString();
+      }
+    });
+    return JSON.stringify(normalized, Object.keys(normalized).sort());
+  }
+
+  /**
    * Resolve the *live* bus serving a route. The bus number changes when routes
    * are merged or the fleet is swapped, but the route identity does not, so a
    * grievance is always anchored to the route and the bus is looked up live.
@@ -116,8 +130,8 @@ export class GrievancesService {
   ) {
     const staff = isStaff(role);
 
-    // Build cache key based on query parameters
-    const cacheKey = `grievances:${loginId}:${role}:${JSON.stringify(options)}`;
+    // Build cache key with normalized options for consistent key generation
+    const cacheKey = `grievances:${loginId}:${role}:${this.normalizeCacheOptions(options)}`;
 
     // Try cache first
     const cached = await this.cache.get<any[]>(cacheKey);
