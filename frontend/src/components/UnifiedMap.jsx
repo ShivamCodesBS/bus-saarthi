@@ -8,6 +8,7 @@ import {
   MapPin, RefreshCw, Crosshair, Layers, Info,
   ChevronDown, ChevronUp
 } from 'lucide-react';
+import { BACKEND_URL } from '../config';
 
 // Fix for default marker icon in react-leaflet
 delete L.Icon.Default.prototype._getIconUrl;
@@ -19,9 +20,10 @@ L.Icon.Default.mergeOptions({
 
 // Bus marker: a white badge with a navigation arrow that rotates with the
 // live heading. When offline, shows "Last seen" timing as a label below.
-const busDirectionIcon = (heading, isOffline, lastSeenText) => {
+// When clicked, fetches fresh last known data.
+const busDirectionIcon = (heading, isOffline, lastSeenText, onMarkerClick) => {
   const markerHtml = `
-    <div style="position:relative;width:42px;height:42px;">
+    <div style="position:relative;width:42px;height:42px;cursor:pointer;">
       <div style="position:absolute;inset:0;border-radius:50%;background:white;border:3px solid ${isOffline ? '#cf1322' : '#3b82f6'};box-shadow:0 3px 10px rgba(0,0,0,0.35);"></div>
       <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transform:rotate(${Number(heading) || 0}deg);transition:transform 0.4s ease;">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="${isOffline ? '#cf1322' : '#3b82f6'}"><path d="M12 2 L19 21 L12 17 L5 21 Z"/></svg>
@@ -229,6 +231,9 @@ const UnifiedMap = ({
   const [lastTelemetryUpdate, setLastTelemetryUpdate] = useState(null);
   // Telemetry panel can collapse to a compact speed chip.
   const [telemetryMinimized, setTelemetryMinimized] = useState(false);
+  // For fetching fresh last-known data on marker click
+  const [lastKnownData, setLastKnownData] = useState(lastKnown);
+  const [isFetchingLastKnown, setIsFetchingLastKnown] = useState(false);
   
   const mapInstance = useRef(null);
   const autoFollowRef = useRef(true);
@@ -240,6 +245,11 @@ const UnifiedMap = ({
   useEffect(() => {
     autoFollowRef.current = autoFollow;
   }, [autoFollow]);
+  
+  // Update lastKnownData when lastKnown prop changes
+  useEffect(() => {
+    setLastKnownData(lastKnown);
+  }, [lastKnown]);
   
   // Expose map instance to parent if ref provided
   useEffect(() => {
@@ -390,12 +400,46 @@ const UnifiedMap = ({
     handleMapInteraction(map);
   }, [handleMapInteraction]);
   
+  // Fetch fresh last-known GPS data when bus is offline and user clicks marker
+  const fetchLastKnownTelemetry = useCallback(async () => {
+    if (!routeInfo) return;
+    const routeId = routeInfo.routeId || routeInfo.route_id;
+    if (!routeId) return;
+    
+    setIsFetchingLastKnown(true);
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('bus_saarthi_token') : null;
+      const res = await fetch(`${BACKEND_URL}/api/telemetry/last/${routeId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === 'success' && data.data) {
+          const freshData = {
+            position: [data.data.lat, data.data.lng],
+            timestamp: data.data.timestamp,
+            speed: data.data.speed,
+          };
+          setLastKnownData(freshData);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to fetch fresh last-known telemetry:', err);
+    } finally {
+      setIsFetchingLastKnown(false);
+    }
+  }, [routeInfo]);
+  
   const handleAutoFollowChange = useCallback((enabled) => {
     setAutoFollow(enabled);
     if (enabled && mapInstance.current && busLocation) {
       mapInstance.current.setView(busLocation, 16, { animate: true, duration: 1.5 });
     }
   }, [busLocation]);
+  
+  const handleMarkerClick = useCallback(() => {
+    fetchLastKnownTelemetry();
+  }, [fetchLastKnownTelemetry]);
   
   // Fullscreen via the native Fullscreen API: the browser scales the SAME
   // map element to the viewport — no React remount, so tiles and map state
@@ -595,8 +639,12 @@ const UnifiedMap = ({
         icon={busDirectionIcon(
           telemetry?.heading, 
           !telemetry || telemetryStale,
-          lastKnown?.timestamp ? formatLastUpdate(lastKnown.timestamp) : null
+          lastKnownData?.timestamp ? formatLastUpdate(lastKnownData.timestamp) : null,
+          handleMarkerClick
         )}
+        eventHandlers={{
+          click: handleMarkerClick,
+        }}
       >
         <Popup
           minWidth={180}
@@ -608,7 +656,7 @@ const UnifiedMap = ({
               🚌 {busLabel} {routeInfo?.busNumber || routeInfo?.bus_number || routeInfo?.routeId || ''}
             </div>
             {telemetry && !telemetryStale && (
-              <>
+<>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '2px' }}>
                   <span style={{ color: '#666' }}>Speed:</span>
                   <span style={{ fontWeight: 'bold', color: telemetry.speed > 60 ? '#cf1322' : '#28a745' }}>
@@ -623,9 +671,9 @@ const UnifiedMap = ({
                   <span style={{ color: '#666' }}>Comfort:</span>
                   <span style={{ 
                     fontWeight: 'bold', 
-                    color: telemetry.comfort === 'Smooth' ? '#28a745' : '#f97316' 
+                    color: (telemetry.comfort || 'Smooth') === 'Smooth' ? '#28a745' : '#f97316' 
                   }}>
-                    {telemetry.comfort}
+                    {telemetry.comfort || 'Smooth'}
                   </span>
                 </div>
                 <div style={{ fontSize: '10px', color: '#999', marginTop: '4px' }}>
@@ -635,8 +683,10 @@ const UnifiedMap = ({
             )}
             {(!telemetry || telemetryStale) && (
               <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#cf1322' }}>
-                {lastKnown?.timestamp
-                  ? `📡 Offline - Last seen ${formatLastUpdate(lastKnown.timestamp)}`
+                {isFetchingLastKnown
+                  ? '📡 Fetching last location...'
+                  : lastKnownData?.timestamp
+                  ? `📡 Offline - Last seen ${formatLastUpdate(lastKnownData.timestamp)}`
                   : '📡 No GPS signal yet'}
               </div>
             )}
@@ -785,14 +835,14 @@ const UnifiedMap = ({
                   letterSpacing: '0.5px'
                 }}>
                   <Wind size={10} style={{ 
-                    color: telemetry.comfort === 'Smooth' ? '#28a745' : '#f97316' 
+                    color: (telemetry.comfort || 'Smooth') === 'Smooth' ? '#28a745' : '#f97316' 
                   }} />
                   Comfort
                 </div>
                 <div style={{ 
                   fontSize: '0.85rem', 
                   fontWeight: '700', 
-                  color: telemetry.comfort === 'Smooth' ? '#28a745' : '#f97316',
+                  color: (telemetry.comfort || 'Smooth') === 'Smooth' ? '#28a745' : '#f97316',
                 }}>
                   {telemetry.comfort || 'Smooth'}
                 </div>

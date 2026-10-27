@@ -997,7 +997,7 @@ const Home = () => {
                   <X size={16} />
                 </Button>
               </div>
-              <div className="flex-1 relative z-0 min-h-0">
+              <div className="flex-1 relative z-0 min-h-0" style={{ minHeight: 0 }}>
                 {/* Absolute host: the map fills the card exactly, immune to
                     percentage-height chains anywhere up the tree. */}
                 <div className="absolute inset-0 z-0">
@@ -1008,6 +1008,7 @@ const Home = () => {
                   isLive={isLive}
                   initialZoom={15}
                   height="100%"
+                  minHeight="500px"
                   busLabel={`Bus ${routeInfo?.busNumber || routeInfo?.bus_number || 'UP 25 AB 1234'}`}
                   lastKnown={lastKnown}
                   showFullscreenButton={true}
