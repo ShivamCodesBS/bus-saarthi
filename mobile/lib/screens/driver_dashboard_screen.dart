@@ -171,11 +171,13 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
     final stdDev = sqrt(variance);
     final maxAccel = _accelBuffer.reduce(max);
 
-    // Dynamic thresholds: shaking phone by hand will easily trigger Moderate/Rough
-    // Standing still / cruising on good tarmac: max < 2.0, stdDev < 0.8
-    if (maxAccel >= 5.5 || stdDev >= 2.0) {
+    // Adjusted thresholds for realistic bus ride comfort (matching SensorFusion):
+    // - Smooth: normal driving, minor vibrations (maxAccel < 4, stdDev < 1.5)
+    // - Moderate: noticeable bumps, potholes (maxAccel 4-10, stdDev 1.5-3.5)
+    // - Rough: severe bumps, speed breakers, bad roads (maxAccel > 10, stdDev > 3.5)
+    if (maxAccel >= 10.0 || stdDev >= 3.5) {
       return 'Rough';
-    } else if (maxAccel >= 2.2 || stdDev >= 0.9) {
+    } else if (maxAccel >= 4.0 || stdDev >= 1.5) {
       return 'Moderate';
     }
     return 'Smooth';

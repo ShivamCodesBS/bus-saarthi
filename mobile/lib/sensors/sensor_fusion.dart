@@ -30,6 +30,16 @@ class SensorFusion {
   // For ride comfort calculation - maintain rolling buffer of acceleration magnitudes
   final List<double> _accelBuffer = [];
   static const int _bufferSize = 20;
+  
+  // Movement detection using accelerometer (to filter GPS noise)
+  final List<double> _movementBuffer = [];
+  static const int _movementBufferSize = 30; // ~7.5 seconds at 250ms interval
+  static const double _movementThreshold = 1.2; // m/s² - minimum vibration to consider "moving"
+  bool _isActuallyMoving = false;
+  
+  // GPS speed smoothing
+  final List<double> _gpsSpeedBuffer = [];
+  static const int _gpsSpeedBufferSize = 10;
 
   Future<void> start(String routeId) async {
     // Guard: stop any existing session before starting a new one.
@@ -53,6 +63,19 @@ class SensorFusion {
           _accelBuffer.add(magnitude);
           if (_accelBuffer.length > _bufferSize) {
             _accelBuffer.removeAt(0);
+          }
+          
+          // Movement detection: use user acceleration (excludes gravity)
+          // to detect actual bus movement vs GPS noise
+          _movementBuffer.add(magnitude);
+          if (_movementBuffer.length > _movementBufferSize) {
+            _movementBuffer.removeAt(0);
+          }
+          
+          // Update movement state based on rolling average
+          if (_movementBuffer.isNotEmpty) {
+            final avgMovement = _movementBuffer.reduce((a, b) => a + b) / _movementBuffer.length;
+            _isActuallyMoving = avgMovement > _movementThreshold;
           }
         },
         onError: (e) => print('[Accel] Stream error (non-fatal): $e'),
@@ -97,6 +120,9 @@ class SensorFusion {
     _lastAccel = null;
     _lastHeading = null;
     _accelBuffer.clear();
+    _movementBuffer.clear();
+    _gpsSpeedBuffer.clear();
+    _isActuallyMoving = false;
   }
 
   void dispose() {
@@ -112,16 +138,43 @@ class SensorFusion {
     final stdDev = sqrt(variance);
     final maxAccel = _accelBuffer.reduce(max);
 
-    // Realistic user-accelerometer thresholds:
-    // Hand shake / road bump produces maxAccel 3-10 m/s², stdDev 1.5-4.0
-    if (maxAccel >= 6.0 || stdDev >= 2.2) return 'Rough';
-    if (maxAccel >= 2.5 || stdDev >= 1.0) return 'Moderate';
+    // Adjusted thresholds for realistic bus ride comfort:
+    // - Smooth: normal driving, minor vibrations (maxAccel < 4, stdDev < 1.5)
+    // - Moderate: noticeable bumps, potholes (maxAccel 4-8, stdDev 1.5-3.0)
+    // - Rough: severe bumps, speed breakers, bad roads (maxAccel > 8, stdDev > 3.0)
+    if (maxAccel >= 10.0 || stdDev >= 3.5) return 'Rough';
+    if (maxAccel >= 4.0 || stdDev >= 1.5) return 'Moderate';
     return 'Smooth';
+  }
+
+  double _calculateFilteredSpeed(double gpsSpeedKmh) {
+    // Add GPS speed to buffer
+    _gpsSpeedBuffer.add(gpsSpeedKmh);
+    if (_gpsSpeedBuffer.length > _gpsSpeedBufferSize) {
+      _gpsSpeedBuffer.removeAt(0);
+    }
+
+    // If not actually moving (based on accelerometer), return 0
+    if (!_isActuallyMoving) {
+      return 0.0;
+    }
+
+    // If moving, use median of recent GPS speeds to filter outliers
+    if (_gpsSpeedBuffer.isNotEmpty) {
+      final sorted = List<double>.from(_gpsSpeedBuffer)..sort();
+      final mid = sorted.length ~/ 2;
+      return sorted.length % 2 == 0
+          ? (sorted[mid - 1] + sorted[mid]) / 2
+          : sorted[mid];
+    }
+
+    return gpsSpeedKmh;
   }
 
   void _publish(String routeId) {
     final gpsSpeedMs = _lastGps?.speed ?? 0.0;
     final gpsSpeedKmh = gpsSpeedMs * 3.6;
+    final filteredSpeedKmh = _calculateFilteredSpeed(gpsSpeedKmh);
     
     final comfort = _calculateComfort();
 
@@ -133,7 +186,7 @@ class SensorFusion {
       accelY: _lastAccel?.y,
       accelZ: _lastAccel?.z,
       headingDeg: _lastHeading,
-      mpuSpeedKmh: gpsSpeedKmh,
+      mpuSpeedKmh: filteredSpeedKmh, // Use filtered speed
       routeId: routeId,
       timestamp: DateTime.now().toUtc().toIso8601String(),
       comfort: comfort,

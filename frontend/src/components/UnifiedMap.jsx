@@ -554,15 +554,15 @@ const UnifiedMap = ({
   
   const gpsStatus = getGPSStatus();
   
-  const mapStyle = {
-    height,
+  // Use a simple block container instead of flex column to avoid extra space
+  // when parent uses min-height instead of fixed height. The inner map host
+  // uses height: 100% + min-height to fill available space.
+  const mapHostStyle = {
+    height: height === '100%' ? '100%' : height,
     minHeight: isFullscreen ? undefined : minHeight,
     width: '100%',
-    // Flex column + flex:1 host below: the map fills whatever height the
-    // embedding card resolves to instead of only its minimum.
-    display: 'flex',
-    flexDirection: 'column',
     borderRadius: isFullscreen ? '0' : '16px',
+    position: 'relative',
     ...style
   };
   
@@ -574,10 +574,7 @@ const UnifiedMap = ({
     bottom: 0,
     zIndex: 9999,
     background: '#1a1a2e',
-  } : {
-    ...style,
-    position: 'relative',
-  };
+  } : mapHostStyle;
   
   const renderMapContent = () => (
     <>
@@ -671,7 +668,8 @@ const UnifiedMap = ({
                   <span style={{ color: '#666' }}>Comfort:</span>
                   <span style={{ 
                     fontWeight: 'bold', 
-                    color: (telemetry.comfort || 'Smooth') === 'Smooth' ? '#28a745' : '#f97316' 
+                    color: (telemetry.comfort || 'Smooth') === 'Smooth' ? '#28a745' : 
+                           (telemetry.comfort || 'Smooth') === 'Moderate' ? '#f97316' : '#ef4444' 
                   }}>
                     {telemetry.comfort || 'Smooth'}
                   </span>
@@ -835,14 +833,16 @@ const UnifiedMap = ({
                   letterSpacing: '0.5px'
                 }}>
                   <Wind size={10} style={{ 
-                    color: (telemetry.comfort || 'Smooth') === 'Smooth' ? '#28a745' : '#f97316' 
+                    color: (telemetry.comfort || 'Smooth') === 'Smooth' ? '#28a745' : 
+                           (telemetry.comfort || 'Smooth') === 'Moderate' ? '#f97316' : '#ef4444' 
                   }} />
                   Comfort
                 </div>
                 <div style={{ 
                   fontSize: '0.85rem', 
                   fontWeight: '700', 
-                  color: (telemetry.comfort || 'Smooth') === 'Smooth' ? '#28a745' : '#f97316',
+                  color: (telemetry.comfort || 'Smooth') === 'Smooth' ? '#28a745' : 
+                         (telemetry.comfort || 'Smooth') === 'Moderate' ? '#f97316' : '#ef4444',
                 }}>
                   {telemetry.comfort || 'Smooth'}
                 </div>
@@ -1112,7 +1112,7 @@ const UnifiedMap = ({
     >
       {fullscreenHeader}
       <div style={{
-        flex: 1,
+        height: '100%',
         minHeight: isFullscreen ? 0 : minHeight,
         width: '100%',
         position: 'relative',
