@@ -24,24 +24,31 @@ export class AuthController {
   @Throttle({ short: { limit: 5, ttl: 60000 } }) // 5 attempts per minute
   async login(@Body() loginDto: LoginDto, @Res({ passthrough: true }) res: Response) {
     const result = await this.authService.login(loginDto);
-    
+
     if (result.status === 'success') {
       // Generate JWT token for HttpOnly cookie
       const token = this.authService.generateToken(result.user);
-      
-      // Set HttpOnly cookie with token
+
+      // Cross-site deployments (Vercel app -> Render API) only carry cookies
+      // marked SameSite=None; localhost dev stays on Lax because None+Secure
+      // breaks over plain http.
+      const isProduction = process.env.NODE_ENV === 'production';
       res.cookie('access_token', token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
+        secure: isProduction,
+        sameSite: isProduction ? 'none' : 'lax',
         maxAge: 24 * 60 * 60 * 1000, // 1 day
         path: '/',
       });
-      
-      // Don't send token in response body
-      return { status: 'success', user: result.user };
+
+      // The token is ALSO returned in the body: the Flutter bus app and the
+      // web Login page authenticate every later request with
+      // `Authorization: Bearer`, and browsers may refuse to send a cross-site
+      // cookie back (third-party cookie blocking), so the cookie can never be
+      // the only credential.
+      return { status: 'success', token, user: result.user };
     }
-    
+
     return result;
   }
 

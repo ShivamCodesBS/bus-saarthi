@@ -77,7 +77,9 @@ const Login = () => {
         const response = await axios.post(`${BACKEND_URL}/api/login`, {
           login_id: userId,
           password: password
-        });
+          // Cross-site: without credentials the browser drops the HttpOnly
+          // session cookie the API sets alongside the body token.
+        }, { withCredentials: true });
 
         if (response.data.status === 'success') {
           const userData = {

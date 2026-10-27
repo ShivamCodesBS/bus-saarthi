@@ -22,11 +22,21 @@ const urlBase64ToUint8Array = (base64String) => {
   return outputArray;
 };
 
-// Get token from backend (HttpOnly cookie can't be read by JS)
-const getAuthToken = async () => {
+// Get token from the HttpOnly cookie where the browser sends it, falling
+// back to the token stored with the session — cross-site deployments
+// (Vercel app -> Render API) may block the cookie entirely, so the stored
+// token is what actually keeps those sessions alive.
+const getAuthToken = async ({ allowStored = true } = {}) => {
   try {
     const res = await axios.get(`${BACKEND_URL}/api/auth/token`, { withCredentials: true });
-    return res.data.token;
+    if (res.data?.token) return res.data.token;
+  } catch {
+    /* cookie not sent — fall through to the stored session */
+  }
+  if (!allowStored) return null;
+  try {
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+    return stored?.token || null;
   } catch {
     return null;
   }
@@ -71,14 +81,25 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Fetch user from backend on load (uses HttpOnly cookie automatically)
+  // Restore the session on load. A credential is resolved (cookie token or
+  // the stored session's token) and validated against /api/users/me with the
+  // Bearer header — the cookie alone can never be relied on cross-site.
   useEffect(() => {
     const initAuth = async () => {
       try {
-        const res = await axios.get(`${BACKEND_URL}/api/users/me`, { withCredentials: true });
+        const token = await getAuthToken();
+        if (!token) {
+          console.log("Not authenticated");
+          return;
+        }
+        const res = await axios.get(`${BACKEND_URL}/api/users/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+          withCredentials: true,
+        });
         if (res.data) {
           const userData = {
             ...res.data,
+            token,
             id: res.data.loginId || res.data.login_id,
           };
           setUser(userData);
@@ -86,6 +107,10 @@ export const AuthProvider = ({ children }) => {
           subscribeToPushNotifications();
         }
       } catch (e) {
+        // 401 (or worse): the credential is expired/revoked. Drop the stored
+        // session so the next load starts clean at the login screen instead
+        // of restoring a half-broken session.
+        localStorage.removeItem(STORAGE_KEY);
         console.log("Not authenticated");
       } finally {
         setLoading(false);
@@ -132,8 +157,11 @@ export const AuthProvider = ({ children }) => {
     // The auth token lets the gateway auto-join `user_<login_id>` — that
     // room is what carries profile_update / personal notifications.
     let socket = null;
+    let cancelled = false;
+
     const initSocket = async () => {
       const token = await getAuthToken();
+      if (cancelled) return;
       socket = io(BACKEND_URL, {
         transports: ['websocket', 'polling'],
         auth: { token },
@@ -141,29 +169,35 @@ export const AuthProvider = ({ children }) => {
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
       });
+
+      socket.on('connect_error', (err) => {
+        console.warn('Socket connection error (Auth):', err.message);
+      });
+
+      socket.on('profile_update', (data) => {
+        if (data.login_id === user.id || data.login_id === user.login_id) {
+          setUser(prev => {
+            if (!prev) return prev;
+            const updated = {
+              ...prev,
+              profile_pic: data.profile_pic,
+              name: data.name || prev.name,
+            };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+            return updated;
+          });
+        }
+      });
     };
+    // Listeners register INSIDE initSocket: the token fetch is async, so
+    // touching `socket` before it resolves dereferences null — that was the
+    // white screen every signed-in user hit on load.
     initSocket();
-    
-    socket.on('connect_error', (err) => {
-      console.warn('Socket connection error (Auth):', err.message);
-    });
 
-    socket.on('profile_update', (data) => {
-      if (data.login_id === user.id || data.login_id === user.login_id) {
-        setUser(prev => {
-          if (!prev) return prev;
-          const updated = { 
-            ...prev, 
-            profile_pic: data.profile_pic,
-            name: data.name || prev.name,
-          };
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-          return updated;
-        });
-      }
-    });
-
-    return () => socket.disconnect();
+    return () => {
+      cancelled = true;
+      socket?.disconnect();
+    };
   }, [user?.id, user?.login_id]);
 
   /**
@@ -172,6 +206,14 @@ export const AuthProvider = ({ children }) => {
    * The session lives in localStorage (user data only), token is in HttpOnly cookie.
    */
   const login = useCallback(async (userData) => {
+    // The login response carries the token (needed for every later Bearer
+    // call). If a caller passes a user without one, pull it from the cookie
+    // that the login response just set — deliberately NOT the localStorage
+    // fallback, which could attach a previous session's token here.
+    if (!userData?.token) {
+      const token = await getAuthToken({ allowStored: false });
+      userData = { ...userData, token };
+    }
     setUser(userData);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(userData));
     await subscribeToPushNotifications();
@@ -200,7 +242,10 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     setUser(null);
     localStorage.removeItem(STORAGE_KEY);
-    await axios.post(`${BACKEND_URL}/api/auth/logout`, {}, { withCredentials: true });
+    // withCredentials so the server can clear the HttpOnly cookie too —
+    // without it the cookie survives across sites and the next login flow
+    // sees a stale session on the API side.
+    await axios.post(`${BACKEND_URL}/api/auth/logout`, {}, { withCredentials: true }).catch(() => {});
     clearSwrDiskCache();
   };
 

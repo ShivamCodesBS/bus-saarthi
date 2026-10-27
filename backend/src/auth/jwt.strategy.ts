@@ -13,7 +13,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private cache: CacheService,
   ) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      // Bearer header first (what the web app and Flutter app send); the
+      // HttpOnly cookie set at login is the fallback so same-site browser
+      // sessions authenticate even when a caller forgets the header.
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+        (req: any) => req?.cookies?.access_token || null,
+      ]),
       ignoreExpiration: false,
       secretOrKey: configService.get<string>('jwt.secret')!,
     });
