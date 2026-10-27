@@ -8,10 +8,14 @@ import { TimeoutInterceptor } from './common/interceptors/timeout.interceptor';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { RedisIoAdapter } from './gateway/redis-io.adapter';
 import { ConfigService } from '@nestjs/config';
+import cookieParser from 'cookie-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
+
+  // Parse cookies for HttpOnly token storage
+  app.use(cookieParser());
 
   // Build allowed origins from env var (comma-separated) + sensible defaults
   const extraOrigins = (process.env.CORS_ORIGINS || '')

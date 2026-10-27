@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import { clearSwrDiskCache } from '../hooks/useStaleWhileRevalidate';
@@ -22,16 +22,25 @@ const urlBase64ToUint8Array = (base64String) => {
   return outputArray;
 };
 
-const subscribeToPushNotifications = async (token) => {
+// Get token from backend (HttpOnly cookie can't be read by JS)
+const getAuthToken = async () => {
+  try {
+    const res = await axios.get(`${BACKEND_URL}/api/auth/token`, { withCredentials: true });
+    return res.data.token;
+  } catch {
+    return null;
+  }
+};
+
+const subscribeToPushNotifications = async () => {
+  const token = await getAuthToken();
+  if (!token) return;
+  
   if ('serviceWorker' in navigator && 'PushManager' in window) {
     try {
       const publicVapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
-      // Skip silently if VAPID key is not configured (local dev)
       if (!publicVapidKey) return;
 
-      // Never re-prompt a user who dismissed the permission bubble too many
-      // times — Chrome hard-blocks it and every login spammed the console
-      // with "Notifications permission has been blocked".
       if (!('Notification' in window)) return;
       if (Notification.permission === 'denied') return;
 
@@ -53,7 +62,6 @@ const subscribeToPushNotifications = async (token) => {
         });
       }
     } catch (err) {
-      // Silent fail — push notifications are optional and require HTTPS + VAPID keys
       if (import.meta.env.DEV) console.debug('Push notifications unavailable in dev:', err.name);
     }
   }
@@ -63,20 +71,27 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Fetch user from backend on load (uses HttpOnly cookie automatically)
   useEffect(() => {
-    const storedUser = localStorage.getItem(STORAGE_KEY);
-    if (storedUser) {
+    const initAuth = async () => {
       try {
-        const parsedUser = JSON.parse(storedUser);
-        setUser(parsedUser);
-        if (parsedUser.token) {
-          subscribeToPushNotifications(parsedUser.token);
+        const res = await axios.get(`${BACKEND_URL}/api/users/me`, { withCredentials: true });
+        if (res.data) {
+          const userData = {
+            ...res.data,
+            id: res.data.loginId || res.data.login_id,
+          };
+          setUser(userData);
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(userData));
+          subscribeToPushNotifications();
         }
       } catch (e) {
-        console.error("Error parsing user data");
+        console.log("Not authenticated");
+      } finally {
+        setLoading(false);
       }
-    }
-    setLoading(false);
+    };
+    initAuth();
   }, []);
 
   /**
@@ -101,9 +116,7 @@ export const AuthProvider = ({ children }) => {
       try {
         const nextUser = JSON.parse(event.newValue);
         setUser(nextUser);
-        if (nextUser?.token) {
-          subscribeToPushNotifications(nextUser.token);
-        }
+        subscribeToPushNotifications();
       } catch (e) {
         setUser(null);
       }
@@ -118,13 +131,18 @@ export const AuthProvider = ({ children }) => {
     if (!user) return;
     // The auth token lets the gateway auto-join `user_<login_id>` — that
     // room is what carries profile_update / personal notifications.
-    const socket = io(BACKEND_URL, {
-      transports: ['websocket', 'polling'],
-      auth: { token: user.token },
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-    });
+    let socket = null;
+    const initSocket = async () => {
+      const token = await getAuthToken();
+      socket = io(BACKEND_URL, {
+        transports: ['websocket', 'polling'],
+        auth: { token },
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+      });
+    };
+    initSocket();
     
     socket.on('connect_error', (err) => {
       console.warn('Socket connection error (Auth):', err.message);
@@ -151,17 +169,13 @@ export const AuthProvider = ({ children }) => {
   /**
    * Sign in.
    *
-   * The session lives in localStorage, which every tab of the same origin
-   * shares. Writing it here is what lets the other tabs pick the change up
-   * through the `storage` event below.
+   * The session lives in localStorage (user data only), token is in HttpOnly cookie.
    */
-  const login = (userData) => {
+  const login = useCallback(async (userData) => {
     setUser(userData);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(userData));
-    if (userData.token) {
-      subscribeToPushNotifications(userData.token);
-    }
-  };
+    await subscribeToPushNotifications();
+  }, []);
 
   /**
    * Merge partial profile changes (name, phone, profile_pic, …) into the
@@ -183,11 +197,10 @@ export const AuthProvider = ({ children }) => {
    * Sign out. The other tabs are told by the `storage` event, so a session
    * cannot survive in a tab that is still open.
    */
-  const logout = () => {
+  const logout = async () => {
     setUser(null);
     localStorage.removeItem(STORAGE_KEY);
-    // The persisted dashboard caches are token-scoped, but clearing them on
-    // sign-out keeps the next login honest.
+    await axios.post(`${BACKEND_URL}/api/auth/logout`, {}, { withCredentials: true });
     clearSwrDiskCache();
   };
 
