@@ -26,7 +26,9 @@ export class UsersService {
    * Strip the password hash and the sensitive JSON blobs from a user record
    * before it leaves the server.
    */
-  private sanitize<T extends Record<string, any>>(user: T): Omit<T, 'password'> {
+  private sanitize<T extends Record<string, any>>(
+    user: T,
+  ): Omit<T, 'password'> {
     const { password, wakeAlarm, ...rest } = user as any;
     return rest;
   }
@@ -223,7 +225,11 @@ export class UsersService {
 
     await this.cache.delByPattern('users:*');
     await this.cache.del(`auth:user:${user.loginId}`);
-    return { status: 'success', message: 'User created', user: this.sanitize(user) };
+    return {
+      status: 'success',
+      message: 'User created',
+      user: this.sanitize(user),
+    };
   }
 
   async update(loginId: string, body: UpdateUserDto, actorRole: UserRole) {
@@ -243,47 +249,50 @@ export class UsersService {
       password = await bcrypt.hash(body.password, 10);
     }
 
-const updatedUser = await this.prisma.user.update({
-    where: { loginId },
-    data: {
-      name: body.name,
-      role: body.role as UserRole,
-      routeId: body.route_id,
-      feeStatus: body.fee_status as FeeStatus,
-      phone: body.phone,
-      email: body.email,
-      designation: body.designation,
-      subject: body.subject,
-      profilePic: body.profile_pic,
-      wakeAlarm: body.wake_alarm,
-      locationLat: body.location_lat,
-      locationLng: body.location_lng,
-      licenseNumber: body.licenseNumber,
-      licenseExpiry: body.licenseExpiry
-        ? new Date(body.licenseExpiry)
-        : undefined,
-      experienceYears: body.experienceYears
-        ? Number(body.experienceYears)
-        : undefined,
-      bloodGroup: body.bloodGroup,
-      parentName: body.parentName,
-      parentPhone: body.parentPhone,
-      dob: body.dob ? new Date(body.dob) : undefined,
-      address: body.address,
-      gradeClass: body.gradeClass,
-      password: password,
-    },
-  });
+    const updatedUser = await this.prisma.user.update({
+      where: { loginId },
+      data: {
+        name: body.name,
+        role: body.role as UserRole,
+        routeId: body.route_id,
+        feeStatus: body.fee_status as FeeStatus,
+        phone: body.phone,
+        email: body.email,
+        designation: body.designation,
+        subject: body.subject,
+        profilePic: body.profile_pic,
+        wakeAlarm: body.wake_alarm,
+        locationLat: body.location_lat,
+        locationLng: body.location_lng,
+        licenseNumber: body.licenseNumber,
+        licenseExpiry: body.licenseExpiry
+          ? new Date(body.licenseExpiry)
+          : undefined,
+        experienceYears: body.experienceYears
+          ? Number(body.experienceYears)
+          : undefined,
+        bloodGroup: body.bloodGroup,
+        parentName: body.parentName,
+        parentPhone: body.parentPhone,
+        dob: body.dob ? new Date(body.dob) : undefined,
+        address: body.address,
+        gradeClass: body.gradeClass,
+        password: password,
+      },
+    });
 
-  // The role may have changed — drop the cached identity.
-  await this.cache.delByPattern('users:*');
-  await this.cache.del(`auth:user:${loginId}`);
+    // User updates can change wakeAlarm through this generic endpoint too.
+    await this.cache.del('wake:alarms:active');
 
-  return {
-    status: 'success',
-    message: 'User updated',
-    user: this.sanitize(updatedUser),
-  };
+    // The role may have changed — drop the cached identity.
+    await this.cache.delByPattern('users:*');
+    await this.cache.del(`auth:user:${loginId}`);
+
+    return {
+      status: 'success',
+      message: 'User updated',
+      user: this.sanitize(updatedUser),
+    };
   }
 
   async remove(loginId: string, actorRole: UserRole) {
@@ -380,9 +389,7 @@ const updatedUser = await this.prisma.user.update({
     // A user may only change their own password. Staff changing someone
     // else's password must go through the admin update endpoint.
     if (requestingLoginId !== loginId && actorRole !== UserRole.admin) {
-      throw new ForbiddenException(
-        'You can only change your own password',
-      );
+      throw new ForbiddenException('You can only change your own password');
     }
 
     const user = await this.prisma.user.findUnique({
@@ -429,6 +436,7 @@ const updatedUser = await this.prisma.user.update({
       where: { loginId },
       data: { wakeAlarm: alarmData },
     });
+    await this.cache.del('wake:alarms:active');
 
     // Save push subscription if provided
     if (dto.subscription) {
@@ -458,6 +466,7 @@ const updatedUser = await this.prisma.user.update({
       where: { loginId },
       data: { wakeAlarm: { enabled: false } },
     });
+    await this.cache.del('wake:alarms:active');
 
     return { status: 'success', message: 'Wake alarm cancelled' };
   }
@@ -543,6 +552,9 @@ const updatedUser = await this.prisma.user.update({
     });
 
     await this.cache.delByPattern('users:*');
-    return { status: 'success', message: 'Face reset approved, user can now re-enroll' };
+    return {
+      status: 'success',
+      message: 'Face reset approved, user can now re-enroll',
+    };
   }
 }

@@ -53,7 +53,11 @@ export class GrievancesService {
     // The route comes from the user's assignment, not from the client. If the
     // client sends a route, it must match the user's own assignment.
     let effectiveRoute = user?.routeId ?? null;
-    if (routeId && effectiveRoute && String(routeId) !== String(effectiveRoute)) {
+    if (
+      routeId &&
+      effectiveRoute &&
+      String(routeId) !== String(effectiveRoute)
+    ) {
       effectiveRoute = effectiveRoute;
     }
     if (!effectiveRoute) {
@@ -85,7 +89,11 @@ export class GrievancesService {
     await this.cache.delByPattern('grievances:*');
 
     // Notify staff that a new grievance is waiting.
-    await this.notifyStaffOfNewGrievance(grievance, resolvedName, route?.routeName);
+    await this.notifyStaffOfNewGrievance(
+      grievance,
+      resolvedName,
+      route?.routeName,
+    );
 
     return {
       status: 'success',
@@ -111,7 +119,7 @@ export class GrievancesService {
     options: { status?: string; route?: string; onlyMine?: boolean } = {},
   ) {
     const staff = isStaff(role);
-    
+
     // Build cache key based on query parameters
     const cacheKey = `grievances:${loginId}:${role}:${JSON.stringify(options)}`;
 
@@ -339,11 +347,12 @@ export class GrievancesService {
    */
   async confirmResolved(id: string, loginId: string) {
     const grievance = await this.requireGrievance(id);
-    if (grievance.loginId !== loginId) {
-      throw new ForbiddenException(
-        'Only the person who raised this complaint can confirm it',
-      );
-    }
+    await this.assertReporterOrLinkedParent(
+      loginId,
+      grievance.loginId,
+      'confirm',
+    );
+
     if (grievance.status !== GrievanceStatus.resolved) {
       throw new BadRequestException(
         'This complaint is not awaiting your confirmation',
@@ -360,17 +369,17 @@ export class GrievancesService {
     });
 
     await this.cache.delByPattern('grievances:*');
-    await this.notifyStaff(
-      grievance.loginId,
-      updated.id,
-      {
-        title: '👍 Complaint confirmed by complainant',
-        body: 'The complainant confirmed the issue is resolved. The complaint is now closed.',
-        type: 'grievance_confirmed',
-      },
-    );
+    await this.notifyStaff(grievance.loginId, updated.id, {
+      title: '👍 Complaint confirmed by complainant',
+      body: 'The complainant confirmed the issue is resolved. The complaint is now closed.',
+      type: 'grievance_confirmed',
+    });
 
-    return { status: 'success', message: 'Thank you for confirming', data: updated };
+    return {
+      status: 'success',
+      message: 'Thank you for confirming',
+      data: updated,
+    };
   }
 
   /**
@@ -379,11 +388,12 @@ export class GrievancesService {
    */
   async reopen(id: string, loginId: string, reason?: string) {
     const grievance = await this.requireGrievance(id);
-    if (grievance.loginId !== loginId) {
-      throw new ForbiddenException(
-        'Only the person who raised this complaint can reopen it',
-      );
-    }
+    await this.assertReporterOrLinkedParent(
+      loginId,
+      grievance.loginId,
+      'reopen',
+    );
+
     if (grievance.status !== GrievanceStatus.resolved) {
       throw new BadRequestException(
         'Only a complaint that is awaiting your confirmation can be reopened',
@@ -406,17 +416,13 @@ export class GrievancesService {
     });
 
     await this.cache.delByPattern('grievances:*');
-    await this.notifyStaff(
-      grievance.loginId,
-      updated.id,
-      {
-        title: '⚠️ Complaint reopened — not satisfied',
-        body: reason
-          ? `The complainant says the issue is not fixed: ${reason}`
-          : 'The complainant has rejected the fix and reopened the complaint.',
-        type: 'grievance_reopened',
-      },
-    );
+    await this.notifyStaff(grievance.loginId, updated.id, {
+      title: '⚠️ Complaint reopened — not satisfied',
+      body: reason
+        ? `The complainant says the issue is not fixed: ${reason}`
+        : 'The complainant has rejected the fix and reopened the complaint.',
+      type: 'grievance_reopened',
+    });
 
     return {
       status: 'success',
@@ -467,12 +473,39 @@ export class GrievancesService {
     return grievance;
   }
 
+  private async assertReporterOrLinkedParent(
+    actorLoginId: string,
+    reporterLoginId: string,
+    action: 'confirm' | 'reopen',
+  ) {
+    if (actorLoginId === reporterLoginId) return;
+
+    const link = await this.prisma.parentChildLink.findUnique({
+      where: {
+        parentLoginId_childLoginId: {
+          parentLoginId: actorLoginId,
+          childLoginId: reporterLoginId,
+        },
+      },
+      select: { parentLoginId: true },
+    });
+    if (!link) {
+      throw new ForbiddenException(
+        `Only the complainant or their linked parent can ${action} this complaint`,
+      );
+    }
+  }
+
   private async notifyComplainant(
     grievance: { id: string; loginId: string },
     payload: { title: string; body: string; type: string },
   ) {
     try {
-      await this.notificationsService.notifyUser(grievance.loginId, grievance.id, payload);
+      await this.notificationsService.notifyUser(
+        grievance.loginId,
+        grievance.id,
+        payload,
+      );
     } catch {
       /* notification delivery must not fail the request */
     }
@@ -487,13 +520,21 @@ export class GrievancesService {
       const staff = await this.prisma.user.findMany({
         where: {
           role: {
-            in: [UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin],
+            in: [
+              UserRole.admin,
+              UserRole.transport_incharge,
+              UserRole.tech_admin,
+            ],
           },
         },
         select: { loginId: true },
       });
       for (const s of staff) {
-        await this.notificationsService.notifyUser(s.loginId, grievanceId, payload);
+        await this.notificationsService.notifyUser(
+          s.loginId,
+          grievanceId,
+          payload,
+        );
       }
     } catch {
       /* ignore */
@@ -509,7 +550,11 @@ export class GrievancesService {
       const staff = await this.prisma.user.findMany({
         where: {
           role: {
-            in: [UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin],
+            in: [
+              UserRole.admin,
+              UserRole.transport_incharge,
+              UserRole.tech_admin,
+            ],
           },
         },
         select: { loginId: true },
