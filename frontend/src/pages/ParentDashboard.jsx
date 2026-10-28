@@ -19,7 +19,7 @@ import {
 } from 'recharts';
 import '../index.css';
 import { friendlyError } from '../lib/errors';
-import { STOP_COORDS } from '../lib/stopCoords';
+import { useStaleWhileRevalidate } from '../hooks/useStaleWhileRevalidate';
 import { StatCardSkeleton, ComplaintSkeleton } from '../components/ui/skeleton';
 import UnifiedMap from '../components/UnifiedMap';
 
@@ -188,55 +188,30 @@ const ParentDashboard = () => {
   const [busLocation, setBusLocation] = useState([28.3180, 79.4670]);
   const [telemetry, setTelemetry] = useState(null);
   const [telemetryStale, setTelemetryStale] = useState(false);
+
+  // Last DB-recorded GPS fix for the child's route. While the bus is
+  // offline the marker sits at the last place it was actually seen — the
+  // same last-seen behaviour the student/admin/TI maps have.
+  const routeToTrackNow = childMergeInfo?.activeRouteId || child?.routeId;
+  const { data: lastKnownData } = useStaleWhileRevalidate(
+    `/api/telemetry/last/${routeToTrackNow || ''}`,
+    { cacheKey: `parent:last-loc:${routeToTrackNow || 'none'}`, staleTime: 15000, token: user?.token, skip: !routeToTrackNow },
+  );
+  const lastKnown = useMemo(() => {
+    const d = lastKnownData?.data;
+    if (!d?.lat || !d?.lng) return null;
+    return { position: [d.lat, d.lng], timestamp: d.timestamp, speed: d.speed };
+  }, [lastKnownData]);
+
+  useEffect(() => {
+    if (telemetryStale && lastKnown) {
+      setBusLocation(lastKnown.position);
+    }
+  }, [telemetryStale, lastKnown]);
   
   // View locking & map controls (handled by UnifiedMap)
   const [autoFollow, setAutoFollow] = useState(true);
   
-  // Dynamic Route Polyline based on routeInfo (same as student Home map)
-  const dynamicRoutePolyline = useMemo(() => {
-    if (!routeInfo || !routeInfo.stops) {
-      return [
-        [28.3180, 79.4670],
-        [28.3250, 79.4750],
-        [28.3320, 79.4800],
-        [28.3400, 79.4900],
-      ];
-    }
-    let stopsArray = [];
-    if (Array.isArray(routeInfo.stops)) {
-      stopsArray = routeInfo.stops;
-    } else {
-      try {
-        const parsed = JSON.parse(routeInfo.stops);
-        if (Array.isArray(parsed)) stopsArray = parsed;
-        else stopsArray = String(routeInfo.stops).split(',').map((s) => s.trim());
-      } catch {
-        stopsArray = String(routeInfo.stops).split(',').map((s) => s.trim());
-      }
-    }
-
-    const coords = stopsArray
-      .map((s) => {
-        const name = typeof s === 'object' && s !== null ? (s.name || s.stopName) : String(s).trim();
-        return STOP_COORDS[name];
-      })
-      .filter(Boolean);
-
-    if (coords.length > 0) {
-      const lastStop = typeof stopsArray[stopsArray.length - 1] === 'object'
-        ? (stopsArray[stopsArray.length - 1]?.name || '')
-        : String(stopsArray[stopsArray.length - 1]).trim();
-      if (lastStop !== 'Invertis University') {
-        coords.push(STOP_COORDS['Invertis University']);
-      }
-      return coords;
-    }
-
-    return [
-      [28.3180, 79.4670],
-      [28.3400, 79.4900],
-    ];
-  }, [routeInfo]);
 
   const [isLoading, setIsLoading] = useState(true);
   const pollingRef = useRef(null);
@@ -735,6 +710,7 @@ const ParentDashboard = () => {
                   routeInfo={routeInfo}
                   telemetry={telemetry}
                   isLive={!!telemetry && !telemetryStale}
+                  lastKnown={lastKnown}
                   initialZoom={14}
                   height="320px"
                   busLabel={`Bus ${routeInfo?.busNumber || routeInfo?.bus_number || child?.routeId || ''}`}

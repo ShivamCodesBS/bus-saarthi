@@ -28,7 +28,8 @@ describe('GrievancesService parent confirmation access', () => {
     };
     cache = { delByPattern: jest.fn() };
     const notifications = { notifyUser: jest.fn() } as any;
-    service = new GrievancesService(prisma, notifications, cache);
+    const eventEmitter = { emit: jest.fn() } as any;
+    service = new GrievancesService(prisma, notifications, cache, eventEmitter);
   });
 
   it.each(['confirm', 'reopen'] as const)(
@@ -57,7 +58,6 @@ describe('GrievancesService parent confirmation access', () => {
             childLoginId: 'student-1',
           },
         },
-        select: { parentLoginId: true },
       });
     },
   );
