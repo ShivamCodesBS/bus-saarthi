@@ -105,7 +105,7 @@ export class GrievancesController {
   @Patch('grievance/:id/start')
   @UseGuards(RolesGuard)
   @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
-  start(@Param('id') id: string, @Request() req: any, @Body() body: { note?: string }) {
+  start(@Param('id') id: string, @Request() req: any, @Body() body: { note?: string } = {}) {
     return this.grievancesService.startProgress(
       id,
       req.user.loginId || req.user.login_id,
@@ -123,7 +123,7 @@ export class GrievancesController {
   resolveAdmin(
     @Param('id') id: string,
     @Request() req: any,
-    @Body() body: { note?: string; response?: string },
+    @Body() body: { note?: string; response?: string } = {},
   ) {
     return this.grievancesService.resolve(
       id,
@@ -139,7 +139,7 @@ export class GrievancesController {
   resolvePut(
     @Param('id') id: string,
     @Request() req: any,
-    @Body() body: { note?: string; response?: string },
+    @Body() body: { note?: string; response?: string } = {},
   ) {
     return this.grievancesService.resolve(
       id,
@@ -165,7 +165,7 @@ export class GrievancesController {
    * the top of the staff queue.
    */
   @Patch('grievance/:id/reopen')
-  reopen(@Param('id') id: string, @Request() req: any, @Body() body: { reason?: string }) {
+  reopen(@Param('id') id: string, @Request() req: any, @Body() body: { reason?: string } = {}) {
     return this.grievancesService.reopen(
       id,
       req.user.loginId || req.user.login_id,
@@ -182,7 +182,7 @@ export class GrievancesController {
   extend(
     @Param('id') id: string,
     @Request() req: any,
-    @Body() body: { hours?: number },
+    @Body() body: { hours?: number } = {},
   ) {
     return this.grievancesService.extendDeadline(
       id,
