@@ -32,7 +32,10 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final user = context.watch<AuthProvider>().user!;
+    final user = context.watch<AuthProvider>().user;
+    if (user == null) {
+      return const Scaffold(body: SizedBox.shrink());
+    }
     return ChangeNotifierProvider(
       create: (_) => TrackingProvider(user),
       child: const _HomeView(),
@@ -151,7 +154,10 @@ class _HomeViewState extends State<_HomeView> {
     final lang = context.watch<LanguageProvider>();
     final auth = context.watch<AuthProvider>();
     final tracking = context.watch<TrackingProvider>();
-    final user = auth.user!;
+    final user = auth.user;
+    if (user == null) {
+      return const Scaffold(body: SizedBox.shrink());
+    }
     final bool isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(

@@ -26,7 +26,10 @@ class ParentDashboardScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final user = context.watch<AuthProvider>().user!;
+    final user = context.watch<AuthProvider>().user;
+    if (user == null) {
+      return const Scaffold(body: SizedBox.shrink());
+    }
     return ChangeNotifierProvider(
       create: (_) {
         final p = ParentProvider(user);

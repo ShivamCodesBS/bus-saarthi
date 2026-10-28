@@ -24,7 +24,10 @@ class CommunityScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final user = context.watch<AuthProvider>().user!;
+    final user = context.watch<AuthProvider>().user;
+    if (user == null) {
+      return const Scaffold(body: SizedBox.shrink());
+    }
     return ChangeNotifierProvider(
       create: (_) {
         final p = CommunityProvider(user);
@@ -65,7 +68,10 @@ class _CommunityViewState extends State<_CommunityView> {
   Widget build(BuildContext context) {
     final lang = context.watch<LanguageProvider>();
     final community = context.watch<CommunityProvider>();
-    final user = context.watch<AuthProvider>().user!;
+    final user = context.watch<AuthProvider>().user;
+    if (user == null) {
+      return const Scaffold(body: SizedBox.shrink());
+    }
     final canCreateComplaint = !const {
       'admin',
       'tech_admin',
@@ -302,11 +308,18 @@ class _Navbar extends StatelessWidget {
                                   cursorColor: Colors.white,
                                   decoration: InputDecoration(
                                     isDense: true,
+                                    filled: false,
+                                    fillColor: Colors.transparent,
+                                    contentPadding: const EdgeInsets.symmetric(vertical: 6),
                                     border: InputBorder.none,
+                                    enabledBorder: InputBorder.none,
+                                    focusedBorder: InputBorder.none,
+                                    disabledBorder: InputBorder.none,
+                                    errorBorder: InputBorder.none,
                                     hintText: 'Search...',
                                     hintStyle: TextStyle(
                                       color: Colors.white.withValues(
-                                        alpha: 0.5,
+                                        alpha: 0.55,
                                       ),
                                       fontSize: 12,
                                     ),
@@ -2378,7 +2391,10 @@ class _CreateComplaintSheetState extends State<_CreateComplaintSheet> {
   Widget build(BuildContext context) {
     final community = context.watch<CommunityProvider>();
     final lang = context.watch<LanguageProvider>();
-    final user = context.watch<AuthProvider>().user!;
+    final user = context.watch<AuthProvider>().user;
+    if (user == null) {
+      return const SizedBox.shrink();
+    }
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textDark = isDark ? AppColors.darkText : AppColors.lightText;
     final textLight = isDark

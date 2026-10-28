@@ -56,6 +56,10 @@ mobile/.dart_tool/
 mobile/build/
 mobile/.flutter-plugins
 mobile/.flutter-plugins-dependencies
+bus_saarthi_app/.dart_tool/
+bus_saarthi_app/build/
+bus_saarthi_app/.flutter-plugins
+bus_saarthi_app/.flutter-plugins-dependencies
 # Kotlin build session files
 **/.kotlin/
 

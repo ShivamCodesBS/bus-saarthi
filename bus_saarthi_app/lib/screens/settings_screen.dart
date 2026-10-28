@@ -104,7 +104,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _faceReset() async {
-    final user = context.read<AuthProvider>().user!;
+    final user = context.read<AuthProvider>().user;
+    if (user == null) return;
     try {
       final response = await ApiClient.dio.post(
         '/api/users/me/face-reset',
@@ -152,7 +153,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final lang = context.watch<LanguageProvider>();
     final auth = context.watch<AuthProvider>();
     final theme = context.watch<ThemeProvider>();
-    final user = auth.user!;
+    final user = auth.user;
+    if (user == null) {
+      return const Scaffold(body: SizedBox.shrink());
+    }
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textDark = isDark ? AppColors.darkText : AppColors.lightText;
     final textLight = isDark
@@ -701,7 +705,11 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
       return;
     }
     setState(() => _loading = true);
-    final user = context.read<AuthProvider>().user!;
+    final user = context.read<AuthProvider>().user;
+    if (user == null) {
+      setState(() => _loading = false);
+      return;
+    }
     try {
       await ApiClient.dio.put(
         '/api/users/${user.loginId}/password',

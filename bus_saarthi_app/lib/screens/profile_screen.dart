@@ -37,7 +37,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _load() async {
     final auth = context.read<AuthProvider>();
-    final user = auth.user!;
+    final user = auth.user;
+    if (user == null) return;
     try {
       final res = await ApiClient.dio.get(
         '/api/users/me',
@@ -78,7 +79,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _loadAttendance() async {
-    final user = context.read<AuthProvider>().user!;
+    final user = context.read<AuthProvider>().user;
+    if (user == null) return;
     try {
       final res = await ApiClient.dio.get(
         '/api/attendance/user/${user.loginId}/summary?days=7',
@@ -104,7 +106,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       maxWidth: 1024,
     );
     if (picked == null || !mounted) return;
-    final user = context.read<AuthProvider>().user!;
+    final user = context.read<AuthProvider>().user;
+    if (user == null) return;
     setState(() => isUploading = true);
     try {
       final form = FormData();
@@ -239,7 +242,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final lang = context.watch<LanguageProvider>();
-    final user = context.watch<AuthProvider>().user!;
+    final user = context.watch<AuthProvider>().user;
+    if (user == null) {
+      return const Scaffold(body: SizedBox.shrink());
+    }
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textDark = isDark ? AppColors.darkText : AppColors.lightText;
     final textLight = isDark
