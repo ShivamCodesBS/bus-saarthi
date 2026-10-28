@@ -29,6 +29,12 @@ const AdminSpeedAnalytics = lazy(() => import('./pages/AdminSpeedAnalytics'));
 const Settings = lazy(() => import('./pages/Settings'));
 
 
+/** Passes the current path to the boundary so it resets on navigation. */
+function BoundaryWithReset({ children }) {
+  const location = useLocation();
+  return <ErrorBoundary resetKey={location.pathname}>{children}</ErrorBoundary>;
+}
+
 // Limiter to prevent toast spam
 const TOAST_LIMIT = 4;
 function ToastLimiter() {
@@ -192,7 +198,7 @@ function App() {
             }}
           />
           <Suspense fallback={<div className="h-screen flex items-center justify-center text-primary-blue font-bold">Loading...</div>}>
-            <ErrorBoundary>
+            <BoundaryWithReset>
               <Routes>
                 {/* Public Routes */}
                 <Route path="/" element={<Splash />} />
@@ -275,7 +281,7 @@ function App() {
                 {/* 404 Catch All Route */}
                 <Route path="*" element={<NotFound />} />
               </Routes>
-            </ErrorBoundary>
+            </BoundaryWithReset>
           </Suspense>
         </div>
       </Router>

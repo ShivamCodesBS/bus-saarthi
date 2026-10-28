@@ -11,31 +11,37 @@ const forceSignOut = () => {
   window.location.href = '/login';
 };
 
+/** Chunk-load failure messages across browsers (Chrome / Firefox / Safari). */
+const CHUNK_LOAD_RE =
+  /Failed to fetch dynamically imported module|error loading dynamically imported module|Importing a module script failed/i;
+
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false, error: null, errorInfo: null };
+    this.state = { hasError: false, error: null, errorInfo: null, chunkFailed: false };
   }
 
   static getDerivedStateFromError(error) {
-    // Update state so the next render will show the fallback UI.
-    return { hasError: true, error };
+    // Update state so the next render will show the fallback UI. Chunk-load
+    // failures get a dedicated "updating" screen — the auto-reload below
+    // heals them, and flashing the scary error page for a second first read
+    // as "the app is broken" on every deploy.
+    return { hasError: true, error, chunkFailed: CHUNK_LOAD_RE.test(error?.message || '') };
   }
 
   componentDidUpdate(prevProps) {
     // Reset when the route changes, so a single transient error does not
     // leave the whole app stuck on the error screen until a full reload.
     if (this.state.hasError && prevProps.resetKey !== this.props.resetKey) {
-      this.setState({ hasError: false, error: null, errorInfo: null });
+      this.setState({ hasError: false, error: null, errorInfo: null, chunkFailed: false });
     }
   }
 
   componentDidCatch(error, errorInfo) {
-    // Check if the error is a dynamic import failure (common with Vite cache issues/deployments)
-    const isChunkLoadFailed =
-      /Failed to fetch dynamically imported module/i.test(error?.message);
-
-    if (isChunkLoadFailed) {
+    // A stale tab after a deploy (or a flaky network) can request a chunk
+    // hash that no longer exists. Reload once to pick up the fresh build —
+    // cached assets make the reload invisible.
+    if (CHUNK_LOAD_RE.test(error?.message || '')) {
       const lastReload = parseInt(
         sessionStorage.getItem('dynamic_import_reload_time') || '0',
         10,
@@ -58,6 +64,19 @@ class ErrorBoundary extends React.Component {
 
   render() {
     if (this.state.hasError) {
+      // Chunk failures heal via the reload above — show a neutral updating
+      // screen instead of the error UI while it happens.
+      if (this.state.chunkFailed) {
+        return (
+          <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-[#0f172a] font-sans">
+            <div className="flex flex-col items-center gap-4 text-slate-500 dark:text-slate-300">
+              <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+              <p className="font-bold tracking-tight text-sm uppercase">Updating Bus Saarthi…</p>
+            </div>
+          </div>
+        );
+      }
+
       return (
         <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-[#0f172a] p-4 font-sans">
           <div className="max-w-md w-full glass p-glass rounded-3xl bg-white dark:bg-slate-800 shadow-xl overflow-hidden flex flex-col items-center text-center p-8 border border-slate-200 dark:border-slate-700">
@@ -84,7 +103,7 @@ class ErrorBoundary extends React.Component {
             <div className="flex flex-col sm:flex-row gap-3 w-full">
               <button
                 onClick={() => {
-                  this.setState({ hasError: false, error: null, errorInfo: null });
+                  this.setState({ hasError: false, error: null, errorInfo: null, chunkFailed: false });
                 }}
                 className="flex-1 flex items-center justify-center gap-2 w-full py-3 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-bold transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5"
               >
