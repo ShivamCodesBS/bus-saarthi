@@ -201,7 +201,12 @@ export class EventsGateway
 
     if (!lat || !lng || !routeId) return;
 
-    // Persist to DB so getLastTelemetry works even after restart/offline
+    // Persist to DB so getLastTelemetry works even after restart/offline.
+    // The comfort label rides along so the service can hysteresis it.
+    // There is deliberately NO direct broadcast here: processing the batch
+    // emits one SMOOTHED live_telemetry (the old raw broadcast + the emit
+    // from processing produced two different speeds a few hundred ms
+    // apart, which read as the speed flickering).
     try {
       const batchDto: TelemetryBatchDto = {
         route_id: String(routeId),
@@ -211,6 +216,7 @@ export class EventsGateway
           gps_speed_knots: gpsSpeedKnots ?? (mpuSpeedKmh ? mpuSpeedKmh / 1.852 : 0),
           mpu_speed_kmh: mpuSpeedKmh ?? (gpsSpeedKnots ? gpsSpeedKnots * 1.852 : 0),
           heading_deg: headingDeg ?? 0,
+          comfort,
           timestamp: timestamp.toISOString(),
         }],
       };
@@ -218,22 +224,6 @@ export class EventsGateway
     } catch (e) {
       this.logger.warn(`[Socket] Failed to persist telemetry for route ${routeId}: ${e.message}`);
     }
-
-    // Broadcast live location to all route subscribers (web dashboard, etc.)
-    const formattedPayload = {
-      route_id: String(routeId),
-      location: { lat, lng },
-      speed:
-        typeof mpuSpeedKmh === 'number'
-          ? mpuSpeedKmh
-          : typeof payload?.speed === 'number'
-            ? payload.speed
-            : (gpsSpeedKnots ?? 0) * 1.852,
-      heading: headingDeg,
-      comfort,
-      timestamp: timestamp.toISOString(),
-    };
-    this.server.to(`route_${routeId}`).emit('live_telemetry', formattedPayload);
 
     // Run wake alarm engine on GPS updates from bus (throttled per route)
     this.maybeCheckWakeAlarms(lat, lng, routeId);
