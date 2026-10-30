@@ -697,7 +697,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.red.shade900,
+        backgroundColor: AppTheme.danger,
         title: const Row(
           children: [
             Icon(Icons.warning_amber_rounded, color: Colors.white, size: 28),
@@ -723,7 +723,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.white,
-              foregroundColor: Colors.red.shade900,
+              foregroundColor: AppTheme.danger,
             ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text(
@@ -964,9 +964,9 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: _isSosActive ? Colors.red : Colors.red.shade50,
+                color: _isSosActive ? AppTheme.danger : AppTheme.danger.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.red.shade300),
+                border: Border.all(color: AppTheme.danger.withValues(alpha: 0.3)),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -974,7 +974,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
                   Icon(
                     Icons.warning_amber_rounded,
                     size: 16,
-                    color: _isSosActive ? Colors.white : Colors.red,
+                    color: _isSosActive ? Colors.white : AppTheme.danger,
                   ),
                   const SizedBox(width: 4),
                   Text(
@@ -982,7 +982,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w900,
-                      color: _isSosActive ? Colors.white : Colors.red,
+                      color: _isSosActive ? Colors.white : AppTheme.danger,
                     ),
                   ),
                 ],
@@ -1040,7 +1040,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
                 value: 'switch_mode',
                 child: Row(
                   children: [
-                    Icon(Icons.sensors_rounded, color: Color(0xFF10B981), size: 20),
+                    Icon(Icons.sensors_rounded, color: AppTheme.success, size: 20),
                     SizedBox(width: 10),
                     Text('Switch to In-Bus Scanner', style: TextStyle(fontWeight: FontWeight.w600)),
                   ],
@@ -1061,9 +1061,9 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
                 value: 'logout',
                 child: Row(
                   children: [
-                    Icon(Icons.logout_rounded, color: Colors.red, size: 20),
+                    Icon(Icons.logout_rounded, color: AppTheme.danger, size: 20),
                     SizedBox(width: 10),
-                    Text('Sign Out', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.red)),
+                    Text('Sign Out', style: TextStyle(fontWeight: FontWeight.w600, color: AppTheme.danger)),
                   ],
                 ),
               ),
@@ -1145,10 +1145,10 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
 
     // Ride comfort color and icon
     final comfortColor = _currentComfort == 'Smooth'
-        ? const Color(0xFF10B981)
+        ? AppTheme.success
         : _currentComfort == 'Moderate'
-            ? const Color(0xFFF59E0B)
-            : const Color(0xFFEF4444);
+            ? AppTheme.warning
+            : AppTheme.danger;
 
     return Container(
       decoration: BoxDecoration(
@@ -1321,7 +1321,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
                       label: 'HEADING',
                       value: heading != null ? '${heading.toStringAsFixed(0)}°' : '--',
                       unit: _getCardinal(heading),
-                      color: const Color(0xFF6366F1),
+                      color: AppTheme.info,
                       icon: Icons.explore_rounded,
                     ),
                   ),
@@ -1332,7 +1332,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
                       label: 'DISTANCE',
                       value: (_distanceTraveledMeters / 1000).toStringAsFixed(1),
                       unit: 'km',
-                      color: const Color(0xFF06B6D4),
+                      color: AppTheme.infoLight,
                       icon: Icons.alt_route_rounded,
                     ),
                   ),
@@ -1343,7 +1343,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
                       label: 'TRIP TIME',
                       value: _formatDuration(_tripDuration),
                       unit: '',
-                      color: const Color(0xFF10B981),
+                      color: AppTheme.success,
                       icon: Icons.timer_rounded,
                     ),
                   ),

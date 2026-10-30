@@ -82,7 +82,7 @@ export class SosService {
     };
   }
 
-  async cancel(loginId: string) {
+  async cancel(loginId: string, cancelledBy?: string) {
     await this.cache.del(`sos:cooldown:${loginId}`);
     this.inMemoryCooldown.delete(loginId);
 
@@ -106,10 +106,17 @@ export class SosService {
       select: { routeId: true },
     });
 
+    const cancelledByUser = cancelledBy || loginId;
+    const cancelledAt = new Date();
+
     this.eventEmitter.emit('sos.cancelled', {
       login_id: loginId,
       route: user?.routeId || 'unknown',
+      cancelled_by: cancelledByUser,
+      cancelled_at: cancelledAt.toISOString(),
     });
+
+    this.logger.log(`SOS cancelled for ${loginId} by ${cancelledByUser}`);
     return { status: 'success', message: 'SOS alert cancelled' };
   }
 

@@ -175,6 +175,9 @@ class TrackingProvider extends ChangeNotifier {
 
   // ── Bootstrap (the web useEffect body) ────────────────────────────────
   Future<void> _bootstrap() async {
+    // Sync wake alarm status from backend first
+    await _syncWakeAlarmFromBackend();
+
     // Allow the merge endpoint a short window to resolve before fetching route
     // scoped data. All requests are still generation-guarded below.
     _mergeCheckTimer = Timer(const Duration(milliseconds: 300), () {
@@ -187,6 +190,7 @@ class TrackingProvider extends ChangeNotifier {
     _fetchCrowdStatus();
     _fetchRouteData();
     _fetchNotifications();
+    _fetchUserGrievances();
     _checkSosStatus();
 
     _socket.connect(effectiveRouteId, user.loginId);
@@ -210,6 +214,36 @@ class TrackingProvider extends ChangeNotifier {
       }
     } catch (_) {}
     notifyListeners();
+  }
+
+  /// Fetch wake alarm status from backend and sync with local storage
+  Future<void> _syncWakeAlarmFromBackend() async {
+    try {
+      final res = await ApiClient.dio.get(
+        '/api/users/me/wake-alarm',
+        options: Options(headers: _authHeaders),
+      );
+      if (_disposed) return;
+      final data = res.data;
+      if (data is Map && data['alarmSet'] == true && data['alarm'] is Map) {
+        final alarm = data['alarm'] as Map;
+        alarmSet = true;
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('wake_alarm_enabled', 'true');
+        await prefs.setString(
+          'wake_alarm_data',
+          '{"lat":${alarm['lat']},"lng":${alarm['lng']},"thresholdKm":${alarm['thresholdKm']}}',
+        );
+      } else {
+        alarmSet = false;
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('wake_alarm_enabled');
+        await prefs.remove('wake_alarm_data');
+      }
+      notifyListeners();
+    } catch (_) {
+      // If backend fails, keep local state
+    }
   }
 
   Future<void> _checkMergeStatus() async {
@@ -318,6 +352,20 @@ class TrackingProvider extends ChangeNotifier {
           .toList();
       _markUnreadIfNew();
       _notify();
+    } catch (_) {}
+  }
+
+  Future<void> _fetchUserGrievances() async {
+    try {
+      final res = await ApiClient.dio.get(
+        '/api/grievances',
+        options: Options(headers: _authHeaders),
+        queryParameters: {'onlyMine': 'true'},
+      );
+      if (_disposed) return;
+      if (res.data != null) {
+        notifyListeners();
+      }
     } catch (_) {}
   }
 

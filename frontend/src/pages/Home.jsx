@@ -215,18 +215,44 @@ const Home = () => {
     };
     fetchNotifications();
 
-    // Check personal active SOS status
-    const checkSosStatus = async () => {
-      try {
-        const res = await axios.get(`${BACKEND_URL}/api/sos/my-status`, authHeaders);
-        if (res.data?.active) {
-          setSosActive(true);
-        }
-      } catch (err) {
-        // non-critical
+// Check personal active SOS status
+  const checkSosStatus = async () => {
+    try {
+      const res = await axios.get(`${BACKEND_URL}/api/sos/my-status`, authHeaders);
+      if (res.data?.active) {
+        setSosActive(true);
       }
-    };
-    checkSosStatus();
+    } catch (err) {
+      // non-critical
+    }
+  };
+  checkSosStatus();
+
+  // Sync wake alarm status from backend
+  const syncWakeAlarm = async () => {
+    try {
+      const res = await axios.get(`${BACKEND_URL}/api/users/me/wake-alarm`, authHeaders);
+      if (res.data?.alarmSet && res.data?.alarm) {
+        const alarm = res.data.alarm;
+        setAlarmSet(true);
+        localStorage.setItem('wake_alarm_enabled', 'true');
+        localStorage.setItem('wake_alarm_data', JSON.stringify({
+          lat: alarm.lat,
+          lng: alarm.lng,
+          thresholdKm: alarm.thresholdKm
+        }));
+      } else {
+        setAlarmSet(false);
+        localStorage.removeItem('wake_alarm_enabled');
+        localStorage.removeItem('wake_alarm_data');
+      }
+    } catch (err) {
+      // If backend fails, keep local state
+      const stored = localStorage.getItem('wake_alarm_enabled') === 'true';
+      setAlarmSet(stored);
+    }
+  };
+  syncWakeAlarm();
 
     // Socket.io connection for live data
     const socket = io(SOCKET_URL, {

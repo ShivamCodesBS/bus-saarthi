@@ -23,9 +23,9 @@ export class RedisIoAdapter extends IoAdapter {
       const { createClient } = await import('redis');
       const { createAdapter } = await import('@socket.io/redis-adapter');
 
-      const pubClient = createClient({ 
+      const pubClient = createClient({
         url: redisUrl,
-        socket: { reconnectStrategy: false }
+        socket: { reconnectStrategy: false },
       });
       const subClient = pubClient.duplicate();
 

@@ -69,7 +69,11 @@ export class RoutesService {
   async getLiveBus(routeId: string) {
     const route = await this.prisma.route.findUnique({
       where: { routeId },
-      select: { busNumber: true, routeName: true, bus: { select: { busNumber: true } } },
+      select: {
+        busNumber: true,
+        routeName: true,
+        bus: { select: { busNumber: true } },
+      },
     });
     if (!route) return null;
     return {

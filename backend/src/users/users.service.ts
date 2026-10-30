@@ -239,7 +239,7 @@ export class UsersService {
     if (!user) throw new NotFoundException(`User ${loginId} not found`);
 
     if (body.role && body.role !== user.role) {
-      if (!canAssignRole(actorRole, body.role as UserRole)) {
+      if (!canAssignRole(actorRole, body.role)) {
         throw new ForbiddenException(
           `You are not allowed to change this account to the role "${body.role}"`,
         );
@@ -423,12 +423,12 @@ export class UsersService {
 
     await this.prisma.user.update({
       where: { loginId },
-      data: { 
+      data: {
         password: await bcrypt.hash(newPassword, 10),
         tokenVersion: { increment: 1 }, // Revoke all existing tokens
       },
     });
-    
+
     // Invalidate versioned cache keys
     await this.cache.delByPattern(`auth:user:${loginId}:*`);
 
@@ -461,6 +461,9 @@ export class UsersService {
       data: { wakeAlarm: alarmData },
     });
     await this.cache.del('wake:alarms:active');
+    if (user.routeId) {
+      await this.cache.del(`wake:alarms:active:${user.routeId}`);
+    }
 
     // Save push subscription if provided
     if (dto.subscription) {
@@ -491,8 +494,38 @@ export class UsersService {
       data: { wakeAlarm: { enabled: false } },
     });
     await this.cache.del('wake:alarms:active');
+    if (user.routeId) {
+      await this.cache.del(`wake:alarms:active:${user.routeId}`);
+    }
 
     return { status: 'success', message: 'Wake alarm cancelled' };
+  }
+
+  /**
+   * Get current wake alarm status for a user.
+   */
+  async getWakeAlarm(loginId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { loginId },
+      select: { wakeAlarm: true },
+    });
+    if (!user) throw new NotFoundException(`User ${loginId} not found`);
+
+    const alarm = user.wakeAlarm as any;
+    const isEnabled = alarm?.enabled === true && alarm?.lat && alarm?.lng;
+
+    return {
+      status: 'success',
+      alarmSet: isEnabled,
+      alarm: isEnabled
+        ? {
+            lat: alarm.lat,
+            lng: alarm.lng,
+            thresholdKm: alarm.thresholdKm,
+            firedAt: alarm.firedAt,
+          }
+        : null,
+    };
   }
 
   /**
@@ -502,15 +535,38 @@ export class UsersService {
    * bus). Previously it did a full `SELECT` over every user in the database
    * each time — including all their JSON columns — which is one of the main
    * reasons live tracking felt slow and hammered the database.
+   *
+   * SEC-08: Now supports route-specific queries to avoid scanning all users.
+   * Use getActiveWakeAlarmsForRoute(routeId) for route-specific queries.
    */
   async getActiveWakeAlarms() {
     return this.cache.remember('wake:alarms:active', 30, async () => {
       const allUsers = await this.prisma.user.findMany({
         select: { loginId: true, wakeAlarm: true, routeId: true },
-        // `{ not: undefined }` used to be passed here — Prisma strips it, so
-        // the query matched every user. Only rows that actually carry an
-        // alarm JSON can be active alarms.
         where: { NOT: { wakeAlarm: { equals: Prisma.AnyNull } } },
+      });
+
+      return allUsers.filter((u) => {
+        const alarm = u.wakeAlarm as any;
+        return alarm?.enabled === true && alarm?.lat && alarm?.lng;
+      });
+    });
+  }
+
+  /**
+   * SEC-08: Get active wake alarms for a specific route.
+   * This avoids scanning all users when we only need alarms for a specific route.
+   * Cache key includes routeId for route-specific caching.
+   */
+  async getActiveWakeAlarmsForRoute(routeId: string) {
+    const cacheKey = `wake:alarms:active:${routeId}`;
+    return this.cache.remember(cacheKey, 30, async () => {
+      const allUsers = await this.prisma.user.findMany({
+        select: { loginId: true, wakeAlarm: true, routeId: true },
+        where: {
+          routeId: routeId,
+          NOT: { wakeAlarm: { equals: Prisma.AnyNull } },
+        },
       });
 
       return allUsers.filter((u) => {
@@ -525,7 +581,10 @@ export class UsersService {
    * This prevents the push subscription from being accidentally deleted.
    */
   async markAlarmFired(loginId: string, today: string) {
-    const user = await this.prisma.user.findUnique({ where: { loginId } });
+    const user = await this.prisma.user.findUnique({
+      where: { loginId },
+      select: { routeId: true, wakeAlarm: true },
+    });
     if (!user) return;
 
     const existingAlarm = user.wakeAlarm as any;
@@ -539,8 +598,12 @@ export class UsersService {
       },
     });
 
-    // The cached alarm list now holds a stale "fired" flag.
+    // The cached alarm lists now hold a stale "fired" flag.
+    // Clear both global and route-specific caches.
     await this.cache.del('wake:alarms:active');
+    if (user.routeId) {
+      await this.cache.del(`wake:alarms:active:${user.routeId}`);
+    }
   }
 
   /**

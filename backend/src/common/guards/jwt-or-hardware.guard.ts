@@ -21,18 +21,8 @@ export class JwtOrHardwareGuard extends AuthGuard('jwt') {
       process.env.WEBHOOK_SECRET ||
       'hw_secret_bus_saarthi_hardware_token_2026';
 
-    // The shared dev tokens must never open the attendance API in production.
-    const isProduction = process.env.NODE_ENV === 'production';
-    const acceptedTokens = isProduction
-      ? [validSecret]
-      : [
-          validSecret,
-          'dev_only_token_DO_NOT_USE_IN_PROD',
-          'dev_only_webhook_secret_DO_NOT_USE_IN_PROD',
-          'hw_secret_bus_saarthi_hardware_token_2026',
-        ];
-
-    if (hwToken && acceptedTokens.includes(hwToken)) {
+    // Only the production hardware token is accepted. Dev tokens are never accepted.
+    if (hwToken && hwToken === validSecret) {
       request.user = {
         loginId: 'hardware_device',
         role: UserRole.driver,

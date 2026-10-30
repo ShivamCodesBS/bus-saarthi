@@ -30,7 +30,7 @@ class AppColors {
   static const Color lightForeground = Color(0xFF0F172A); // 222 47% 11%
   static const Color lightMutedFg = Color(0xFF64748B); // 215 16% 47%
   static const Color lightSecondary = Color(0xFFF1F5F9); // 210 40% 96%
-  static const Color lightDestructive = Color(0xFFEF4444); // 0 84% 60%
+  static const Color lightDestructive = Color(0xFFCF1322); // 0 84% 60% → matches web #CF1322
   static const Color lightShadBorder = Color(0xFFE2E8F0); // 214 32% 91%
 
   // ── Dark theme (from body.dark-mode) ──────────────────────────────────
@@ -42,15 +42,15 @@ class AppColors {
   static const Color darkBorder = Color(0xFF2A2D3E);
 
   // shadcn tokens, dark
-  static const Color darkScaffold = Color(0xFF141826); // 224 33% 8%
-  static const Color darkForeground = Color(0xFFE2E8F0); // 220 20% 92%
-  static const Color darkMutedFg = Color(0xFF8B93A7); // 218 11% 65%
-  static const Color darkSecondary = Color(0xFF232742); // 225 20% 18%
-  static const Color darkDestructive = Color(0xFFC82F2F); // 0 63% 45%
-  static const Color darkPrimaryBlue = Color(0xFF1A8BFF); // 211 100% 55%
+  static const Color darkScaffold = Color(0xFF0F1117); // matches web --bg-color
+  static const Color darkForeground = Color(0xFFE8EAF0); // matches web --text-dark
+  static const Color darkMutedFg = Color(0xFF9BA3B8); // matches web --text-light
+  static const Color darkSecondary = Color(0xFF13151F); // secondary surfaces
+  static const Color darkDestructive = Color(0xFFCF1322); // matches web --danger
+  static const Color darkPrimaryBlue = Color(0xFF1A8BFF); // lighter blue for dark
 
   // ── Semantic status colours (used across Home/Community) ──────────────
-  static const Color success = Color(0xFF22C55E);
+  static const Color success = Color(0xFF28A745); // matches web --success
   static const Color sosRed = Color(0xFFCF1322); // pulse-red / emergency
   static const Color loginErrorRed = Color(0xFFFF6B6B);
   static const Color amber = Color(0xFFF59E0B);
@@ -121,12 +121,12 @@ class AppShadows {
       offset: const Offset(0, 4),
     ),
   ];
+
+  static const String fontFamily = 'Geist';
 }
 
 class AppTheme {
   AppTheme._();
-
-  static const String fontFamily = 'Geist';
 
   static ThemeData light() => _build(
         brightness: Brightness.light,
@@ -181,7 +181,7 @@ class AppTheme {
 
     return ThemeData(
       useMaterial3: true,
-      fontFamily: fontFamily,
+      fontFamily: AppShadows.fontFamily,
       colorScheme: scheme,
       scaffoldBackgroundColor: scaffold,
       canvasColor: scaffold,
@@ -215,7 +215,7 @@ class AppTheme {
         scrolledUnderElevation: 0,
         centerTitle: false,
         titleTextStyle: TextStyle(
-          fontFamily: fontFamily,
+          fontFamily: AppShadows.fontFamily,
           fontSize: 17,
           fontWeight: FontWeight.w700,
           color: foreground,
@@ -250,7 +250,7 @@ class AppTheme {
       ),
       snackBarTheme: SnackBarThemeData(
         backgroundColor: isDark ? AppColors.darkCard : AppColors.lightText,
-        contentTextStyle: TextStyle(fontFamily: fontFamily, color: Colors.white, fontSize: 14),
+        contentTextStyle: TextStyle(fontFamily: AppShadows.fontFamily, color: Colors.white, fontSize: 14),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
       ),
@@ -265,8 +265,8 @@ class AppTheme {
       dialogTheme: DialogThemeData(
         backgroundColor: card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
-        titleTextStyle: TextStyle(fontFamily: fontFamily, fontSize: 17, fontWeight: FontWeight.w700, color: foreground),
-        contentTextStyle: TextStyle(fontFamily: fontFamily, fontSize: 14, color: foreground),
+        titleTextStyle: TextStyle(fontFamily: AppShadows.fontFamily, fontSize: 17, fontWeight: FontWeight.w700, color: foreground),
+        contentTextStyle: TextStyle(fontFamily: AppShadows.fontFamily, fontSize: 14, color: foreground),
       ),
       chipTheme: ChipThemeData(
         backgroundColor: secondary,

@@ -13,6 +13,16 @@ import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import type { Response, Request } from 'express';
+import * as jwt from 'jsonwebtoken';
+
+interface JwtPayload {
+  login_id: string;
+  role: string;
+  name: string;
+  route_id: string | null;
+  tokenVersion?: number;
+  id?: string;
+}
 
 @Controller('api')
 @UseGuards(ThrottlerGuard)
@@ -22,40 +32,155 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @Throttle({ short: { limit: 5, ttl: 60000 } }) // 5 attempts per minute
-  async login(@Body() loginDto: LoginDto, @Res({ passthrough: true }) res: Response) {
+  async login(
+    @Body() loginDto: LoginDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const result = await this.authService.login(loginDto);
 
     if (result.status === 'success') {
-      // Generate JWT token for HttpOnly cookie
-      const token = this.authService.generateToken(result.user);
-
-      // Cross-site deployments (Vercel app -> Render API) only carry cookies
-      // marked SameSite=None; localhost dev stays on Lax because None+Secure
-      // breaks over plain http.
       const isProduction = process.env.NODE_ENV === 'production';
-      res.cookie('access_token', token, {
+
+      // Set access token cookie (24 hours)
+      res.cookie('access_token', result.accessToken, {
         httpOnly: true,
         secure: isProduction,
         sameSite: isProduction ? 'none' : 'lax',
-        maxAge: 24 * 60 * 60 * 1000, // 1 day
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
         path: '/',
       });
 
-      // The token is ALSO returned in the body: the Flutter bus app and the
-      // web Login page authenticate every later request with
-      // `Authorization: Bearer`, and browsers may refuse to send a cross-site
-      // cookie back (third-party cookie blocking), so the cookie can never be
-      // the only credential.
-      return { status: 'success', token, user: result.user };
+      // Set refresh token cookie (long-lived, 30 days)
+      res.cookie('refresh_token', result.refreshToken, {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: isProduction ? 'none' : 'lax',
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        path: '/',
+      });
+
+      // The access token is ALSO returned in the body for clients that need it
+      // (e.g., Flutter apps that use Authorization: Bearer header)
+      return {
+        status: 'success',
+        token: result.accessToken,
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
+        refreshTokenExpiresAt: result.refreshTokenExpiresAt,
+        user: result.user,
+      };
     }
 
     return result;
   }
 
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  async refresh(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const refreshToken = req.cookies?.refresh_token;
+
+    if (!refreshToken) {
+      return { status: 'error', message: 'Refresh token not found' };
+    }
+
+    // Extract user ID from the refresh token (we need to decode it first)
+    // For simplicity, we'll use the access token from cookies to get user ID
+    const accessToken = req.cookies?.access_token;
+    if (!accessToken) {
+      return { status: 'error', message: 'Access token not found' };
+    }
+
+    // Decode the access token to get user ID (without verification, since it may be expired)
+    let payload: JwtPayload | null = null;
+    try {
+      payload = jwt.decode(accessToken) as JwtPayload | null;
+    } catch {
+      return { status: 'error', message: 'Invalid access token' };
+    }
+
+    if (!payload?.login_id) {
+      return { status: 'error', message: 'Invalid token payload' };
+    }
+
+    // Find user by login_id
+    const user = await this.authService.getPrisma().user.findUnique({
+      where: { loginId: payload.login_id },
+      select: { id: true },
+    });
+
+    if (!user) {
+      return { status: 'error', message: 'User not found' };
+    }
+
+    // Verify and rotate refresh token
+    const tokens = await this.authService.verifyAndRotateRefreshToken(
+      user.id,
+      refreshToken,
+    );
+
+    if (!tokens) {
+      // Clear cookies and return error
+      res.clearCookie('access_token', { path: '/' });
+      res.clearCookie('refresh_token', { path: '/' });
+      return { status: 'error', message: 'Invalid or expired refresh token' };
+    }
+
+    const isProduction = process.env.NODE_ENV === 'production';
+
+    // Set new access token cookie (24 hours)
+    res.cookie('access_token', tokens.accessToken, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      path: '/',
+    });
+
+    // Set new refresh token cookie
+    res.cookie('refresh_token', tokens.refreshToken, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+      path: '/',
+    });
+
+    return {
+      status: 'success',
+      token: tokens.accessToken,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      refreshTokenExpiresAt: tokens.refreshTokenExpiresAt.toISOString(),
+    };
+  }
+
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  async logout(@Res({ passthrough: true }) res: Response) {
+  async logout(@Res({ passthrough: true }) res: Response, @Req() req: Request) {
+    // Get user ID from access token to revoke refresh token
+    const accessToken = req.cookies?.access_token;
+    if (accessToken) {
+      try {
+        const payload = jwt.decode(accessToken) as JwtPayload | null;
+        if (payload?.login_id) {
+          const user = await this.authService.getPrisma().user.findUnique({
+            where: { loginId: payload.login_id },
+            select: { id: true },
+          });
+          if (user) {
+            await this.authService.revokeRefreshToken(user.id);
+          }
+        }
+      } catch {
+        // Ignore decode errors
+      }
+    }
+
     res.clearCookie('access_token', { path: '/' });
+    res.clearCookie('refresh_token', { path: '/' });
     return { status: 'success', message: 'Logged out successfully' };
   }
 

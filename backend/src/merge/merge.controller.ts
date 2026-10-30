@@ -28,7 +28,10 @@ export class MergeController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.transport_incharge, UserRole.admin, UserRole.tech_admin)
   async createMerge(@Body() dto: CreateMergeDto, @Req() req: any) {
-    return this.mergeService.createMerge(dto, req.user.loginId || req.user.login_id);
+    return this.mergeService.createMerge(
+      dto,
+      req.user.loginId || req.user.login_id,
+    );
   }
 
   /**
@@ -37,9 +40,17 @@ export class MergeController {
    */
   @Post('request')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.driver, UserRole.transport_incharge, UserRole.admin, UserRole.tech_admin)
+  @Roles(
+    UserRole.driver,
+    UserRole.transport_incharge,
+    UserRole.admin,
+    UserRole.tech_admin,
+  )
   async requestMerge(@Body() dto: CreateMergeDto, @Req() req: any) {
-    return this.mergeService.createMerge(dto, req.user.loginId || req.user.login_id);
+    return this.mergeService.createMerge(
+      dto,
+      req.user.loginId || req.user.login_id,
+    );
   }
 
   /**
@@ -50,7 +61,10 @@ export class MergeController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.transport_incharge, UserRole.admin, UserRole.tech_admin)
   async cancelBus(@Body() dto: CreateBusCancelDto, @Req() req: any) {
-    return this.mergeService.cancelBus(dto, req.user.loginId || req.user.login_id);
+    return this.mergeService.cancelBus(
+      dto,
+      req.user.loginId || req.user.login_id,
+    );
   }
 
   /**
@@ -60,7 +74,10 @@ export class MergeController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.transport_incharge, UserRole.admin, UserRole.tech_admin)
   async undoMerge(@Param('id') id: string, @Req() req: any) {
-    return this.mergeService.undoMerge(id, req.user.loginId || req.user.login_id);
+    return this.mergeService.undoMerge(
+      id,
+      req.user.loginId || req.user.login_id,
+    );
   }
 
   /**
@@ -68,7 +85,12 @@ export class MergeController {
    */
   @Get('active')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.transport_incharge, UserRole.admin, UserRole.tech_admin, UserRole.driver)
+  @Roles(
+    UserRole.transport_incharge,
+    UserRole.admin,
+    UserRole.tech_admin,
+    UserRole.driver,
+  )
   async getActiveMerges() {
     const merges = await this.mergeService.getActiveMerges();
     return { status: 'success', data: merges };
@@ -110,7 +132,10 @@ export class MergeController {
     @Query('to') to: string,
   ) {
     if (!from || !to) {
-      return { status: 'error', message: 'Please provide "from" and "to" query params (YYYY-MM-DD)' };
+      return {
+        status: 'error',
+        message: 'Please provide "from" and "to" query params (YYYY-MM-DD)',
+      };
     }
     const analytics = await this.mergeService.getMergeAnalytics(from, to);
     return { status: 'success', data: analytics };

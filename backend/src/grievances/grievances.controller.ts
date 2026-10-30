@@ -91,12 +91,18 @@ export class GrievancesController {
   // Upvote — supports both POST (correct) and PUT (legacy frontend)
   @Post('grievance/:id/upvote')
   upvotePost(@Param('id') id: string, @Request() req: any) {
-    return this.grievancesService.upvote(id, req.user.loginId || req.user.login_id);
+    return this.grievancesService.upvote(
+      id,
+      req.user.loginId || req.user.login_id,
+    );
   }
 
   @Put('grievance/:id/upvote')
   upvotePut(@Param('id') id: string, @Request() req: any) {
-    return this.grievancesService.upvote(id, req.user.loginId || req.user.login_id);
+    return this.grievancesService.upvote(
+      id,
+      req.user.loginId || req.user.login_id,
+    );
   }
 
   /**
@@ -105,7 +111,11 @@ export class GrievancesController {
   @Patch('grievance/:id/start')
   @UseGuards(RolesGuard)
   @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
-  start(@Param('id') id: string, @Request() req: any, @Body() body: { note?: string } = {}) {
+  start(
+    @Param('id') id: string,
+    @Request() req: any,
+    @Body() body: { note?: string } = {},
+  ) {
     return this.grievancesService.startProgress(
       id,
       req.user.loginId || req.user.login_id,
@@ -165,7 +175,11 @@ export class GrievancesController {
    * the top of the staff queue.
    */
   @Patch('grievance/:id/reopen')
-  reopen(@Param('id') id: string, @Request() req: any, @Body() body: { reason?: string } = {}) {
+  reopen(
+    @Param('id') id: string,
+    @Request() req: any,
+    @Body() body: { reason?: string } = {},
+  ) {
     return this.grievancesService.reopen(
       id,
       req.user.loginId || req.user.login_id,

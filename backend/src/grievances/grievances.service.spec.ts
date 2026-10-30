@@ -12,6 +12,8 @@ describe('GrievancesService parent confirmation access', () => {
   };
   let prisma: any;
   let cache: any;
+  let eventEmitter: any;
+  let notifications: any;
   let service: GrievancesService;
 
   beforeEach(() => {
@@ -27,8 +29,8 @@ describe('GrievancesService parent confirmation access', () => {
       user: { findMany: jest.fn().mockResolvedValue([]) },
     };
     cache = { delByPattern: jest.fn() };
-    const notifications = { notifyUser: jest.fn() } as any;
     const eventEmitter = { emit: jest.fn() } as any;
+    const notifications = { notifyUser: jest.fn() } as any;
     service = new GrievancesService(prisma, notifications, cache, eventEmitter);
   });
 

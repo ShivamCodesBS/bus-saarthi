@@ -53,8 +53,7 @@ export class UploadService {
           if (error) {
             // Cloudinary rejects the file (wrong format, too large, …).
             // Surface a readable message instead of a 500.
-            const message =
-              error?.message || 'The file could not be uploaded';
+            const message = error?.message || 'The file could not be uploaded';
             return reject(
               new BadRequestException(
                 /Invalid image file|File size|unsupported/i.test(message)

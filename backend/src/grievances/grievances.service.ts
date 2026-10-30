@@ -103,7 +103,11 @@ export class GrievancesService {
     // Notify staff without blocking the submitter's request — the fan-out
     // (DB lookup + insert + push per staff member) used to run inline and
     // made filing a complaint feel slow.
-    void this.notifyStaffOfNewGrievance(grievance, resolvedName, route?.routeName);
+    void this.notifyStaffOfNewGrievance(
+      grievance,
+      resolvedName,
+      route?.routeName,
+    );
 
     return {
       status: 'success',
@@ -166,10 +170,7 @@ export class GrievancesService {
       }
 
       if (routeIds.length > 0) {
-        where.OR = [
-          { route: { in: routeIds } },
-          { loginId: loginId },
-        ];
+        where.OR = [{ route: { in: routeIds } }, { loginId: loginId }];
       } else {
         where.loginId = loginId;
       }
@@ -238,9 +239,14 @@ export class GrievancesService {
         ...rest,
         realName: canSeeName ? g.realName : null,
         isAnonymous: staff || mine ? g.isAnonymous : false,
-        authorDisplay: staff || mine
-          ? (isMyChild ? `${g.realName} (Your Child)` : (g.realName || 'Passenger'))
-          : (g.isAnonymous ? 'Anonymous Passenger' : (g.realName || 'Passenger')),
+        authorDisplay:
+          staff || mine
+            ? isMyChild
+              ? `${g.realName} (Your Child)`
+              : g.realName || 'Passenger'
+            : g.isAnonymous
+              ? 'Anonymous Passenger'
+              : g.realName || 'Passenger',
         isMine: mine,
         isChild: isMyChild,
         hasUpvotedLocally: upvotedIds.has(g.id),
@@ -281,7 +287,10 @@ export class GrievancesService {
         where: { loginId },
         select: { routeId: true },
       });
-      if (!caller?.routeId || String(caller.routeId) !== String(grievance.route)) {
+      if (
+        !caller?.routeId ||
+        String(caller.routeId) !== String(grievance.route)
+      ) {
         throw new ForbiddenException('You cannot view this grievance');
       }
     }
@@ -292,9 +301,12 @@ export class GrievancesService {
       ...rest,
       realName: canSeeName ? grievance.realName : null,
       isAnonymous: staff || mine ? grievance.isAnonymous : false,
-      authorDisplay: staff || mine
-        ? grievance.realName
-        : (grievance.isAnonymous ? 'Anonymous Passenger' : (grievance.realName || 'Passenger')),
+      authorDisplay:
+        staff || mine
+          ? grievance.realName
+          : grievance.isAnonymous
+            ? 'Anonymous Passenger'
+            : grievance.realName || 'Passenger',
       isMine: mine,
     };
   }
@@ -474,15 +486,11 @@ export class GrievancesService {
 
     await this.cache.delByPattern('grievances:*');
     this.eventEmitter.emit('grievance.updated', updated);
-    void this.notifyStaff(
-      grievance.loginId,
-      updated.id,
-      {
-        title: '👍 Complaint confirmed by complainant',
-        body: 'The complainant confirmed the issue is resolved. The complaint is now closed.',
-        type: 'grievance_confirmed',
-      },
-    );
+    void this.notifyStaff(grievance.loginId, updated.id, {
+      title: '👍 Complaint confirmed by complainant',
+      body: 'The complainant confirmed the issue is resolved. The complaint is now closed.',
+      type: 'grievance_confirmed',
+    });
 
     return {
       status: 'success',
@@ -539,17 +547,13 @@ export class GrievancesService {
 
     await this.cache.delByPattern('grievances:*');
     this.eventEmitter.emit('grievance.updated', updated);
-    void this.notifyStaff(
-      grievance.loginId,
-      updated.id,
-      {
-        title: '⚠️ Complaint reopened — not satisfied',
-        body: reason
-          ? `The complainant says the issue is not fixed: ${reason}`
-          : 'The complainant has rejected the fix and reopened the complaint.',
-        type: 'grievance_reopened',
-      },
-    );
+    void this.notifyStaff(grievance.loginId, updated.id, {
+      title: '⚠️ Complaint reopened — not satisfied',
+      body: reason
+        ? `The complainant says the issue is not fixed: ${reason}`
+        : 'The complainant has rejected the fix and reopened the complaint.',
+      type: 'grievance_reopened',
+    });
 
     return {
       status: 'success',

@@ -1,12 +1,15 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as os from 'os';
 import { PrismaService } from '../prisma/prisma.service';
 import { CacheService } from '../cache/cache.service';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { Logger } from '@nestjs/common';
 
 @Injectable()
-export class HealthService implements OnModuleInit {
+export class HealthService implements OnModuleInit, OnModuleDestroy {
   private metricsInterval: NodeJS.Timeout;
+  private readonly logger = new Logger(HealthService.name);
 
   constructor(
     private prisma: PrismaService,
@@ -121,5 +124,29 @@ export class HealthService implements OnModuleInit {
       limit,
       totalPages: Math.ceil(total / limit),
     };
+  }
+
+  // SEC-07: SystemLog TTL/cleanup job - runs daily at 3 AM
+  // Deletes logs older than the configured retention period (default 90 days)
+  @Cron(CronExpression.EVERY_DAY_AT_3AM)
+  async cleanupOldLogs() {
+    const retentionDays = parseInt(process.env.LOG_RETENTION_DAYS || '90', 10);
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
+
+    try {
+      const result = await this.prisma.systemLog.deleteMany({
+        where: {
+          createdAt: {
+            lt: cutoffDate,
+          },
+        },
+      });
+      this.logger.log(
+        `Cleaned up ${result.count} system logs older than ${retentionDays} days`,
+      );
+    } catch (error) {
+      this.logger.error(`Failed to cleanup old logs: ${error.message}`);
+    }
   }
 }
