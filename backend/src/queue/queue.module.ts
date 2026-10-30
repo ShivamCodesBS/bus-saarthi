@@ -28,11 +28,15 @@ export function isTelemetryRedisConfigured(): boolean {
 export class QueueModule {
   static register(): DynamicModule {
     if (!isTelemetryRedisConfigured()) {
-      logger.log('REDIS_HOST not set — telemetry queue disabled, telemetry persists directly');
+      logger.log(
+        'REDIS_HOST not set — telemetry queue disabled, telemetry persists directly',
+      );
       return { module: QueueModule, imports: [], providers: [], exports: [] };
     }
 
-    logger.log(`Telemetry queue enabled for ${process.env.REDIS_HOST}:${process.env.REDIS_PORT || 6379}`);
+    logger.log(
+      `Telemetry queue enabled for ${process.env.REDIS_HOST}:${process.env.REDIS_PORT || 6379}`,
+    );
     return {
       module: QueueModule,
       imports: [

@@ -69,19 +69,34 @@ export class EventsGateway
         headers['access-control-allow-credentials'] = 'true';
         return;
       }
+      // Allow explicitly configured Vercel deployment domains only (no wildcard)
       try {
         const host = new URL(origin).hostname;
+        const allowedVercelDomains = (
+          this.configService.get<string>('ALLOWED_VERCEL_DOMAINS') || ''
+        )
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
         if (
-          host.endsWith('.vercel.app') ||
-          origin.startsWith('http://192.168.') ||
-          origin.startsWith('http://10.')
+          host.endsWith('.vercel.app') &&
+          allowedVercelDomains.includes(host)
         ) {
           headers['access-control-allow-origin'] = origin;
           headers['access-control-allow-credentials'] = 'true';
           return;
         }
       } catch {
-        // Invalid origin - reject silently
+        /* unparseable origin — rejected below */
+      }
+      // Allow local network during dev
+      if (
+        origin.startsWith('http://192.168.') ||
+        origin.startsWith('http://10.')
+      ) {
+        headers['access-control-allow-origin'] = origin;
+        headers['access-control-allow-credentials'] = 'true';
+        return;
       }
       // Reject: don't set CORS headers
     });
@@ -172,7 +187,9 @@ export class EventsGateway
       client.join('admin_room');
       return { event: 'subscribed', data: 'admin_room' };
     } catch (error) {
-      this.logger.warn(`Failed admin join for client ${client.id}: ${error.message}`);
+      this.logger.warn(
+        `Failed admin join for client ${client.id}: ${error.message}`,
+      );
       // Tell the client instead of silently killing the connection —
       // a silent disconnect looks exactly like "the dashboard is broken".
       client.emit('admin_join_failed', { message: error.message });
@@ -197,7 +214,9 @@ export class EventsGateway
     const mpuSpeedKmh = payload?.mpu_speed_kmh;
     const headingDeg = payload?.heading_deg ?? payload?.heading;
     const comfort = payload?.comfort || 'Smooth';
-    const timestamp = payload?.timestamp ? new Date(payload.timestamp) : new Date();
+    const timestamp = payload?.timestamp
+      ? new Date(payload.timestamp)
+      : new Date();
 
     if (!lat || !lng || !routeId) return;
 
@@ -205,18 +224,24 @@ export class EventsGateway
     try {
       const batchDto: TelemetryBatchDto = {
         route_id: String(routeId),
-        data: [{
-          lat,
-          lng,
-          gps_speed_knots: gpsSpeedKnots ?? (mpuSpeedKmh ? mpuSpeedKmh / 1.852 : 0),
-          mpu_speed_kmh: mpuSpeedKmh ?? (gpsSpeedKnots ? gpsSpeedKnots * 1.852 : 0),
-          heading_deg: headingDeg ?? 0,
-          timestamp: timestamp.toISOString(),
-        }],
+        data: [
+          {
+            lat,
+            lng,
+            gps_speed_knots:
+              gpsSpeedKnots ?? (mpuSpeedKmh ? mpuSpeedKmh / 1.852 : 0),
+            mpu_speed_kmh:
+              mpuSpeedKmh ?? (gpsSpeedKnots ? gpsSpeedKnots * 1.852 : 0),
+            heading_deg: headingDeg ?? 0,
+            timestamp: timestamp.toISOString(),
+          },
+        ],
       };
       await this.telemetryService.addBatchToQueue(batchDto);
     } catch (e) {
-      this.logger.warn(`[Socket] Failed to persist telemetry for route ${routeId}: ${e.message}`);
+      this.logger.warn(
+        `[Socket] Failed to persist telemetry for route ${routeId}: ${e.message}`,
+      );
     }
 
     // Broadcast live location to all route subscribers (web dashboard, etc.)
@@ -265,7 +290,9 @@ export class EventsGateway
           ? payload.mpu_speed_kmh
           : typeof payload?.speed === 'number'
             ? payload.speed
-            : (payload?.gps_speed_knots ? payload.gps_speed_knots * 1.852 : 0),
+            : payload?.gps_speed_knots
+              ? payload.gps_speed_knots * 1.852
+              : 0,
       heading: payload.heading_deg ?? payload.heading,
       comfort: payload.comfort || 'Smooth',
       timestamp: payload.timestamp || new Date().toISOString(),
@@ -290,61 +317,72 @@ export class EventsGateway
 
   @OnEvent('merge.executed')
   handleMergeExecuted(payload: any) {
-    const { mergeEvent, cancelledRoute, targetRoute, cancelledStudentCount } = payload;
+    const { mergeEvent, cancelledRoute, targetRoute, cancelledStudentCount } =
+      payload;
 
     // Broadcast to admin room (Transport Incharge & Admin dashboards)
     this.server.to('admin_room').emit('merge_executed', payload);
 
     // Broadcast to students/drivers on the cancelled route
-    this.server.to(`route_${mergeEvent.cancelledRouteId}`).emit('your_route_merged', {
-      mergeEventId: mergeEvent.id,
-      cancelledRouteId: mergeEvent.cancelledRouteId,
-      newRouteId: mergeEvent.targetRouteId,
-      newBusNumber: targetRoute?.busNumber,
-      newRouteName: targetRoute?.routeName,
-      reason: mergeEvent.reason,
-      message: `Your bus (${cancelledRoute?.busNumber || mergeEvent.cancelledRouteName || 'assigned'}) has been cancelled. Please board Bus ${targetRoute?.busNumber || 'the replacement'} (${targetRoute?.routeName || 'replacement route'}).`,
-    });
+    this.server
+      .to(`route_${mergeEvent.cancelledRouteId}`)
+      .emit('your_route_merged', {
+        mergeEventId: mergeEvent.id,
+        cancelledRouteId: mergeEvent.cancelledRouteId,
+        newRouteId: mergeEvent.targetRouteId,
+        newBusNumber: targetRoute?.busNumber,
+        newRouteName: targetRoute?.routeName,
+        reason: mergeEvent.reason,
+        message: `Your bus (${cancelledRoute?.busNumber || mergeEvent.cancelledRouteName || 'assigned'}) has been cancelled. Please board Bus ${targetRoute?.busNumber || 'the replacement'} (${targetRoute?.routeName || 'replacement route'}).`,
+      });
 
     // Broadcast to students/drivers on the target route
-    this.server.to(`route_${mergeEvent.targetRouteId}`).emit('students_incoming', {
-      fromRoute: cancelledRoute?.routeName,
-      fromBus: cancelledRoute?.busNumber,
-      fromRouteId: mergeEvent.cancelledRouteId,
-      count: cancelledStudentCount,
-      message: `${cancelledStudentCount ?? 'Some'} students from ${cancelledRoute?.routeName || 'another route'} (Bus ${cancelledRoute?.busNumber || '—'}) are merged into your bus.`,
-    });
+    this.server
+      .to(`route_${mergeEvent.targetRouteId}`)
+      .emit('students_incoming', {
+        fromRoute: cancelledRoute?.routeName,
+        fromBus: cancelledRoute?.busNumber,
+        fromRouteId: mergeEvent.cancelledRouteId,
+        count: cancelledStudentCount,
+        message: `${cancelledStudentCount ?? 'Some'} students from ${cancelledRoute?.routeName || 'another route'} (Bus ${cancelledRoute?.busNumber || '—'}) are merged into your bus.`,
+      });
   }
 
   @OnEvent('merge.undone')
   handleMergeUndone(payload: any) {
     // Support both field names for backward compatibility
     const mergeEvent = payload.mergeEvent || payload.merge;
-    
+
     this.server.to('admin_room').emit('merge_undone', payload);
-    this.server.to(`route_${mergeEvent.cancelledRouteId}`).emit('route_restored', {
-      cancelledRouteId: mergeEvent.cancelledRouteId,
-      message: `Your original bus route (${mergeEvent.cancelledRouteName}) has been restored.`,
-    });
-    this.server.to(`route_${mergeEvent.targetRouteId}`).emit('students_removed', {
-      fromRouteId: mergeEvent.cancelledRouteId,
-      message: `Merge with ${mergeEvent.cancelledRouteName} was undone.`,
-    });
+    this.server
+      .to(`route_${mergeEvent.cancelledRouteId}`)
+      .emit('route_restored', {
+        cancelledRouteId: mergeEvent.cancelledRouteId,
+        message: `Your original bus route (${mergeEvent.cancelledRouteName}) has been restored.`,
+      });
+    this.server
+      .to(`route_${mergeEvent.targetRouteId}`)
+      .emit('students_removed', {
+        fromRouteId: mergeEvent.cancelledRouteId,
+        message: `Merge with ${mergeEvent.cancelledRouteName} was undone.`,
+      });
   }
 
   @OnEvent('bus.cancelled')
   handleBusCancelled(payload: any) {
     const { mergeEvent, cancelledRoute, cancelledStudentCount } = payload;
-    
+
     this.server.to('admin_room').emit('bus_cancelled', payload);
 
     // Broadcast to students/drivers on the cancelled route
-    this.server.to(`route_${mergeEvent.cancelledRouteId}`).emit('your_route_cancelled', {
-      mergeEventId: mergeEvent.id,
-      cancelledRouteId: mergeEvent.cancelledRouteId,
-      reason: mergeEvent.reason,
-      message: `Your bus (${cancelledRoute.busNumber}) has been cancelled today. No replacement bus is available.`,
-    });
+    this.server
+      .to(`route_${mergeEvent.cancelledRouteId}`)
+      .emit('your_route_cancelled', {
+        mergeEventId: mergeEvent.id,
+        cancelledRouteId: mergeEvent.cancelledRouteId,
+        reason: mergeEvent.reason,
+        message: `Your bus (${cancelledRoute.busNumber}) has been cancelled today. No replacement bus is available.`,
+      });
   }
 
   @OnEvent('sos.triggered')
@@ -377,7 +415,9 @@ export class EventsGateway
 
   @OnEvent('broadcast.created')
   handleBroadcastCreated(payload: any) {
-    this.logger.log(`📢 Broadcasting announcement globally: ${payload.title || 'Notice'}`);
+    this.logger.log(
+      `📢 Broadcasting announcement globally: ${payload.title || 'Notice'}`,
+    );
     this.server.emit('global_broadcast', payload);
   }
 
@@ -385,17 +425,23 @@ export class EventsGateway
   handleGrievanceCreated(grievance: any) {
     // Route rooms are joined by any student on that bus — never leak the
     // reporter's real name/login there. The admin room gets the full record.
-    this.server.to(`route_${grievance.route}`).emit('new_grievance', this.maskGrievance(grievance));
+    this.server
+      .to(`route_${grievance.route}`)
+      .emit('new_grievance', this.maskGrievance(grievance));
     this.server.to('admin_room').emit('new_grievance', grievance);
   }
 
   @OnEvent('grievance.updated')
   handleGrievanceUpdated(grievance: any) {
-    this.server.to(`route_${grievance.route}`).emit('grievance_updated', this.maskGrievance(grievance));
+    this.server
+      .to(`route_${grievance.route}`)
+      .emit('grievance_updated', this.maskGrievance(grievance));
     this.server.to('admin_room').emit('grievance_updated', grievance);
     if (grievance.loginId) {
       // The reporter may follow their own complaint from another tab.
-      this.server.to(`user_${grievance.loginId}`).emit('grievance_updated', grievance);
+      this.server
+        .to(`user_${grievance.loginId}`)
+        .emit('grievance_updated', grievance);
     }
   }
 
@@ -452,7 +498,11 @@ export class EventsGateway
    * alarm check hits the users table, so it runs at most once every few
    * seconds per route.
    */
-  private maybeCheckWakeAlarms(busLat: number, busLng: number, routeId: string) {
+  private maybeCheckWakeAlarms(
+    busLat: number,
+    busLng: number,
+    routeId: string,
+  ) {
     const now = Date.now();
     const last = this.lastWakeAlarmCheck.get(String(routeId)) || 0;
     if (now - last < EventsGateway.WAKE_ALARM_CHECK_INTERVAL_MS) return;
@@ -461,40 +511,51 @@ export class EventsGateway
   }
 
   /**
-   * Server-side wake alarm engine.
-   * Runs on telemetry events (throttled). Compares bus location vs saved user location.
-   * Fires Web Push if bus is within user's set threshold km.
-   * User's phone GPS does NOT need to be on — we use their saved location.
+   * SEC-08: Check wake alarms for a specific route.
+   * Uses the new route-specific method to avoid scanning all users.
    */
-  private async checkWakeAlarms(busLat: number, busLng: number, routeId: string) {
+  private async checkWakeAlarms(
+    busLat: number,
+    busLng: number,
+    routeId: string,
+  ) {
     try {
       const today = new Date().toISOString().split('T')[0];
-      const activeAlarms = await this.usersService.getActiveWakeAlarms();
+      // SEC-08: Use route-specific method to avoid scanning all users
+      const activeAlarms =
+        await this.usersService.getActiveWakeAlarmsForRoute(routeId);
 
       for (const u of activeAlarms) {
-        // Only trigger wake alarm if this bus is on user's route
-        if (routeId && u.routeId && String(u.routeId) !== String(routeId)) {
-          continue;
-        }
-
         const alarm = u.wakeAlarm as any;
         if (!alarm?.lat || !alarm?.lng) continue;
         if (alarm.firedAt === today) continue; // Already fired today, don't spam
 
         // haversineDistance returns meters — convert to km
-        const distanceMeters = haversineDistance(busLat, busLng, alarm.lat, alarm.lng);
+        const distanceMeters = haversineDistance(
+          busLat,
+          busLng,
+          alarm.lat,
+          alarm.lng,
+        );
         const distanceKm = distanceMeters / 1000;
 
         if (distanceKm <= alarm.thresholdKm) {
-          // 1. Send Web Push Notification (works even if app/browser is closed)
-          await this.notificationsService.sendPushNotification(u.loginId, {
-            title: '🚌 Your Bus is Near!',
-            body: `Bus is only ${distanceKm.toFixed(1)}km away from your location. Get ready!`,
-            icon: '/icons/bus-192x192.png',
-            badge: '/icons/bus-72x72.png',
-            tag: 'wake-alarm',
-            requireInteraction: true,
-          }).catch(() => {});
+          // 1. Send Push Notification (works even if app/browser is closed)
+          await this.notificationsService
+            .sendPushNotification(u.loginId, {
+              title: '🚌 Your Bus is Near!',
+              body: `Bus is only ${distanceKm.toFixed(1)}km away from your location. Get ready!`,
+              icon: '/icons/bus-192x192.png',
+              badge: '/icons/bus-72x72.png',
+              tag: 'wake-alarm',
+              type: 'wake_alarm',
+              data: {
+                type: 'wake_alarm',
+                distanceKm: distanceKm.toFixed(2),
+              },
+              requireInteraction: true,
+            })
+            .catch(() => {});
 
           // 2. If the user has a tab open, ring the in-app alarm
           this.server.to(`user_${u.loginId}`).emit('wake_alarm_trigger', {

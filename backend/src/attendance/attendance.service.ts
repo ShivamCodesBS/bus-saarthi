@@ -29,7 +29,7 @@ export class AttendanceService {
     // Support flat single record: { route_id: '4', passenger_id: '...', ... }
     else if (!records || records.length === 0) {
       if (syncDto.passenger_id || syncDto.login_id || syncDto.student_id) {
-        records = [syncDto as any];
+        records = [syncDto];
       }
     }
 
@@ -71,7 +71,10 @@ export class AttendanceService {
     );
 
     const existingToday = await this.prisma.attendance.findMany({
-      where: { passengerId: { in: passengerIds }, timestamp: { gte: todayStart } },
+      where: {
+        passengerId: { in: passengerIds },
+        timestamp: { gte: todayStart },
+      },
       select: { passengerId: true },
     });
     const alreadyBoarded = new Set(existingToday.map((a) => a.passengerId));
@@ -102,7 +105,9 @@ export class AttendanceService {
           select: { id: true, cancelledRouteId: true },
         })
       : [];
-    const mergeByRoute = new Map(activeMerges.map((m) => [String(m.cancelledRouteId), m.id]));
+    const mergeByRoute = new Map(
+      activeMerges.map((m) => [String(m.cancelledRouteId), m.id]),
+    );
 
     const creates: any[] = [];
     const events: any[] = [];
@@ -134,7 +139,8 @@ export class AttendanceService {
         // Route eligibility check:
         // 1. Direct match: student is assigned to this bus route
         // 2. Merged route: student's assigned route was merged into this bus route today
-        let isEligible = !passenger.routeId || String(passenger.routeId) === String(route_id);
+        let isEligible =
+          !passenger.routeId || String(passenger.routeId) === String(route_id);
         let originalRouteId: string | null = null;
         let mergeEventId: string | null = null;
 
@@ -192,10 +198,7 @@ export class AttendanceService {
           timestampDate: timestamp,
         });
       } catch (err) {
-        this.logger.error(
-          `Error syncing attendance for ${passengerId}:`,
-          err,
-        );
+        this.logger.error(`Error syncing attendance for ${passengerId}:`, err);
         results.errors++;
       }
     }
@@ -209,8 +212,12 @@ export class AttendanceService {
         this.eventEmitter.emit('attendance.marked', payload);
 
         // Notify linked parents asynchronously.
-        this.notifyParentsOfBoarding(passengerRef, String(route_id), timestampDate).catch(
-          (err) => this.logger.error(`Failed to notify parent: ${err.message}`),
+        this.notifyParentsOfBoarding(
+          passengerRef,
+          String(route_id),
+          timestampDate,
+        ).catch((err) =>
+          this.logger.error(`Failed to notify parent: ${err.message}`),
         );
       }
 
@@ -243,13 +250,16 @@ export class AttendanceService {
       });
 
       for (const link of links) {
-        await this.notificationsService.sendPushNotification(link.parentLoginId, {
-          title: '🚌 Bus Boarded!',
-          body: `${student.name} has boarded Bus (Route ${routeId}) at ${formattedTime}.`,
-          icon: '/icons/bus-192x192.png',
-          badge: '/icons/bus-72x72.png',
-          tag: `boarding-${student.loginId}`,
-        });
+        await this.notificationsService.sendPushNotification(
+          link.parentLoginId,
+          {
+            title: '🚌 Bus Boarded!',
+            body: `${student.name} has boarded Bus (Route ${routeId}) at ${formattedTime}.`,
+            icon: '/icons/bus-192x192.png',
+            badge: '/icons/bus-72x72.png',
+            tag: `boarding-${student.loginId}`,
+          },
+        );
       }
     } catch (e) {
       this.logger.error('Error notifying parent of boarding:', e);

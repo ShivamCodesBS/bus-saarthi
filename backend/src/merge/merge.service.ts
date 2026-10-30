@@ -337,7 +337,9 @@ export class MergeService {
       });
       return !!merge;
     } catch (err: any) {
-      this.logger.warn(`isRouteCancelledToday check failed for route ${routeId}: ${err?.message}`);
+      this.logger.warn(
+        `isRouteCancelledToday check failed for route ${routeId}: ${err?.message}`,
+      );
       return false;
     }
   }
@@ -346,10 +348,7 @@ export class MergeService {
    * Find an active merge where the given cancelled route is merged into the target route.
    * Used by attendance service to check if a student is eligible to board.
    */
-  async findActiveMerge(
-    cancelledRouteId: string,
-    targetRouteId: string,
-  ) {
+  async findActiveMerge(cancelledRouteId: string, targetRouteId: string) {
     try {
       const todayStart = getISTMidnightUTC();
       return await this.prisma.mergeEvent.findFirst({
@@ -380,7 +379,9 @@ export class MergeService {
         },
       });
     } catch (err: any) {
-      this.logger.warn(`findActiveMergeForCancelledRoute check failed: ${err?.message}`);
+      this.logger.warn(
+        `findActiveMergeForCancelledRoute check failed: ${err?.message}`,
+      );
       return null;
     }
   }
@@ -452,8 +453,7 @@ export class MergeService {
           for (const target of sameCityRoutes) {
             const targetAttendance =
               attendanceMap.get(String(target.routeId)) ?? 0;
-            const available =
-              (target.seatingCapacity || 50) - targetAttendance;
+            const available = (target.seatingCapacity || 50) - targetAttendance;
             if (available > maxAvailable) {
               maxAvailable = available;
               bestTarget = {
@@ -610,7 +610,10 @@ export class MergeService {
       );
 
       // Transaction committed - async operations
-      void this.sendBusCancelNotifications(dto.cancelled_route_id, cancelledRoute);
+      void this.sendBusCancelNotifications(
+        dto.cancelled_route_id,
+        cancelledRoute,
+      );
 
       // Auto-broadcast
       const reasonText = (dto.reason || 'bus_cancelled').replace(/_/g, ' ');
@@ -652,12 +655,10 @@ export class MergeService {
 
       for (const student of affectedStudents) {
         await this.notificationsService
-          .sendPushNotification(student.loginId, {
+          .notifyUser(student.loginId, null, {
             title: '🚌 Bus Cancelled',
             body: `Your bus (${cancelledRoute.routeName}, Bus ${cancelledRoute.busNumber}) is cancelled today. No replacement bus is available.`,
-            icon: '/icons/bus-192x192.png',
-            tag: 'bus-cancelled',
-            requireInteraction: true,
+            type: 'route_cancel',
           })
           .catch((err) =>
             this.logger.warn(
@@ -677,12 +678,10 @@ export class MergeService {
 
       for (const link of parentLinks) {
         await this.notificationsService
-          .sendPushNotification(link.parentLoginId, {
+          .notifyUser(link.parentLoginId, null, {
             title: '🔔 Bus Cancelled for Your Child',
             body: `Your child's bus (${cancelledRoute.routeName}, Bus ${cancelledRoute.busNumber}) is cancelled today. No replacement bus available.`,
-            icon: '/icons/bus-192x192.png',
-            tag: 'bus-cancelled-parent',
-            requireInteraction: true,
+            type: 'route_cancel',
           })
           .catch((err) =>
             this.logger.warn(
@@ -717,12 +716,10 @@ export class MergeService {
 
       for (const student of affectedStudents) {
         await this.notificationsService
-          .sendPushNotification(student.loginId, {
+          .notifyUser(student.loginId, null, {
             title: '🚌 Bus Change Notice',
             body: `Your bus (${cancelledRoute.routeName}, Bus ${cancelledRoute.busNumber}) is cancelled today. Please board Bus ${targetRoute.busNumber} (${targetRoute.routeName}).`,
-            icon: '/icons/bus-192x192.png',
-            tag: 'bus-merge',
-            requireInteraction: true,
+            type: 'merge',
           })
           .catch((err) =>
             this.logger.warn(
@@ -742,12 +739,10 @@ export class MergeService {
 
       for (const link of parentLinks) {
         await this.notificationsService
-          .sendPushNotification(link.parentLoginId, {
+          .notifyUser(link.parentLoginId, null, {
             title: '🔔 Bus Change for Your Child',
             body: `Your child's bus has been changed to Bus ${targetRoute.busNumber} (${targetRoute.routeName}) due to low attendance. Track the new bus in the app.`,
-            icon: '/icons/bus-192x192.png',
-            tag: 'bus-merge-parent',
-            requireInteraction: true,
+            type: 'merge',
           })
           .catch((err) =>
             this.logger.warn(

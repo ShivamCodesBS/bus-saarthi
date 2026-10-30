@@ -40,7 +40,12 @@ export class TelemetryController {
   }
 
   @Get('telemetry/history/:routeId')
-  @Roles(UserRole.admin, UserRole.tech_admin, UserRole.transport_incharge, UserRole.parent)
+  @Roles(
+    UserRole.admin,
+    UserRole.tech_admin,
+    UserRole.transport_incharge,
+    UserRole.parent,
+  )
   getTelemetryHistory(
     @Param('routeId') routeId: string,
     @Query('date') date: string,

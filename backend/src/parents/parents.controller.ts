@@ -48,7 +48,10 @@ export class ParentsController {
     @Param('loginId') childLoginId: string,
   ) {
     const parentLoginId = req.user?.loginId || req.user?.login_id;
-    return this.parentsService.getChildGrievancesFor(parentLoginId, childLoginId);
+    return this.parentsService.getChildGrievancesFor(
+      parentLoginId,
+      childLoginId,
+    );
   }
 
   /**
@@ -85,7 +88,11 @@ export class ParentsController {
     @Body('date') date: string,
   ) {
     const parentLoginId = req.user?.loginId || req.user?.login_id;
-    return this.parentsService.markChildLeave(parentLoginId, childLoginId, date);
+    return this.parentsService.markChildLeave(
+      parentLoginId,
+      childLoginId,
+      date,
+    );
   }
 
   /**

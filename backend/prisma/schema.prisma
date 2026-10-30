@@ -46,6 +46,10 @@ model User {
   createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
   tokenVersion      Int                @default(0) @map("token_version")
+  /// Hashed refresh token for rotation (SEC-01)
+  refreshToken      String?            @map("refresh_token")
+  /// Expiration of the current refresh token
+  refreshTokenExpiresAt DateTime?      @map("refresh_token_expires_at") @db.Timestamptz(6)
   wakeAlarm         Json?              @map("wake_alarm") @db.Json
   /// Subject taught — only meaningful for the `teacher` role.
   subject           String?            @db.VarChar(100)
@@ -121,6 +125,7 @@ model Attendance {
   @@index([timestamp])
   @@index([passengerId, timestamp])
   @@index([routeId, timestamp])
+  @@index([originalRouteId])  // PERF-05: Index for merge eligibility checks
   @@map("attendance")
 }
 

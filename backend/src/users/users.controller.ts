@@ -62,7 +62,9 @@ export class UsersController {
   @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
   bulkCreate(@Body() body: { users: any[] }, @Request() req: any) {
     if (!body.users || !Array.isArray(body.users)) {
-      throw new ForbiddenException('Invalid payload: expected an array of users');
+      throw new ForbiddenException(
+        'Invalid payload: expected an array of users',
+      );
     }
     return this.usersService.bulkCreate(body.users, req.user.role);
   }
@@ -136,6 +138,15 @@ export class UsersController {
   cancelWakeAlarm(@Request() req: any) {
     const loginId = req.user?.loginId || req.user?.login_id;
     return this.usersService.cancelWakeAlarm(loginId);
+  }
+
+  /**
+   * Get current wake alarm status for the signed-in user.
+   */
+  @Get('me/wake-alarm')
+  getWakeAlarm(@Request() req: any) {
+    const loginId = req.user?.loginId || req.user?.login_id;
+    return this.usersService.getWakeAlarm(loginId);
   }
 
   /**

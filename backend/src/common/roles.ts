@@ -45,13 +45,14 @@ export function isStaff(role: UserRole): boolean {
  * `admin` may create `tech_admin` (system operator accounts are provisioned
  * by the campus admin).
  */
-export function canAssignRole(actorRole: UserRole, targetRole: UserRole): boolean {
+export function canAssignRole(
+  actorRole: UserRole,
+  targetRole: UserRole,
+): boolean {
   if (!ASSIGNABLE_ROLES.includes(targetRole)) {
     // Only an admin/tech_admin may mint another admin or tech_admin.
     if (targetRole === UserRole.admin || targetRole === UserRole.tech_admin) {
-      return (
-        actorRole === UserRole.admin || actorRole === UserRole.tech_admin
-      );
+      return actorRole === UserRole.admin || actorRole === UserRole.tech_admin;
     }
     return false;
   }

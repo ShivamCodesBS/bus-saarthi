@@ -1,4 +1,12 @@
-import { Controller, Post, Get, Request, UseGuards, Body, BadRequestException } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Request,
+  UseGuards,
+  Body,
+  BadRequestException,
+} from '@nestjs/common';
 import { SosService } from './sos.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -20,12 +28,19 @@ export class SosController {
   cancel(@Request() req: any, @Body() body: any) {
     // Passengers cancel their own alert. Staff may cancel on behalf of a
     // student by passing the student's loginId in the body.
-    if (req.user.role === UserRole.admin || req.user.role === UserRole.transport_incharge || req.user.role === UserRole.tech_admin) {
+    if (
+      req.user.role === UserRole.admin ||
+      req.user.role === UserRole.transport_incharge ||
+      req.user.role === UserRole.tech_admin
+    ) {
       const target = body?.login_id || body?.loginId;
       if (!target) {
-        throw new BadRequestException('Pass the student loginId to cancel their SOS');
+        throw new BadRequestException(
+          'Pass the student loginId to cancel their SOS',
+        );
       }
-      return this.sosService.cancel(target);
+      // Pass the staff member's loginId as cancelledBy for audit trail
+      return this.sosService.cancel(target, req.user.loginId);
     }
     return this.sosService.cancel(req.user.loginId);
   }

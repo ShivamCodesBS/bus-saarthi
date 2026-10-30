@@ -9,6 +9,7 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { RedisIoAdapter } from './gateway/redis-io.adapter';
 import { ConfigService } from '@nestjs/config';
 import cookieParser from 'cookie-parser';
+import * as bodyParser from 'body-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -16,6 +17,10 @@ async function bootstrap() {
 
   // Parse cookies for HttpOnly token storage
   app.use(cookieParser());
+
+  // Request body size limits (SEC-04) - prevent DoS via large payloads
+  app.use(bodyParser.json({ limit: '10mb' }));
+  app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
 
   // Build allowed origins from env var (comma-separated) + sensible defaults
   const extraOrigins = (process.env.CORS_ORIGINS || '')
@@ -38,11 +43,18 @@ async function bootstrap() {
       if (!origin || allowedOrigins.has(origin)) {
         return callback(null, true);
       }
-      // Allow any *.vercel.app deployment for testing — matched on the
-      // hostname so "evil-vercel-app.com" cannot sneak through endsWith.
+      // Allow explicitly configured Vercel deployment domains only (no wildcard)
       try {
         const host = new URL(origin).hostname;
-        if (host.endsWith('.vercel.app')) {
+        // Check if host is in an explicitly allowed Vercel domains list
+        const allowedVercelDomains = (process.env.ALLOWED_VERCEL_DOMAINS || '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (
+          host.endsWith('.vercel.app') &&
+          allowedVercelDomains.includes(host)
+        ) {
           return callback(null, true);
         }
       } catch {
@@ -61,6 +73,13 @@ async function bootstrap() {
     },
     credentials: true,
   });
+
+  // CSRF protection is NOT applied globally because:
+  // - Most API endpoints use Bearer token authentication (not cookies)
+  // - Cookie-based auth is only for login/refresh/logout endpoints
+  // - Clients (Flutter, React) don't currently send CSRF tokens
+  // If cookie-based CSRF protection is needed later, it should be applied
+  // selectively via a guard on specific routes, not globally.
 
   app.useGlobalPipes(
     new ValidationPipe({

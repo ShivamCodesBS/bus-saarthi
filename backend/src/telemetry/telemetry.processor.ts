@@ -4,9 +4,9 @@ import { TelemetryService } from './telemetry.service';
 
 @Processor('telemetry', { concurrency: 5 })
 export class TelemetryProcessor extends WorkerHost {
-  constructor(
-    private telemetryService: TelemetryService,
-  ) { super(); }
+  constructor(private telemetryService: TelemetryService) {
+    super();
+  }
 
   async process(job: Job) {
     const { route_id, data } = job.data;

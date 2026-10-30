@@ -15,7 +15,11 @@ const QUEUE_ADD_TIMEOUT_MS = 3000;
 const QUEUE_PROBE_RETRY_MS = 60_000;
 
 /** Reject with `message` if `promise` does not settle within `ms`. */
-function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  message: string,
+): Promise<T> {
   return Promise.race([
     promise,
     new Promise<never>((_, reject) =>
@@ -37,7 +41,9 @@ export class TelemetryService {
     private eventEmitter: EventEmitter2,
     // Absent when REDIS_HOST is not configured — the service then always
     // persists directly (see isQueueReady).
-    @Optional() @InjectQueue('telemetry') private telemetryQueue: Queue | undefined,
+    @Optional()
+    @InjectQueue('telemetry')
+    private telemetryQueue: Queue | undefined,
   ) {}
 
   /**
@@ -58,12 +64,16 @@ export class TelemetryService {
     if (queue && (await this.isQueueReady())) {
       try {
         await withTimeout(
-          queue.add('process-telemetry', { route_id, data }, {
-            attempts: 3,
-            backoff: { type: 'exponential', delay: 1000 },
-            removeOnComplete: 100,
-            removeOnFail: 50,
-          }),
+          queue.add(
+            'process-telemetry',
+            { route_id, data },
+            {
+              attempts: 3,
+              backoff: { type: 'exponential', delay: 1000 },
+              removeOnComplete: 100,
+              removeOnFail: 50,
+            },
+          ),
           QUEUE_ADD_TIMEOUT_MS,
           'queue add timed out',
         );
@@ -136,7 +146,11 @@ export class TelemetryService {
     });
 
     if (isCancelled) {
-      return { status: 'success', received: 0, note: 'Route is cancelled today due to merge' };
+      return {
+        status: 'success',
+        received: 0,
+        note: 'Route is cancelled today due to merge',
+      };
     }
 
     const entities = data.map((item: any) => ({
@@ -167,16 +181,16 @@ export class TelemetryService {
 
   async getLatestStatus(routeId: string) {
     const todayStart = getISTMidnightUTC();
-    
+
     // Get capacity from route or bus
     const route = await this.prisma.route.findUnique({
       where: { routeId },
-      select: { 
+      select: {
         seatingCapacity: true,
-        bus: { select: { seatingCapacity: true } }
-      }
+        bus: { select: { seatingCapacity: true } },
+      },
     });
-    
+
     // Priority: Route.seatingCapacity > Bus.seatingCapacity > default 50
     const total = route?.seatingCapacity ?? route?.bus?.seatingCapacity ?? 50;
 

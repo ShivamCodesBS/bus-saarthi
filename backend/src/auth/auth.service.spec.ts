@@ -3,7 +3,10 @@ import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from './auth.service';
 
-jest.mock('bcrypt', () => ({ compare: jest.fn() }));
+jest.mock('bcrypt', () => ({
+  compare: jest.fn(),
+  hash: jest.fn(),
+}));
 import * as bcrypt from 'bcrypt';
 
 describe('AuthService phone fallback', () => {
@@ -66,7 +69,7 @@ describe('AuthService phone fallback', () => {
     const result = await service.login({
       login_id: '5551234',
       password: 'secret',
-    } as any);
+    });
 
     expect(result.user.login_id).toBe('student-1');
     expect(prisma.user.findMany).toHaveBeenCalledWith(
