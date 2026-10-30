@@ -279,7 +279,7 @@ describe('AuthService', () => {
           route_id: '4',
           tokenVersion: 0,
         }),
-        { expiresIn: '15m' },
+        { expiresIn: process.env.JWT_EXPIRES_IN || '24h' },
       );
     });
   });

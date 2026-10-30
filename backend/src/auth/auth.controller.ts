@@ -41,12 +41,12 @@ export class AuthController {
     if (result.status === 'success') {
       const isProduction = process.env.NODE_ENV === 'production';
 
-      // Set access token cookie (short-lived, 15 minutes)
+      // Set access token cookie (24 hours)
       res.cookie('access_token', result.accessToken, {
         httpOnly: true,
         secure: isProduction,
         sameSite: isProduction ? 'none' : 'lax',
-        maxAge: 15 * 60 * 1000, // 15 minutes
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
         path: '/',
       });
 
@@ -130,12 +130,12 @@ export class AuthController {
 
     const isProduction = process.env.NODE_ENV === 'production';
 
-    // Set new access token cookie
+    // Set new access token cookie (24 hours)
     res.cookie('access_token', tokens.accessToken, {
       httpOnly: true,
       secure: isProduction,
       sameSite: isProduction ? 'none' : 'lax',
-      maxAge: 15 * 60 * 1000, // 15 minutes
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
       path: '/',
     });
 

@@ -30,8 +30,8 @@ const USER_SELECT = {
   tokenVersion: true,
 } as const;
 
-// Token expiration constants
-const ACCESS_TOKEN_EXPIRY = '15m';
+// Token expiration constants (defaults to 24h to support mobile/web sessions without silent refresh)
+const ACCESS_TOKEN_EXPIRY: any = process.env.JWT_EXPIRES_IN || '24h';
 const REFRESH_TOKEN_EXPIRY_DAYS = 30;
 const REFRESH_TOKEN_EXPIRY_MS = REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
 
