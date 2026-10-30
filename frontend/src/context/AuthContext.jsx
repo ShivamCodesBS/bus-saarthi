@@ -245,7 +245,7 @@ export const AuthProvider = ({ children }) => {
     // withCredentials so the server can clear the HttpOnly cookie too —
     // without it the cookie survives across sites and the next login flow
     // sees a stale session on the API side.
-    await axios.post(`${BACKEND_URL}/api/auth/logout`, {}, { withCredentials: true }).catch(() => {});
+    await axios.post(`${BACKEND_URL}/api/logout`, {}, { withCredentials: true }).catch(() => {});
     clearSwrDiskCache();
   };
 

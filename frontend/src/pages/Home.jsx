@@ -232,6 +232,7 @@ const Home = () => {
 
   // Sync wake alarm status from backend
   const syncWakeAlarm = async () => {
+    if (!user?.token) return;
     try {
       const res = await axios.get(`${BACKEND_URL}/api/users/me/wake-alarm`, authHeaders);
       if (res.data?.alarmSet && res.data?.alarm) {

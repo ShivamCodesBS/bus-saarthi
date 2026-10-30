@@ -164,7 +164,7 @@ describe('AuthContext', () => {
       expect(result.current.user).toBeNull();
       expect(mockLocalStorage.removeItem).toHaveBeenCalledWith('bus_saarthi_user');
       expect(mockAxios.post).toHaveBeenCalledWith(
-        expect.stringContaining('/api/auth/logout'),
+        expect.stringContaining('/api/logout'),
         {},
         expect.any(Object)
       );

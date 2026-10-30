@@ -570,7 +570,8 @@ const AdminDashboard = () => {
       const authHeaders = { headers: { Authorization: `Bearer ${user?.token}` } };
       
       if (mergeFormData.mode === 'merge') {
-        const res = await axios.post(`${BACKEND_URL}/api/merge`, mergeFormData, authHeaders);
+        const { mode, ...payload } = mergeFormData;
+        const res = await axios.post(`${BACKEND_URL}/api/merge`, payload, authHeaders);
         if (res.data.status === 'success') {
           toast.success(res.data.message || 'Bus merged successfully!');
           if (res.data.warning) toast(res.data.warning, { icon: '⚠️' });
@@ -587,7 +588,7 @@ const AdminDashboard = () => {
         }
       } else {
         // Cancel bus (no merge)
-        const { target_route_id, ...cancelData } = mergeFormData;
+        const { target_route_id, mode, ...cancelData } = mergeFormData;
         const res = await axios.post(`${BACKEND_URL}/api/merge/cancel`, cancelData, authHeaders);
         if (res.data.status === 'success') {
           toast.success(res.data.message || 'Bus cancelled successfully!');

@@ -15,6 +15,10 @@ export class CreateMergeDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsString()
+  mode?: string;
 }
 
 export class CreateBusCancelDto {
@@ -28,4 +32,8 @@ export class CreateBusCancelDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsString()
+  mode?: string;
 }
