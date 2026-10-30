@@ -6,6 +6,6 @@
 //
 // ⚠️  DO NOT hardcode any production URLs here
 
-export const BACKEND_URL = import.meta.env.VITE_API_URL || 'https://bus-saarthi-j3lq.onrender.com';
-export const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_URL || 'https://bus-saarthi-j3lq.onrender.com';
+export const BACKEND_URL = import.meta.env.VITE_API_URL || 'https://invertis-bus-saarthi.onrender.com';
+export const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_URL || 'https://invertis-bus-saarthi.onrender.com';
 

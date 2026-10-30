@@ -33,14 +33,14 @@ const c = {
 };
 
 // Parse command line arguments
-let baseUrl = 'https://bus-saarthi-j3lq.onrender.com';
+let baseUrl = 'https://invertis-bus-saarthi.onrender.com';
 for (const arg of process.argv.slice(2)) {
   if (arg === '--target=local' || arg === '-l') {
     baseUrl = 'http://localhost:5000';
   } else if (arg.startsWith('--url=')) {
     baseUrl = arg.split('=')[1].replace(/\/+$/, '');
   } else if (arg === '--target=live') {
-    baseUrl = 'https://bus-saarthi-j3lq.onrender.com';
+    baseUrl = 'https://invertis-bus-saarthi.onrender.com';
   }
 }
 

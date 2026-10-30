@@ -8,13 +8,13 @@ class AppConstants {
   // Defaults to the production Render backend (same as the web app).
   static const String restApiUrl = String.fromEnvironment(
     'API_URL',
-    defaultValue: 'https://bus-saarthi-j3lq.onrender.com',
+    defaultValue: 'https://invertis-bus-saarthi.onrender.com',
   );
 
   // WebSocket URL — defaults to same as REST API.
   static const String socketUrl = String.fromEnvironment(
     'SOCKET_URL',
-    defaultValue: 'https://bus-saarthi-j3lq.onrender.com',
+    defaultValue: 'https://invertis-bus-saarthi.onrender.com',
   );
 
   // ── Session storage keys (mirror the web app's localStorage keys) ──

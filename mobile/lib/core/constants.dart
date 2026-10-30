@@ -8,13 +8,13 @@ class AppConstants {
   // Defaults to production Render backend
   static const String restApiUrl = String.fromEnvironment(
     'API_URL',
-    defaultValue: 'https://bus-saarthi-j3lq.onrender.com',
+    defaultValue: 'https://invertis-bus-saarthi.onrender.com',
   );
 
   // WebSocket URL — defaults to same as REST API
   static const String socketUrl = String.fromEnvironment(
     'SOCKET_URL',
-    defaultValue: 'https://bus-saarthi-j3lq.onrender.com',
+    defaultValue: 'https://invertis-bus-saarthi.onrender.com',
   );
 
   // Hardware token — must match WEBHOOK_SECRET on the backend
