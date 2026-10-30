@@ -16,25 +16,44 @@ class NotificationItem {
     required this.time,
   });
 
-  factory NotificationItem.fromNoticeJson(Map<String, dynamic> json) {
-    final ts = json['timestamp'] ?? json['created_at'];
-    String time = 'Recent';
-    if (ts != null) {
-      final d = DateTime.tryParse(ts.toString());
-      if (d != null) time = '${d.day}/${d.month}/${d.year}';
+  static String _formatTime(dynamic ts) {
+    if (ts == null) return 'Recent';
+    final d = DateTime.tryParse(ts.toString())?.toLocal();
+    if (d == null) return 'Recent';
+    final now = DateTime.now();
+    if (d.day == now.day && d.month == now.month && d.year == now.year) {
+      final h = d.hour.toString().padLeft(2, '0');
+      final m = d.minute.toString().padLeft(2, '0');
+      return '$h:$m';
     }
+    return '${d.day}/${d.month}/${d.year}';
+  }
+
+  factory NotificationItem.fromNoticeJson(Map<String, dynamic> json) {
+    final ts = json['timestamp'] ?? json['created_at'] ?? json['createdAt'];
     return NotificationItem(
       id: 'notice-${json['id'] ?? json['_id'] ?? json['title'] ?? 'x'}',
       type: (json['type'] ?? 'info').toString(),
       title: (json['title'] ?? 'Admin Notice').toString(),
       message: (json['body'] ?? json['message'] ?? '').toString(),
-      time: time,
+      time: _formatTime(ts),
+    );
+  }
+
+  factory NotificationItem.fromBroadcastJson(Map<String, dynamic> json) {
+    final ts = json['timestamp'] ?? json['created_at'] ?? json['createdAt'];
+    return NotificationItem(
+      id: 'broadcast-${json['id'] ?? json['_id'] ?? 'x'}',
+      type: 'broadcast',
+      title: (json['title'] ?? 'Notice').toString(),
+      message: (json['message'] ?? json['body'] ?? '').toString(),
+      time: _formatTime(ts),
     );
   }
 
   factory NotificationItem.broadcast(Map<String, dynamic> data) =>
       NotificationItem(
-        id: 'broadcast-active',
+        id: 'broadcast-${data['id'] ?? 'active'}',
         type: 'broadcast',
         title: (data['title'] ?? 'Broadcast').toString(),
         message: (data['message'] ?? '').toString(),
@@ -49,3 +68,4 @@ class NotificationItem {
     time: 'Now',
   );
 }
+

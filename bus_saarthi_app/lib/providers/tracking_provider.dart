@@ -9,6 +9,7 @@ import '../models/notification_item.dart';
 import '../models/route_model.dart';
 import '../models/user_model.dart';
 import '../services/api_client.dart';
+import '../services/fcm_service.dart';
 import '../services/notification_preferences.dart';
 import '../services/socket_service.dart';
 
@@ -90,6 +91,7 @@ class MergeInfo {
       newRouteId: m['targetRouteId']?.toString(),
       newBusNumber: m['targetBusNumber']?.toString(),
       newRouteName: m['targetRouteName']?.toString(),
+      cancelledRouteId: m['cancelledRouteId']?.toString(),
       cancelledBusNumber: m['cancelledBusNumber']?.toString(),
       cancelledRouteName: m['cancelledRouteName']?.toString(),
       reason: m['reason']?.toString(),
@@ -145,11 +147,42 @@ class TrackingProvider extends ChangeNotifier {
 
   bool _disposed = false;
   int _notificationGeneration = 0;
+  StreamSubscription<Map<String, dynamic>>? _fcmTapSub;
 
   TrackingProvider(this.user) {
     _loadLocalFlags();
     _wireSocket();
+    _wireFcmTap();
     _bootstrap();
+  }
+
+  void _wireFcmTap() {
+    _fcmTapSub = FcmService.onTapNotification.listen((data) {
+      _handleFcmNotificationTap(data);
+    });
+  }
+
+  void _handleFcmNotificationTap(Map<String, dynamic> data) {
+    if (_disposed) return;
+    final type = data['type']?.toString();
+    if (type == 'broadcast') {
+      activeBroadcast = {
+        'id': data['broadcastId'] ?? data['id'] ?? 'broadcast-tap',
+        'title': data['title'] ?? 'Notice',
+        'message': data['body'] ?? data['message'] ?? '',
+        'sender': data['sender'] ?? 'Administration',
+        'timestamp': data['timestamp'] ?? DateTime.now().toIso8601String(),
+      };
+      _notify();
+    } else if (type == 'merge' || type == 'route_cancel') {
+      _checkMergeStatus();
+    } else if (type == 'wake_alarm' || type == 'wake_alarm_trigger') {
+      _toast(
+        '🚌 Bus arrival alert: ${data['body'] ?? data['message'] ?? 'Approaching destination'}',
+        kind: ToastKind.wakeAlarm,
+        duration: const Duration(seconds: 10),
+      );
+    }
   }
 
   void attachToastContext(BuildContext context) => _toastContext = context;
@@ -257,19 +290,26 @@ class TrackingProvider extends ChangeNotifier {
       _mergeCheckTimer?.cancel();
       _mergeCheckTimer = null;
       final data = res.data;
-      if (data is Map &&
-          data['status'] == 'success' &&
-          data['data']?['isCancelled'] == true &&
-          data['data']?['merge'] != null) {
+      if (data is Map && data['status'] == 'success') {
+        final isCancelled = data['data']?['isCancelled'] == true;
+        final mergeData = data['data']?['merge'];
         final oldRouteId = effectiveRouteId;
-        mergeInfo = MergeInfo.fromCheck(
-          Map<String, dynamic>.from(data['data']['merge'] as Map),
-        );
-        if (oldRouteId != effectiveRouteId) _handleEffectiveRouteChanged();
-        _notify();
-      } else {
-        final oldRouteId = effectiveRouteId;
-        mergeInfo = null;
+
+        if (isCancelled && mergeData != null && mergeData is Map) {
+          mergeInfo = MergeInfo.fromCheck(
+            Map<String, dynamic>.from(mergeData),
+          );
+        } else if (isCancelled) {
+          mergeInfo = MergeInfo(
+            isCancelled: true,
+            cancelledRouteId: homeRouteId,
+            message:
+                'Your bus is cancelled today. No replacement bus is available.',
+          );
+        } else {
+          mergeInfo = null;
+        }
+
         if (oldRouteId != effectiveRouteId) _handleEffectiveRouteChanged();
         _notify();
       }
@@ -334,22 +374,77 @@ class TrackingProvider extends ChangeNotifier {
   Future<void> _fetchNotifications() async {
     final generation = ++_notificationGeneration;
     try {
-      final res = await ApiClient.dio.get(
+      final inboxFuture = ApiClient.dio.get(
         '/api/notifications/inbox',
         options: Options(headers: _authHeaders),
       );
+      final broadcastFuture = ApiClient.dio.get(
+        '/api/notifications',
+        options: Options(headers: _authHeaders),
+      );
+
+      final results = await Future.wait([
+        inboxFuture.catchError(
+          (_) => Response(requestOptions: RequestOptions(), data: []),
+        ),
+        broadcastFuture.catchError(
+          (_) => Response(requestOptions: RequestOptions(), data: []),
+        ),
+      ]);
+
       if (_disposed || generation != _notificationGeneration) return;
-      final data = res.data;
-      final List list = data is List
-          ? data
-          : (data is Map && data['data'] is List ? data['data'] as List : []);
-      notices = list
-          .whereType<Map>()
-          .map(
-            (n) =>
-                NotificationItem.fromNoticeJson(Map<String, dynamic>.from(n)),
-          )
-          .toList();
+
+      final inboxData = results[0].data;
+      final broadcastData = results[1].data;
+
+      final List<NotificationItem> fetchedNotices = [];
+
+      // 1. User inbox notifications
+      final List inboxList = inboxData is List
+          ? inboxData
+          : (inboxData is Map && inboxData['data'] is List
+              ? inboxData['data'] as List
+              : []);
+      for (final n in inboxList.whereType<Map>()) {
+        fetchedNotices.add(
+          NotificationItem.fromNoticeJson(Map<String, dynamic>.from(n)),
+        );
+      }
+
+      // 2. Global broadcasts (official administration notices)
+      final List broadcastList = broadcastData is List
+          ? broadcastData
+          : (broadcastData is Map && broadcastData['data'] is List
+              ? broadcastData['data'] as List
+              : []);
+
+      Map<String, dynamic>? candidateBroadcast;
+
+      for (final b in broadcastList.whereType<Map>()) {
+        final bMap = Map<String, dynamic>.from(b);
+        final item = NotificationItem.fromBroadcastJson(bMap);
+        fetchedNotices.add(item);
+
+        // If broadcast happened recently (within 24h) and user hasn't seen/acknowledged it
+        if (candidateBroadcast == null) {
+          final tsStr = bMap['timestamp'] ?? bMap['createdAt'];
+          if (tsStr != null) {
+            final ts = DateTime.tryParse(tsStr.toString())?.toLocal();
+            if (ts != null && DateTime.now().difference(ts).inHours < 24) {
+              final bId = bMap['id']?.toString() ?? item.id;
+              if (!seenIds.contains(bId) && !seenIds.contains(item.id)) {
+                candidateBroadcast = bMap;
+              }
+            }
+          }
+        }
+      }
+
+      if (candidateBroadcast != null && activeBroadcast == null) {
+        activeBroadcast = candidateBroadcast;
+      }
+
+      notices = fetchedNotices;
       _markUnreadIfNew();
       _notify();
     } catch (_) {}
@@ -611,6 +706,21 @@ class TrackingProvider extends ChangeNotifier {
   }
 
   void acknowledgeBroadcast() {
+    if (activeBroadcast != null) {
+      final id = activeBroadcast!['id']?.toString() ?? 'broadcast-active';
+      if (!seenIds.contains(id)) {
+        seenIds.add(id);
+        seenIds.add('broadcast-$id');
+        SharedPreferences.getInstance().then((prefs) {
+          prefs.setString(
+            'passenger_seen_notif_ids',
+            seenIds.map((s) => '"$s"').join(',').isNotEmpty
+                ? '[${seenIds.map((s) => '"$s"').join(',')}]'
+                : '[]',
+          );
+        });
+      }
+    }
     activeBroadcast = null;
     notifyListeners();
   }
@@ -802,6 +912,7 @@ class TrackingProvider extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _fcmTapSub?.cancel();
     _crowdInterval?.cancel();
     _mergeCheckTimer?.cancel();
     _mergeCheckGeneration++;

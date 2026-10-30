@@ -38,7 +38,7 @@ class UserModel {
       loginId: loginId,
       name: (json['name'] ?? '').toString(),
       role: (json['role'] ?? '').toString(),
-      routeId: json['route_id']?.toString(),
+      routeId: (json['route_id'] ?? json['routeId'])?.toString(),
       feeStatus: json['fee_status']?.toString(),
       profilePic: json['profile_pic']?.toString(),
       designation: json['designation']?.toString(),

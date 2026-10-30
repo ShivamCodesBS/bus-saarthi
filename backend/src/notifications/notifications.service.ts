@@ -36,12 +36,29 @@ export class NotificationsService {
     }
 
     // ── FCM (Android app) ──────────────────────────────────────────────
-    const serviceAccountJson = this.configService.get<string>(
-      'FIREBASE_SERVICE_ACCOUNT_JSON',
-    );
-    if (serviceAccountJson) {
+    let rawServiceAccount =
+      this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT_JSON') ||
+      this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT_BASE64');
+
+    if (rawServiceAccount) {
       try {
-        const serviceAccount = JSON.parse(serviceAccountJson);
+        let serviceAccount: any;
+        const trimmed = rawServiceAccount.trim();
+        if (!trimmed.startsWith('{')) {
+          try {
+            const decoded = Buffer.from(trimmed, 'base64').toString('utf-8');
+            serviceAccount = JSON.parse(decoded);
+          } catch {
+            serviceAccount = JSON.parse(trimmed);
+          }
+        } else {
+          serviceAccount = JSON.parse(trimmed);
+        }
+
+        if (serviceAccount.private_key && typeof serviceAccount.private_key === 'string') {
+          serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+        }
+
         if (!getApps().length) {
           initializeApp({ credential: cert(serviceAccount) });
         }
@@ -49,7 +66,7 @@ export class NotificationsService {
         this.logger.log('FCM enabled — Android push notifications active.');
       } catch (err: any) {
         this.logger.error(
-          `FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON or failed to init — FCM disabled. ${err?.message}`,
+          `FIREBASE_SERVICE_ACCOUNT_JSON failed to init — FCM disabled. ${err?.message}`,
         );
       }
     } else {
@@ -70,6 +87,10 @@ export class NotificationsService {
     payload: any,
   ): Promise<boolean> {
     if (deviceType === 'android') {
+      if (!this.fcmEnabled) {
+        this.logger.warn('FCM is not initialized — Android push skipped.');
+        return true;
+      }
       const token = subscription?.token ?? subscription?.fcmToken;
       if (!token || typeof token !== 'string') {
         this.logger.warn(
@@ -112,11 +133,13 @@ export class NotificationsService {
             title,
             body,
             type: msgType,
+            click_action: 'FLUTTER_NOTIFICATION_CLICK',
             ...payload.data,
           }).map(([k, v]) => [k, String(v)]),
         ),
         android: {
           priority: 'high' as const,
+          ttl: 86400 * 1000,
           notification: {
             channelId,
             priority: 'max' as const,

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:ui' as ui;
 
 import 'package:firebase_core/firebase_core.dart';
@@ -11,12 +12,6 @@ import 'notification_preferences.dart';
 import 'api_client.dart';
 
 /// FCM push for the Android app.
-///
-/// The backend stores the FCM token in PushSubscription (deviceType
-/// 'android') and delivers through firebase-admin. Firebase init fails
-/// gracefully while `android/app/google-services.json` is still the
-/// bundled placeholder — the app runs fine without push until the real
-/// Firebase project is wired in.
 class FcmService {
   static final FlutterLocalNotificationsPlugin _local =
       FlutterLocalNotificationsPlugin();
@@ -25,6 +20,13 @@ class FcmService {
   static String? _currentJwt;
   static StreamSubscription<String>? _tokenRefreshSubscription;
   static void Function(RemoteMessage message)? onForegroundMessage;
+
+  static final StreamController<Map<String, dynamic>> _tapStreamController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
+  /// Stream of notification tap events (both native FCM click and local notification tap)
+  static Stream<Map<String, dynamic>> get onTapNotification =>
+      _tapStreamController.stream;
 
   static bool _initialized = false;
   static bool _initFailed = false;
@@ -48,7 +50,7 @@ class FcmService {
     try {
       await Firebase.initializeApp();
     } catch (e) {
-      debugPrint('[FCM] Firebase init skipped (placeholder config?): $e');
+      debugPrint('[FCM] Firebase init skipped: $e');
       _initialized = false;
       _initFailed = true;
       _lastError = e.toString();
@@ -57,12 +59,16 @@ class FcmService {
 
     await ensureLocalNotifications();
 
-    // Ask the user once — like the web Notification.requestPermission().
-    final permission = await FirebaseMessaging.instance.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
+    // Ask the user once — like web Notification.requestPermission()
+    try {
+      await FirebaseMessaging.instance.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+    } catch (e) {
+      debugPrint('[FCM] requestPermission error: $e');
+    }
 
     // Handle foreground messages
     FirebaseMessaging.onMessage.listen((message) async {
@@ -73,12 +79,25 @@ class FcmService {
       onForegroundMessage?.call(message);
     });
 
+    // Handle background notification clicks (when app was in background)
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      debugPrint('[FCM] notification opened app: ${message.data}');
+      _tapStreamController.add(message.data);
+    });
+
+    // Check if app was opened directly from a notification while terminated
+    FirebaseMessaging.instance.getInitialMessage().then((RemoteMessage? message) {
+      if (message != null) {
+        debugPrint('[FCM] app opened from terminated state by notification: ${message.data}');
+        _tapStreamController.add(message.data);
+      }
+    });
+
     // Handle background messages - top-level function
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
-    if (_isAuthorized(permission.authorizationStatus)) {
-      await _subscribeToken(jwtToken);
-    }
+    // Always attempt token registration so the backend has the device token.
+    await _subscribeToken(jwtToken);
 
     // Token can rotate — re-subscribe using the latest signed-in account.
     _tokenRefreshSubscription ??= FirebaseMessaging.instance.onTokenRefresh
@@ -95,6 +114,19 @@ class FcmService {
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
     await _local.initialize(
       settings: const InitializationSettings(android: android),
+      onDidReceiveNotificationResponse: (NotificationResponse response) {
+        debugPrint('[FCM] local notification tapped: ${response.payload}');
+        if (response.payload != null && response.payload!.isNotEmpty) {
+          try {
+            final decoded = jsonDecode(response.payload!);
+            if (decoded is Map<String, dynamic>) {
+              _tapStreamController.add(decoded);
+              return;
+            }
+          } catch (_) {}
+          _tapStreamController.add({'payload': response.payload});
+        }
+      },
     );
 
     final androidImpl = _local.resolvePlatformSpecificImplementation<
@@ -102,6 +134,7 @@ class FcmService {
     if (androidImpl != null) {
       await androidImpl.requestNotificationsPermission();
     }
+
 
     await _createNotificationChannels();
     _localNotificationsReady = true;
@@ -342,7 +375,7 @@ class FcmService {
       title: title,
       body: body,
       notificationDetails: notificationDetails,
-      payload: message.data.toString(),
+      payload: jsonEncode(message.data),
     );
   }
 
