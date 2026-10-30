@@ -71,7 +71,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
           response.setHeader('Access-Control-Allow-Origin', origin);
           response.setHeader('Access-Control-Allow-Credentials', 'true');
         }
-      } catch {}
+      } catch (err) {
+        void err;
+      }
     }
 
     response.status(status).json({
