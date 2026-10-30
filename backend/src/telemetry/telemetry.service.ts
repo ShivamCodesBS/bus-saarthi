@@ -56,15 +56,13 @@ export class TelemetryService {
 
   smoothReading(routeId: string, speedKmh: number, comfort?: string) {
     const key = String(routeId);
-    const f =
-      this.readingFilters.get(key) ??
-      ({
-        speedEma: null,
-        lastTs: 0,
-        comfortCurrent: 'Smooth',
-        comfortCandidate: 'Smooth',
-        comfortCount: 0,
-      } as RouteReadingFilter);
+    const f = this.readingFilters.get(key) ?? {
+      speedEma: null,
+      lastTs: 0,
+      comfortCurrent: 'Smooth',
+      comfortCandidate: 'Smooth',
+      comfortCount: 0,
+    };
 
     const now = Date.now();
     let input = Number(speedKmh) || 0;
@@ -72,7 +70,10 @@ export class TelemetryService {
     // Long gap (device restart / batch backlog): re-anchor instead of
     // spike-rejecting, otherwise a parked bus would stay "stuck" at its
     // old EMA forever.
-    if (f.speedEma === null || now - f.lastTs > TelemetryService.READING_STALE_MS) {
+    if (
+      f.speedEma === null ||
+      now - f.lastTs > TelemetryService.READING_STALE_MS
+    ) {
       f.speedEma = input;
     } else {
       const spike =
@@ -235,7 +236,11 @@ export class TelemetryService {
 
     const filtered = data.map((item: any) => ({
       item,
-      f: this.smoothReading(routeId, item.mpu_speed_kmh ?? (item.gps_speed_knots || 0) * 1.852, item.comfort),
+      f: this.smoothReading(
+        routeId,
+        item.mpu_speed_kmh ?? (item.gps_speed_knots || 0) * 1.852,
+        item.comfort,
+      ),
     }));
 
     const entities = filtered.map(({ item, f }) => ({

@@ -36,7 +36,7 @@ export class NotificationsService {
     }
 
     // ── FCM (Android app) ──────────────────────────────────────────────
-    let rawServiceAccount =
+    const rawServiceAccount =
       this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT_JSON') ||
       this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT_BASE64');
 
@@ -55,8 +55,14 @@ export class NotificationsService {
           serviceAccount = JSON.parse(trimmed);
         }
 
-        if (serviceAccount.private_key && typeof serviceAccount.private_key === 'string') {
-          serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+        if (
+          serviceAccount.private_key &&
+          typeof serviceAccount.private_key === 'string'
+        ) {
+          serviceAccount.private_key = serviceAccount.private_key.replace(
+            /\\n/g,
+            '\n',
+          );
         }
 
         if (!getApps().length) {
@@ -112,9 +118,12 @@ export class NotificationsService {
 
       let channelId = 'bus_saarthi_general';
       if (msgType === 'sos') channelId = 'bus_saarthi_sos';
-      else if (String(msgType).startsWith('wake_alarm')) channelId = 'bus_saarthi_wake_alarm';
-      else if (String(msgType).startsWith('grievance')) channelId = 'bus_saarthi_grievance';
-      else if (msgType === 'merge' || msgType === 'route_cancel') channelId = 'bus_saarthi_route';
+      else if (String(msgType).startsWith('wake_alarm'))
+        channelId = 'bus_saarthi_wake_alarm';
+      else if (String(msgType).startsWith('grievance'))
+        channelId = 'bus_saarthi_grievance';
+      else if (msgType === 'merge' || msgType === 'route_cancel')
+        channelId = 'bus_saarthi_route';
       else if (msgType === 'broadcast') channelId = 'bus_saarthi_broadcast';
 
       const title = payload.title ?? 'Bus Saarthi';
@@ -147,7 +156,8 @@ export class NotificationsService {
             defaultVibrateTimings: true,
             visibility: 'public' as const,
             sound:
-              channelId === 'bus_saarthi_wake_alarm' || channelId === 'bus_saarthi_sos'
+              channelId === 'bus_saarthi_wake_alarm' ||
+              channelId === 'bus_saarthi_sos'
                 ? 'alarm'
                 : 'notification',
           },
@@ -311,7 +321,9 @@ export class NotificationsService {
         } else if (err.code?.startsWith('messaging/')) {
           await this.prisma.pushSubscription.delete({ where: { id: sub.id } });
         } else {
-          this.logger.warn(`Failed to deliver broadcast push to ${sub.loginId}: ${err?.message}`);
+          this.logger.warn(
+            `Failed to deliver broadcast push to ${sub.loginId}: ${err?.message}`,
+          );
         }
       }
     }
