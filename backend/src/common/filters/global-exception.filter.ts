@@ -56,6 +56,24 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       }
     }
 
+    const origin = request.headers.origin;
+    if (origin && typeof origin === 'string') {
+      try {
+        const host = new URL(origin).hostname;
+        if (
+          origin.startsWith('http://localhost') ||
+          origin.startsWith('http://127.0.0.1') ||
+          host.endsWith('.vercel.app') ||
+          host.endsWith('.onrender.com') ||
+          origin.startsWith('http://192.168.') ||
+          origin.startsWith('http://10.')
+        ) {
+          response.setHeader('Access-Control-Allow-Origin', origin);
+          response.setHeader('Access-Control-Allow-Credentials', 'true');
+        }
+      } catch {}
+    }
+
     response.status(status).json({
       status: 'error',
       statusCode: status,

@@ -15,13 +15,6 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
 
-  // Parse cookies for HttpOnly token storage
-  app.use(cookieParser());
-
-  // Request body size limits (SEC-04) - prevent DoS via large payloads
-  app.use(bodyParser.json({ limit: '10mb' }));
-  app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
-
   // Build allowed origins from env var (comma-separated) + sensible defaults
   const extraOrigins = (process.env.CORS_ORIGINS || '')
     .split(',')
@@ -34,6 +27,7 @@ async function bootstrap() {
     'http://127.0.0.1:5173',
     'http://127.0.0.1:5174',
     'http://127.0.0.1:5199',
+    'https://bus-saarthi-inky.vercel.app',
     ...extraOrigins,
   ]);
 
@@ -75,7 +69,16 @@ async function bootstrap() {
       'Origin',
     ],
     credentials: true,
+    optionsSuccessStatus: 204,
+    preflightContinue: false,
   });
+
+  // Parse cookies for HttpOnly token storage
+  app.use(cookieParser());
+
+  // Request body size limits (SEC-04) - prevent DoS via large payloads
+  app.use(bodyParser.json({ limit: '10mb' }));
+  app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
 
   // CSRF protection is NOT applied globally because:
   // - Most API endpoints use Bearer token authentication (not cookies)
