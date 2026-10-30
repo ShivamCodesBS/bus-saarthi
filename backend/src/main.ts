@@ -43,17 +43,14 @@ async function bootstrap() {
       if (!origin || allowedOrigins.has(origin)) {
         return callback(null, true);
       }
-      // Allow explicitly configured Vercel deployment domains only (no wildcard)
       try {
         const host = new URL(origin).hostname;
-        // Check if host is in an explicitly allowed Vercel domains list
-        const allowedVercelDomains = (process.env.ALLOWED_VERCEL_DOMAINS || '')
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean);
+        // Allow all project Vercel and Render frontend deployments
         if (
-          host.endsWith('.vercel.app') &&
-          allowedVercelDomains.includes(host)
+          host.endsWith('.vercel.app') ||
+          host.endsWith('.onrender.com') ||
+          host === 'localhost' ||
+          host === '127.0.0.1'
         ) {
           return callback(null, true);
         }
@@ -67,10 +64,16 @@ async function bootstrap() {
       ) {
         return callback(null, true);
       }
-      // Reject without throwing — throwing produced a bare 500 with no CORS
-      // headers, which browsers report as an opaque network error.
       callback(null, false);
     },
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'Accept',
+      'Origin',
+    ],
     credentials: true,
   });
 
