@@ -19,6 +19,8 @@
     "build:frontend": "npm run build --prefix frontend",
     "build:admin": "npm run build --prefix admin-frontend",
     "build:all": "npm run build:backend && npm run build:frontend && npm run build:admin",
+    "test:apis": "node scripts/verify-all-apis.mjs",
+    "test:apis:local": "node scripts/verify-all-apis.mjs --target=local",
     "postinstall": "npx --yes prisma@5.22.0 generate --schema=backend/prisma/schema.prisma || true"
   },
   "dependencies": {
