@@ -4,7 +4,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import '../models/sensor_payload.dart';
 import '../models/telemetry_model.dart';
-import '../core/constants.dart';
 import 'gps_sensor.dart';
 import 'accelerometer_sensor.dart';
 import 'compass_sensor.dart';
