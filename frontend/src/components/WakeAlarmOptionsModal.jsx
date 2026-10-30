@@ -5,7 +5,7 @@ import { X, AlarmClock, MapPin, BellOff, ChevronRight, Loader2 } from 'lucide-re
 
 const WakeAlarmOptionsModal = ({ onClose, onChangeLocation, onTurnOff, loading = false }) => {
   useModalA11y(true, onClose);
-  const { t } = useLanguage();
+  const { t } = useLang();
 
   return (
     <div

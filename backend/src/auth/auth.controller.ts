@@ -157,7 +157,7 @@ export class AuthController {
     };
   }
 
-  @Post('logout')
+  @Post(['logout', 'auth/logout'])
   @HttpCode(HttpStatus.OK)
   async logout(@Res({ passthrough: true }) res: Response, @Req() req: Request) {
     // Get user ID from access token to revoke refresh token
