@@ -35,6 +35,19 @@ class SensorFusion {
   double? _smoothedHeading;
   static const double _headingAlpha = 0.3; // Smoothing factor (0-1, lower = smoother)
 
+  // Speed smoothing. Raw phone GPS speed flickers between dropout-zeros and
+  // the true value, which made the student UI jump between 0.1 and 55+ km/h.
+  double? _smoothedSpeed;
+  static const double _speedAlpha = 0.45; // EMA factor (lower = smoother)
+  static const double _speedSpikeKmh = 30; // reject >30 km/h jumps per second while moving
+  static const double _speedDeadbandKmh = 1.2; // readings below this near zero snap to 0
+
+  // Ride-comfort hysteresis: a new label must repeat twice before it sticks,
+  // otherwise potholes flap the badge between Smooth/Moderate/Rough.
+  String _comfortCurrent = 'Smooth';
+  String _comfortCandidate = 'Smooth';
+  int _comfortCandidateCount = 0;
+
   Future<void> start(String routeId) async {
     // Guard: stop any existing session before starting a new one.
     stop();
@@ -113,6 +126,10 @@ class SensorFusion {
     _lastAccel = null;
     _lastHeading = null;
     _smoothedHeading = null;
+    _smoothedSpeed = null;
+    _comfortCurrent = 'Smooth';
+    _comfortCandidate = 'Smooth';
+    _comfortCandidateCount = 0;
     _accelBuffer.clear();
   }
 
@@ -122,7 +139,7 @@ class SensorFusion {
   }
 
   String _calculateComfort() {
-    if (_accelBuffer.isEmpty) return 'Smooth';
+    if (_accelBuffer.isEmpty) return _comfortCurrent;
 
     final mean = _accelBuffer.reduce((a, b) => a + b) / _accelBuffer.length;
     final variance = _accelBuffer.map((v) => pow(v - mean, 2)).reduce((a, b) => a + b) / _accelBuffer.length;
@@ -130,9 +147,44 @@ class SensorFusion {
     final maxAccel = _accelBuffer.reduce(max);
 
     // Adjusted thresholds for realistic bus ride comfort:
-    if (maxAccel >= 10.0 || stdDev >= 3.5) return 'Rough';
-    if (maxAccel >= 4.0 || stdDev >= 1.5) return 'Moderate';
-    return 'Smooth';
+    final raw = (maxAccel >= 10.0 || stdDev >= 3.5)
+        ? 'Rough'
+        : (maxAccel >= 4.0 || stdDev >= 1.5)
+            ? 'Moderate'
+            : 'Smooth';
+
+    // Hysteresis: hold the current label unless the new one repeats twice.
+    if (raw == _comfortCurrent) {
+      _comfortCandidate = raw;
+      _comfortCandidateCount = 0;
+    } else if (raw == _comfortCandidate) {
+      _comfortCandidateCount += 1;
+    } else {
+      _comfortCandidate = raw;
+      _comfortCandidateCount = 1;
+    }
+    if (_comfortCandidateCount >= 2) {
+      _comfortCurrent = raw;
+      _comfortCandidateCount = 0;
+    }
+    return _comfortCurrent;
+  }
+
+  /// EMA-smooth the raw GPS speed with spike rejection and a deadband, so a
+  /// dropped GPS fix cannot make the UI read 0 km/h mid-ride.
+  double _smoothSpeed(double rawKmh) {
+    if (_smoothedSpeed == null) {
+      _smoothedSpeed = rawKmh;
+      return rawKmh;
+    }
+    final prev = _smoothedSpeed!;
+    var input = rawKmh;
+    final spike = (input - prev).abs() > _speedSpikeKmh && prev > 10;
+    if (spike) input = prev; // hold the last sane value through the glitch
+    var next = prev + _speedAlpha * (input - prev);
+    if (next < _speedDeadbandKmh && input < _speedDeadbandKmh) next = 0;
+    _smoothedSpeed = next;
+    return next;
   }
 
   void _publish(String routeId) {
@@ -143,8 +195,8 @@ class SensorFusion {
     }
 
     final gpsSpeedMs = _lastGps!.speed;
-    final gpsSpeedKmh = gpsSpeedMs * 3.6;
-    
+    final gpsSpeedKmh = _smoothSpeed(gpsSpeedMs * 3.6);
+
     final comfort = _calculateComfort();
 
     final payload = SensorPayload(

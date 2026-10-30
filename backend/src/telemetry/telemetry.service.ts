@@ -28,9 +28,89 @@ function withTimeout<T>(
   ]);
 }
 
+interface RouteReadingFilter {
+  speedEma: number | null;
+  lastTs: number;
+  comfortCurrent: string;
+  comfortCandidate: string;
+  comfortCount: number;
+}
+
 @Injectable()
 export class TelemetryService {
   private logger = new Logger('TelemetryService');
+
+  /**
+   * Per-route live-reading filter. Raw phone GPS speed flickers between
+   * dropout-zeros and the true value (the UI jumped 0.1 <-> 55 km/h), and
+   * the comfort label flapped every second — so live readings are EMA
+   * smoothed, spike-rejected and deadbanded before they are stored or
+   * broadcast, and the comfort label needs 3 consecutive readings to
+   * change.
+   */
+  private readingFilters = new Map<string, RouteReadingFilter>();
+  private static readonly SPEED_SPIKE_KMH = 30;
+  private static readonly SPEED_DEADBAND_KMH = 1.2;
+  private static readonly READING_STALE_MS = 10_000;
+  private static readonly COMFORT_HOLD = 3;
+
+  smoothReading(routeId: string, speedKmh: number, comfort?: string) {
+    const key = String(routeId);
+    const f =
+      this.readingFilters.get(key) ??
+      ({
+        speedEma: null,
+        lastTs: 0,
+        comfortCurrent: 'Smooth',
+        comfortCandidate: 'Smooth',
+        comfortCount: 0,
+      } as RouteReadingFilter);
+
+    const now = Date.now();
+    let input = Number(speedKmh) || 0;
+
+    // Long gap (device restart / batch backlog): re-anchor instead of
+    // spike-rejecting, otherwise a parked bus would stay "stuck" at its
+    // old EMA forever.
+    if (f.speedEma === null || now - f.lastTs > TelemetryService.READING_STALE_MS) {
+      f.speedEma = input;
+    } else {
+      const spike =
+        Math.abs(input - f.speedEma) > TelemetryService.SPEED_SPIKE_KMH &&
+        f.speedEma > 10;
+      if (spike) input = f.speedEma; // hold through the glitch
+      f.speedEma = f.speedEma + 0.4 * (input - f.speedEma);
+      if (
+        f.speedEma < TelemetryService.SPEED_DEADBAND_KMH &&
+        input < TelemetryService.SPEED_DEADBAND_KMH
+      ) {
+        f.speedEma = 0;
+      }
+    }
+    f.lastTs = now;
+
+    // Comfort hysteresis: a label must repeat N readings before it sticks.
+    const raw = comfort || f.comfortCurrent || 'Smooth';
+    if (raw === f.comfortCurrent) {
+      f.comfortCandidate = raw;
+      f.comfortCount = 0;
+    } else if (raw === f.comfortCandidate) {
+      f.comfortCount += 1;
+    } else {
+      f.comfortCandidate = raw;
+      f.comfortCount = 1;
+    }
+    if (f.comfortCount >= TelemetryService.COMFORT_HOLD) {
+      f.comfortCurrent = raw;
+      f.comfortCount = 0;
+    }
+
+    this.readingFilters.set(key, f);
+    return {
+      speed: Math.round(f.speedEma * 10) / 10,
+      comfort: f.comfortCurrent,
+    };
+  }
 
   /** null = not probed yet, true = queue usable, false = persist directly. */
   private queueReady: boolean | null = null;
@@ -153,12 +233,17 @@ export class TelemetryService {
       };
     }
 
-    const entities = data.map((item: any) => ({
+    const filtered = data.map((item: any) => ({
+      item,
+      f: this.smoothReading(routeId, item.mpu_speed_kmh ?? (item.gps_speed_knots || 0) * 1.852, item.comfort),
+    }));
+
+    const entities = filtered.map(({ item, f }) => ({
       routeId: String(routeId),
       latitude: item.lat,
       longitude: item.lng,
       gpsSpeedKnots: item.gps_speed_knots,
-      mpuSpeedKmh: item.mpu_speed_kmh,
+      mpuSpeedKmh: f.speed,
       headingDeg: item.heading_deg,
       timestamp: new Date(item.timestamp),
     }));
@@ -167,12 +252,19 @@ export class TelemetryService {
       await this.prisma.telemetry.createMany({ data: entities });
     }
 
-    // Broadcast live location to Gateway
-    if (data.length > 0) {
-      const latest = data[data.length - 1];
+    // Broadcast the SMOOTHED last reading to the Gateway — this is the
+    // single live emit for both the socket and HTTP ingestion paths.
+    if (filtered.length > 0) {
+      const { item, f } = filtered[filtered.length - 1];
       this.eventEmitter.emit('telemetry.live', {
         route_id: String(routeId),
-        ...latest,
+        lat: item.lat,
+        lng: item.lng,
+        mpu_speed_kmh: f.speed,
+        gps_speed_knots: item.gps_speed_knots,
+        heading_deg: item.heading_deg,
+        comfort: f.comfort,
+        timestamp: item.timestamp,
       });
     }
 

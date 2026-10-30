@@ -4,6 +4,7 @@ import {
   IsArray,
   ValidateNested,
   IsNumber,
+  IsOptional,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -22,6 +23,11 @@ class TelemetryDataDto {
 
   @IsNumber()
   heading_deg: number;
+
+  // Ride-comfort label from the device ("Smooth" | "Moderate" | "Rough").
+  @IsOptional()
+  @IsString()
+  comfort?: string;
 
   @IsString()
   timestamp: string;

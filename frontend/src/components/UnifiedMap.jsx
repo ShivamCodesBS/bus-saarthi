@@ -258,16 +258,13 @@ const UnifiedMap = ({
     }
   }, [mapRef]);
   
-  // Dynamic Route Polyline based on routeInfo
+  // Dynamic Route Polyline based on routeInfo. Draws ONLY real stop
+  // coordinates — when the route is unknown or no stop resolves, there is
+  // no line at all. The previous hardcoded fallbacks read as a dotted
+  // "line to nowhere".
   const dynamicRoutePolyline = useMemo(() => {
-    if (!routeInfo || !routeInfo.stops) {
-      return [
-        [28.3180, 79.4670],
-        [28.3250, 79.4750],
-        [28.3320, 79.4800],
-        [28.3400, 79.4900],
-      ];
-    }
+    if (!routeInfo || !routeInfo.stops) return [];
+
     let stopsArray = [];
     if (Array.isArray(routeInfo.stops)) {
       stopsArray = routeInfo.stops;
@@ -288,20 +285,15 @@ const UnifiedMap = ({
       })
       .filter(Boolean);
 
-    if (coords.length > 0) {
-      const lastStop = typeof stopsArray[stopsArray.length - 1] === 'object'
-        ? (stopsArray[stopsArray.length - 1]?.name || '')
-        : String(stopsArray[stopsArray.length - 1]).trim();
-      if (lastStop !== 'Invertis University') {
-        coords.push(STOP_COORDS['Invertis University']);
-      }
-      return coords;
-    }
+    if (coords.length === 0) return [];
 
-    return [
-      [28.3180, 79.4670],
-      [28.3400, 79.4900],
-    ];
+    const lastStop = typeof stopsArray[stopsArray.length - 1] === 'object'
+      ? (stopsArray[stopsArray.length - 1]?.name || '')
+      : String(stopsArray[stopsArray.length - 1]).trim();
+    if (lastStop !== 'Invertis University') {
+      coords.push(STOP_COORDS['Invertis University']);
+    }
+    return coords;
   }, [routeInfo]);
   
   // Handle telemetry updates - mark stale after 30 seconds (progressive degradation)
@@ -407,10 +399,15 @@ const UnifiedMap = ({
     if (!routeInfo) return;
     const routeId = routeInfo.routeId || routeInfo.route_id;
     if (!routeId) return;
-    
+
     setIsFetchingLastKnown(true);
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('bus_saarthi_token') : null;
+      // The session (with its token) is stored as one JSON blob under
+      // `bus_saarthi_user` — there is no separate token key.
+      let token = null;
+      try {
+        token = JSON.parse(localStorage.getItem('bus_saarthi_user') || 'null')?.token || null;
+      } catch { token = null; }
       const res = await fetch(`${BACKEND_URL}/api/telemetry/last/${routeId}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
@@ -591,13 +588,14 @@ const UnifiedMap = ({
         subdomains={['a', 'b', 'c']}
       />
       
-      {/* Route Polyline — show the planned route but NOT lines connected to 
-          the current bus position. The bus marker stands alone. */}
-      {showRoutePolyline && dynamicRoutePolyline.length > 1 && (
-        <Polyline 
-          positions={dynamicRoutePolyline} 
-          color="#0056b3" 
-          weight={5} 
+      {/* Route Polyline — only while the trip is live. When the bus is
+          offline the marker sits at its last-seen fix, and a route line
+          starting from there read as a dotted line to nowhere. */}
+      {showRoutePolyline && tripState !== 'offline' && dynamicRoutePolyline.length > 1 && (
+        <Polyline
+          positions={dynamicRoutePolyline}
+          color="#0056b3"
+          weight={5}
           opacity={0.6}
           lineCap="round"
           lineJoin="round"
@@ -620,9 +618,9 @@ const UnifiedMap = ({
           </Tooltip>
         </Marker>
       ))}
-      
-      {/* Destination Marker — show whenever route data is available */}
-      {showDestinationMarker && dynamicRoutePolyline.length > 0 && (
+
+      {/* Destination Marker — same live-only rule as the polyline */}
+      {showDestinationMarker && tripState !== 'offline' && dynamicRoutePolyline.length > 0 && (
         <Marker position={dynamicRoutePolyline[dynamicRoutePolyline.length - 1]} icon={destinationIcon}>
           <Popup>
             <div style={{ textAlign: 'center' }}>

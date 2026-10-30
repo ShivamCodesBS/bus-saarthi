@@ -29,8 +29,8 @@ describe('GrievancesService parent confirmation access', () => {
       user: { findMany: jest.fn().mockResolvedValue([]) },
     };
     cache = { delByPattern: jest.fn() };
-    eventEmitter = { emit: jest.fn() };
-    notifications = { notifyUser: jest.fn() } as any;
+    const eventEmitter = { emit: jest.fn() } as any;
+    const notifications = { notifyUser: jest.fn() } as any;
     service = new GrievancesService(prisma, notifications, cache, eventEmitter);
   });
 

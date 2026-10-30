@@ -532,31 +532,6 @@ const Home = () => {
   };
 
 
-  // Dynamic Route Polyline based on routeInfo
-  const dynamicRoutePolyline = (() => {
-    if (!routeInfo || !routeInfo.stops) {
-      return [
-        [28.3180, 79.4670],
-        [28.3250, 79.4750],
-        [28.3320, 79.4800],
-        [28.3400, 79.4900],
-      ];
-    }
-    const stopsArray = routeInfo.stops.split(',').map(s => s.trim());
-    const coords = stopsArray.map(stop => STOP_COORDS[stop]).filter(Boolean);
-    if (coords.length > 0) {
-      // Add a default final destination if Invertis University isn't already the last stop
-      if (stopsArray[stopsArray.length - 1] !== 'Invertis University') {
-        coords.push(STOP_COORDS['Invertis University']);
-      }
-      return coords;
-    }
-    // Fallback if no valid coords found
-    return [
-      [28.3180, 79.4670],
-      [28.3400, 79.4900],
-    ];
-  })();
 
   // The global broadcast popup is modal — lock the page behind it.
   useModalA11y(!!activeBroadcast, acknowledgeBroadcast);

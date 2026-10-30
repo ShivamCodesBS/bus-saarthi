@@ -114,7 +114,7 @@ export class GrievancesController {
   start(
     @Param('id') id: string,
     @Request() req: any,
-    @Body() body: { note?: string },
+    @Body() body: { note?: string } = {},
   ) {
     return this.grievancesService.startProgress(
       id,
@@ -133,7 +133,7 @@ export class GrievancesController {
   resolveAdmin(
     @Param('id') id: string,
     @Request() req: any,
-    @Body() body: { note?: string; response?: string },
+    @Body() body: { note?: string; response?: string } = {},
   ) {
     return this.grievancesService.resolve(
       id,
@@ -149,7 +149,7 @@ export class GrievancesController {
   resolvePut(
     @Param('id') id: string,
     @Request() req: any,
-    @Body() body: { note?: string; response?: string },
+    @Body() body: { note?: string; response?: string } = {},
   ) {
     return this.grievancesService.resolve(
       id,
@@ -178,7 +178,7 @@ export class GrievancesController {
   reopen(
     @Param('id') id: string,
     @Request() req: any,
-    @Body() body: { reason?: string },
+    @Body() body: { reason?: string } = {},
   ) {
     return this.grievancesService.reopen(
       id,
@@ -196,7 +196,7 @@ export class GrievancesController {
   extend(
     @Param('id') id: string,
     @Request() req: any,
-    @Body() body: { hours?: number },
+    @Body() body: { hours?: number } = {},
   ) {
     return this.grievancesService.extendDeadline(
       id,
