@@ -8,7 +8,7 @@ on:
 
 env:
   NODE_VERSION: '22'
-  FLUTTER_VERSION: '3.24.0'
+  JAVA_VERSION: '17'
 
 jobs:
   # Backend Tests & Build
@@ -138,11 +138,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: 'gradle'
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
+          channel: 'stable'
           cache: true
 
       - name: Get dependencies
@@ -154,9 +160,10 @@ jobs:
         working-directory: ./bus_saarthi_app
 
       - name: Build APK
-        run: flutter build apk --release
-          --dart-define=API_URL=https://api.bussaarthi.com
-          --dart-define=SOCKET_URL=https://api.bussaarthi.com
+        run: |
+          flutter build apk --release \
+            --dart-define=API_URL=https://api.bussaarthi.com \
+            --dart-define=SOCKET_URL=https://api.bussaarthi.com
         working-directory: ./bus_saarthi_app
 
       - name: Upload APK
@@ -173,11 +180,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: 'gradle'
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
+          channel: 'stable'
           cache: true
 
       - name: Get dependencies
@@ -189,10 +202,11 @@ jobs:
         working-directory: ./mobile
 
       - name: Build APK (Driver mode)
-        run: flutter build apk --release
-          --dart-define=API_URL=https://api.bussaarthi.com
-          --dart-define=SOCKET_URL=https://api.bussaarthi.com
-          --dart-define=APP_MODE=driver
+        run: |
+          flutter build apk --release \
+            --dart-define=API_URL=https://api.bussaarthi.com \
+            --dart-define=SOCKET_URL=https://api.bussaarthi.com \
+            --dart-define=APP_MODE=driver
         working-directory: ./mobile
 
       - name: Upload Driver APK
@@ -203,12 +217,13 @@ jobs:
           retention-days: 7
 
       - name: Build APK (BusDevice mode)
-        run: flutter build apk --release
-          --dart-define=API_URL=https://api.bussaarthi.com
-          --dart-define=SOCKET_URL=https://api.bussaarthi.com
-          --dart-define=APP_MODE=busDevice
-          --dart-define=HARDWARE_TOKEN=${{ secrets.HARDWARE_TOKEN }}
-          --dart-define=ROUTE_ID=4
+        run: |
+          flutter build apk --release \
+            --dart-define=API_URL=https://api.bussaarthi.com \
+            --dart-define=SOCKET_URL=https://api.bussaarthi.com \
+            --dart-define=APP_MODE=busDevice \
+            --dart-define=HARDWARE_TOKEN=${{ secrets.HARDWARE_TOKEN }} \
+            --dart-define=ROUTE_ID=4
         working-directory: ./mobile
 
       - name: Upload BusDevice APK
