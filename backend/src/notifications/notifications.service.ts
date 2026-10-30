@@ -37,26 +37,33 @@ export class NotificationsService {
 
     // ── FCM (Android app) ──────────────────────────────────────────────
     const rawServiceAccount =
-      this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT_JSON') ||
-      this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT_BASE64');
+      this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT_BASE64') ||
+      this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT_JSON');
 
     if (rawServiceAccount) {
       try {
         let serviceAccount: any;
-        const trimmed = rawServiceAccount.trim();
-        if (!trimmed.startsWith('{')) {
-          try {
-            const decoded = Buffer.from(trimmed, 'base64').toString('utf-8');
-            serviceAccount = JSON.parse(decoded);
-          } catch {
-            serviceAccount = JSON.parse(trimmed);
-          }
+        let str = String(rawServiceAccount).trim();
+
+        // Strip surrounding quotes if env var added them
+        if (
+          (str.startsWith('"') && str.endsWith('"')) ||
+          (str.startsWith("'") && str.endsWith("'"))
+        ) {
+          str = str.slice(1, -1).trim();
+        }
+
+        if (str.startsWith('{')) {
+          serviceAccount = JSON.parse(str);
         } else {
-          serviceAccount = JSON.parse(trimmed);
+          // Base64 encoded — remove any whitespace or line breaks
+          const cleanB64 = str.replace(/\s+/g, '');
+          const decoded = Buffer.from(cleanB64, 'base64').toString('utf-8');
+          serviceAccount = JSON.parse(decoded);
         }
 
         if (
-          serviceAccount.private_key &&
+          serviceAccount?.private_key &&
           typeof serviceAccount.private_key === 'string'
         ) {
           serviceAccount.private_key = serviceAccount.private_key.replace(
@@ -72,7 +79,7 @@ export class NotificationsService {
         this.logger.log('FCM enabled — Android push notifications active.');
       } catch (err: any) {
         this.logger.error(
-          `FIREBASE_SERVICE_ACCOUNT_JSON failed to init — FCM disabled. ${err?.message}`,
+          `Firebase service account failed to init — FCM disabled. ${err?.message}`,
         );
       }
     } else {
