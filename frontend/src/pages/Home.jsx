@@ -4,6 +4,7 @@ import { Bus, Menu, MapPin, Phone, User, X, Compass, Activity, Navigation, Wind,
 import HamburgerMenu from '../components/HamburgerMenu';
 import UserAvatar from '../components/UserAvatar';
 import WakeAlarmModal from '../components/WakeAlarmModal';
+import WakeAlarmOptionsModal from '../components/WakeAlarmOptionsModal';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
 import { io } from 'socket.io-client';
@@ -62,6 +63,7 @@ const Home = () => {
   const [alarmSet, setAlarmSet] = useState(() => localStorage.getItem('wake_alarm_enabled') === 'true');
   const [alarmLoading, setAlarmLoading] = useState(false);
   const [showAlarmModal, setShowAlarmModal] = useState(false);
+  const [showAlarmOptionsModal, setShowAlarmOptionsModal] = useState(false);
   const alarmAudioRef = useRef(null);
   const [sosActive, setSosActive] = useState(false);
   const [sosTimer, setSosTimer] = useState(null);
@@ -448,27 +450,32 @@ const Home = () => {
     setActiveBroadcast(null);
   };
 
-  const handleWakeAlarm = async () => {
+  const handleWakeAlarm = () => {
     if (alarmSet) {
-      // Cancel the alarm
-      setAlarmLoading(true);
-      try {
-        const token = user?.token || JSON.parse(localStorage.getItem('bus_saarthi_user') || '{}').token;
-        await axios.delete(`${BACKEND_URL}/api/users/me/wake-alarm`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        setAlarmSet(false);
-        localStorage.removeItem('wake_alarm_enabled');
-        localStorage.removeItem('wake_alarm_data');
-        toast.success('🔕 Wake alarm cancelled.', { style: { borderRadius: '10px' } });
-      } catch (err) {
-        toast.error('We could not cancel the alarm. Please try again.');
-      } finally {
-        setAlarmLoading(false);
-      }
+      // Alarm is active: open options to either change location or turn off
+      setShowAlarmOptionsModal(true);
     } else {
       // Open modal to set alarm
       setShowAlarmModal(true);
+    }
+  };
+
+  const handleCancelAlarm = async () => {
+    setAlarmLoading(true);
+    try {
+      const token = user?.token || JSON.parse(localStorage.getItem('bus_saarthi_user') || '{}').token;
+      await axios.delete(`${BACKEND_URL}/api/users/me/wake-alarm`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setAlarmSet(false);
+      setShowAlarmOptionsModal(false);
+      localStorage.removeItem('wake_alarm_enabled');
+      localStorage.removeItem('wake_alarm_data');
+      toast.success('🔕 Wake alarm cancelled.', { style: { borderRadius: '10px' } });
+    } catch (err) {
+      toast.error('We could not cancel the alarm. Please try again.');
+    } finally {
+      setAlarmLoading(false);
     }
   };
 
@@ -1061,6 +1068,18 @@ const Home = () => {
       )}
 
       <HamburgerMenu isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} />
+
+      {showAlarmOptionsModal && (
+        <WakeAlarmOptionsModal
+          onClose={() => setShowAlarmOptionsModal(false)}
+          onChangeLocation={() => {
+            setShowAlarmOptionsModal(false);
+            setShowAlarmModal(true);
+          }}
+          onTurnOff={handleCancelAlarm}
+          loading={alarmLoading}
+        />
+      )}
 
       {showAlarmModal && (
         <WakeAlarmModal

@@ -134,19 +134,268 @@ class _HomeViewState extends State<_HomeView> {
   Future<void> _handleWakeAlarm(TrackingProvider tracking) async {
     if (tracking.alarmLoading) return;
     if (tracking.alarmSet) {
-      final ok = await tracking.cancelWakeAlarm();
-      if (mounted) {
-        ApiClient.toast(
-          context,
-          ok
-              ? '🔕 Wake alarm cancelled.'
-              : 'We could not cancel the alarm. Please try again.',
-          kind: ok ? ToastKind.success : ToastKind.error,
-        );
-      }
+      _showWakeAlarmOptions(tracking);
     } else {
       setState(() => _showAlarmModal = true);
     }
+  }
+
+  void _showWakeAlarmOptions(TrackingProvider tracking) {
+    final lang = context.read<LanguageProvider>();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardBg = isDark ? AppColors.darkCard : Colors.white;
+    final textDark = isDark ? AppColors.darkText : const Color(0xFF0F172A);
+    final textMuted = isDark ? AppColors.darkTextMuted : const Color(0xFF64748B);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: Container(
+          margin: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: cardBg,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: isDark ? AppColors.darkBorder : const Color(0xFFE2E8F0),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.15),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Header
+              Row(
+                children: [
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEFF6FF),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          LucideIcons.alarmClock,
+                          size: 22,
+                          color: Color(0xFF2563EB),
+                        ),
+                      ),
+                      Positioned(
+                        top: 2,
+                        right: 2,
+                        child: Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 1.5),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          lang.t('alarmActiveTitle'),
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: textDark,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          lang.t('alarmActiveSubtitle'),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: textMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(LucideIcons.x, size: 20, color: textMuted),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+
+              // Option 1: Change Location
+              InkWell(
+                onTap: () {
+                  Navigator.pop(ctx);
+                  setState(() => _showAlarmModal = true);
+                },
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF0F7FF),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: isDark ? const Color(0xFF334155) : const Color(0xFFBFDBFE),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF1E3A8A) : const Color(0xFFDBEAFE),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          LucideIcons.mapPin,
+                          size: 22,
+                          color: Color(0xFF1D4ED8),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              lang.t('changeLocation'),
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: isDark ? Colors.white : const Color(0xFF1E3A8A),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              lang.t('changeLocationSubtitle'),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFF3B82F6),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(
+                        LucideIcons.chevronRight,
+                        size: 20,
+                        color: Color(0xFF60A5FA),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Option 2: Turn Off Alarm
+              InkWell(
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final ok = await tracking.cancelWakeAlarm();
+                  if (mounted) {
+                    ApiClient.toast(
+                      context,
+                      ok
+                          ? '🔕 Wake alarm cancelled.'
+                          : 'We could not cancel the alarm. Please try again.',
+                      kind: ok ? ToastKind.success : ToastKind.error,
+                    );
+                  }
+                },
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF2A1515) : const Color(0xFFFFF5F5),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: isDark ? const Color(0xFF451A1A) : const Color(0xFFFECACA),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF4C1D1D) : const Color(0xFFFEE2E2),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          LucideIcons.bellOff,
+                          size: 22,
+                          color: Color(0xFFDC2626),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              lang.t('turnOffAlarm'),
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: isDark ? const Color(0xFFFCA5A5) : const Color(0xFF991B1B),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              lang.t('turnOffAlarmSubtitle'),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isDark ? const Color(0xFFF87171) : const Color(0xFFEF4444),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(
+                        LucideIcons.chevronRight,
+                        size: 20,
+                        color: Color(0xFFF87171),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Keep Active Button
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text(
+                  lang.t('keepAlarmActive'),
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: textMuted,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
