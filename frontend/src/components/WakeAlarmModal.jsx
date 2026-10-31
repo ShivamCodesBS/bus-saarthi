@@ -15,14 +15,14 @@ import {
   Compass,
   Plus,
   Minus,
-  Search,
   Crosshair,
-  School,
   Check,
+  ChevronUp,
+  ChevronDown,
+  ChevronLeft,
 } from 'lucide-react';
 import axios from 'axios';
 import { BACKEND_URL } from '../config';
-import { STOP_COORDS } from '../lib/stopCoords';
 import toast from 'react-hot-toast';
 
 // Fix default leaflet marker icon
@@ -43,30 +43,29 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
 }
 
-// Controller to track map movements, zoom, and clicks smoothly
+// Controller to track map movements, zoom, and invalidate size smoothly without 60fps React re-renders
 function MapController({ onPositionChange, setIsMoving, setMapInstance }) {
   const map = useMap();
 
   useEffect(() => {
     setMapInstance(map);
+    map.invalidateSize();
+    const t1 = setTimeout(() => map.invalidateSize(), 150);
+    const t2 = setTimeout(() => map.invalidateSize(), 350);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
   }, [map, setMapInstance]);
 
   useMapEvents({
     movestart() {
       setIsMoving(true);
     },
-    move() {
-      const center = map.getCenter();
-      onPositionChange([center.lat, center.lng]);
-    },
     moveend() {
       setIsMoving(false);
       const center = map.getCenter();
       onPositionChange([center.lat, center.lng]);
-    },
-    click(e) {
-      map.flyTo([e.latlng.lat, e.latlng.lng], map.getZoom(), { duration: 0.4 });
-      onPositionChange([e.latlng.lat, e.latlng.lng]);
     },
   });
 
@@ -74,20 +73,6 @@ function MapController({ onPositionChange, setIsMoving, setMapInstance }) {
 }
 
 const KM_OPTIONS = [1, 2, 3, 5];
-
-// Popular stops shortcuts for quick one-tap snapping
-const POPULAR_STOPS = [
-  'Invertis University',
-  'Satellite Bus Stand',
-  'Civil Lines',
-  'Rajendra Nagar',
-  'Chauki Chauraha',
-  'DD Puram',
-  'Faridpur',
-  'Bareilly Mod',
-  'Shahjahanpur',
-  'Badaun',
-];
 
 const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
   const { lang } = useLang();
@@ -100,10 +85,40 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
   const [gpsStatus, setGpsStatus] = useState('idle'); // 'idle' | 'loading' | 'success' | 'error'
   const [isMoving, setIsMoving] = useState(false);
   const [mapInstance, setMapInstance] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [showSearchResults, setShowSearchResults] = useState(false);
 
   useModalA11y(true, onClose);
+
+  // Keyboard navigation for PC arrow keys (↑ ↓ ← → and WASD)
+  useEffect(() => {
+    if (step !== 'map' || !mapInstance) return;
+
+    const handleKeyDown = (e) => {
+      if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+      const panDistance = 100;
+      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
+        e.preventDefault();
+        mapInstance.panBy([0, -panDistance]);
+      } else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {
+        e.preventDefault();
+        mapInstance.panBy([0, panDistance]);
+      } else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+        e.preventDefault();
+        mapInstance.panBy([-panDistance, 0]);
+      } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+        e.preventDefault();
+        mapInstance.panBy([panDistance, 0]);
+      } else if (e.key === '+' || e.key === '=') {
+        e.preventDefault();
+        mapInstance.zoomIn();
+      } else if (e.key === '-' || e.key === '_') {
+        e.preventDefault();
+        mapInstance.zoomOut();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [step, mapInstance]);
 
   const handleUseGPS = useCallback(() => {
     setStep('gps');
@@ -159,10 +174,6 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
       { enableHighAccuracy: true, timeout: 8000 }
     );
   };
-
-  const filteredStops = Object.entries(STOP_COORDS).filter(([name]) =>
-    name.toLowerCase().includes(searchQuery.toLowerCase().trim())
-  );
 
   const handleConfirm = async () => {
     if (!position) return;
@@ -537,158 +548,32 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
           {/* STEP 2: Ultra-Convenient Interactive Map Selection */}
           {step === 'map' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {/* Quick Search & Filter Input */}
-              <div style={{ position: 'relative' }}>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    background: '#f8fafc',
-                    borderRadius: '12px',
-                    padding: '0.55rem 0.85rem',
-                    border: '1.5px solid #cbd5e1',
-                  }}
-                >
-                  <Search size={16} color="#64748b" />
-                  <input
-                    type="text"
-                    placeholder={
-                      lang === 'hi'
-                        ? 'स्टॉप खोजें (जैसे Satellite, Civil Lines)...'
-                        : 'Search stop or landmark (e.g. Satellite, Civil Lines)...'
-                    }
-                    value={searchQuery}
-                    onFocus={() => setShowSearchResults(true)}
-                    onChange={(e) => {
-                      setSearchQuery(e.target.value);
-                      setShowSearchResults(true);
-                    }}
-                    style={{
-                      border: 'none',
-                      background: 'transparent',
-                      outline: 'none',
-                      width: '100%',
-                      fontSize: '0.84rem',
-                      color: '#0f172a',
-                    }}
-                  />
-                  {searchQuery && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSearchQuery('');
-                        setShowSearchResults(false);
-                      }}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                    >
-                      <X size={15} color="#94a3b8" />
-                    </button>
-                  )}
-                </div>
-
-                {/* Search Results Dropdown */}
-                {showSearchResults && searchQuery.trim() && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: '100%',
-                      left: 0,
-                      right: 0,
-                      marginTop: '4px',
-                      background: 'white',
-                      borderRadius: '12px',
-                      boxShadow: '0 10px 25px -5px rgba(0,0,0,0.2)',
-                      border: '1px solid #cbd5e1',
-                      maxHeight: '180px',
-                      overflowY: 'auto',
-                      zIndex: 2000,
-                    }}
-                  >
-                    {filteredStops.length > 0 ? (
-                      filteredStops.map(([name, coords]) => (
-                        <div
-                          key={name}
-                          onClick={() => {
-                            handleFlyTo(coords, 16);
-                            setSearchQuery('');
-                            setShowSearchResults(false);
-                          }}
-                          style={{
-                            padding: '0.65rem 0.95rem',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.65rem',
-                            cursor: 'pointer',
-                            borderBottom: '1px solid #f1f5f9',
-                            fontSize: '0.82rem',
-                            color: '#1e293b',
-                            fontWeight: 500,
-                          }}
-                          onMouseEnter={(e) => (e.currentTarget.style.background = '#f0f7ff')}
-                          onMouseLeave={(e) => (e.currentTarget.style.background = 'white')}
-                        >
-                          <MapPin size={15} color="#2563eb" />
-                          <span>{name}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <div style={{ padding: '0.75rem', fontSize: '0.8rem', color: '#64748b', textAlign: 'center' }}>
-                        {lang === 'hi' ? 'कोई स्टॉप नहीं मिला' : 'No matching stops'}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Quick Popular Stop Chips */}
               <div
                 style={{
                   display: 'flex',
-                  gap: '6px',
-                  overflowX: 'auto',
-                  paddingBottom: '2px',
-                  scrollbarWidth: 'none',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  background: '#f8fafc',
+                  borderRadius: '12px',
+                  padding: '0.6rem 0.85rem',
+                  border: '1px solid #e2e8f0',
+                  fontSize: '0.8rem',
+                  color: '#64748b',
                 }}
               >
-                {POPULAR_STOPS.map((stopName) => {
-                  const coords = STOP_COORDS[stopName];
-                  if (!coords) return null;
-                  return (
-                    <button
-                      key={stopName}
-                      type="button"
-                      onClick={() => handleFlyTo(coords, 16)}
-                      style={{
-                        padding: '0.35rem 0.75rem',
-                        borderRadius: '20px',
-                        border: '1px solid #dbeafe',
-                        background: '#eff6ff',
-                        color: '#1d4ed8',
-                        fontSize: '0.74rem',
-                        fontWeight: 600,
-                        whiteSpace: 'nowrap',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        flexShrink: 0,
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = '#dbeafe')}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = '#eff6ff')}
-                    >
-                      <MapPin size={12} color="#2563eb" />
-                      {stopName.replace(' Bus Stand', '')}
-                    </button>
-                  );
-                })}
+                <Compass size={16} color="#2563eb" style={{ flexShrink: 0 }} />
+                <span>
+                  {lang === 'hi'
+                    ? 'मैप को माउस से ड्रैग करें या कीबोर्ड/स्क्रीन एरो (↑ ↓ ← →) से सेट करें'
+                    : 'Drag map with mouse or use arrow keys/screen buttons (↑ ↓ ← →) to pan'}
+                </span>
               </div>
 
               {/* Map Canvas with Center Pin and Floating Controls */}
               <div
                 style={{
                   position: 'relative',
-                  height: '310px',
+                  height: '340px',
                   borderRadius: '18px',
                   overflow: 'hidden',
                   border: '1.5px solid #cbd5e1',
@@ -698,11 +583,12 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
                 <MapContainer
                   center={position || INVERTIS_CENTER}
                   zoom={15}
-                  style={{ height: '100%', width: '100%' }}
+                  style={{ height: '100%', width: '100%', cursor: isMoving ? 'grabbing' : 'grab' }}
                   zoomControl={false}
                   scrollWheelZoom={true}
                   doubleClickZoom={true}
                   touchZoom={true}
+                  dragging={true}
                 >
                   <TileLayer
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -762,6 +648,105 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
                       transition: 'transform 0.16s ease',
                     }}
                   />
+                </div>
+
+                {/* Directional Pan Pad for Easy Up/Down/Left/Right on PC (Top Left) */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '12px',
+                    left: '12px',
+                    zIndex: 1000,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '2px',
+                    background: 'rgba(255, 255, 255, 0.95)',
+                    backdropFilter: 'blur(6px)',
+                    padding: '4px',
+                    borderRadius: '14px',
+                    border: '1.5px solid #cbd5e1',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+                  }}
+                >
+                  <button
+                    type="button"
+                    title={lang === 'hi' ? 'ऊपर ले जाएं (↑)' : 'Pan Up (↑)'}
+                    onClick={() => mapInstance?.panBy([0, -100])}
+                    style={{
+                      width: '32px',
+                      height: '28px',
+                      borderRadius: '8px',
+                      background: '#f8fafc',
+                      border: '1px solid #e2e8f0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      color: '#1e293b',
+                    }}
+                  >
+                    <ChevronUp size={16} strokeWidth={2.5} />
+                  </button>
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <button
+                      type="button"
+                      title={lang === 'hi' ? 'बाएं ले जाएं (←)' : 'Pan Left (←)'}
+                      onClick={() => mapInstance?.panBy([-100, 0])}
+                      style={{
+                        width: '32px',
+                        height: '28px',
+                        borderRadius: '8px',
+                        background: '#f8fafc',
+                        border: '1px solid #e2e8f0',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        color: '#1e293b',
+                      }}
+                    >
+                      <ChevronLeft size={16} strokeWidth={2.5} />
+                    </button>
+                    <button
+                      type="button"
+                      title={lang === 'hi' ? 'दाएं ले जाएं (→)' : 'Pan Right (→)'}
+                      onClick={() => mapInstance?.panBy([100, 0])}
+                      style={{
+                        width: '32px',
+                        height: '28px',
+                        borderRadius: '8px',
+                        background: '#f8fafc',
+                        border: '1px solid #e2e8f0',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        color: '#1e293b',
+                      }}
+                    >
+                      <ChevronRight size={16} strokeWidth={2.5} />
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    title={lang === 'hi' ? 'नीचे ले जाएं (↓)' : 'Pan Down (↓)'}
+                    onClick={() => mapInstance?.panBy([0, 100])}
+                    style={{
+                      width: '32px',
+                      height: '28px',
+                      borderRadius: '8px',
+                      background: '#f8fafc',
+                      border: '1px solid #e2e8f0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      color: '#1e293b',
+                    }}
+                  >
+                    <ChevronDown size={16} strokeWidth={2.5} />
+                  </button>
                 </div>
 
                 {/* Floating Map Navigation Controls (Top Right) */}
@@ -840,28 +825,6 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
                     }}
                   >
                     <Crosshair size={18} strokeWidth={2.5} />
-                  </button>
-
-                  {/* Reset to Invertis */}
-                  <button
-                    type="button"
-                    title={lang === 'hi' ? 'इनवर्टिस यूनिवर्सिटी' : 'Invertis Campus'}
-                    onClick={() => handleFlyTo(INVERTIS_CENTER, 15)}
-                    style={{
-                      width: '36px',
-                      height: '36px',
-                      borderRadius: '10px',
-                      background: 'white',
-                      border: '1.5px solid #bbf7d0',
-                      boxShadow: '0 2px 6px rgba(34,197,94,0.2)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer',
-                      color: '#16a34a',
-                    }}
-                  >
-                    <School size={18} strokeWidth={2.2} />
                   </button>
                 </div>
 

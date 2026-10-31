@@ -6,7 +6,6 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
-import '../core/stop_coords.dart';
 import '../core/theme.dart';
 import '../providers/language_provider.dart';
 import '../providers/tracking_provider.dart';
@@ -29,33 +28,17 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
   double _thresholdKm = 2;
   bool _isCustomThreshold = false;
   final TextEditingController _customValue = TextEditingController();
-  final TextEditingController _searchController = TextEditingController();
   final MapController _mapController = MapController();
   bool _loading = false;
   String _gpsStatus = 'idle'; // 'idle' | 'loading' | 'error'
   bool _isMoving = false;
-  String _searchQuery = '';
-  bool _showSearchResults = false;
 
   static const LatLng _invertisCenter = LatLng(28.3180, 79.4670);
   static const List<double> _kmOptions = [1, 2, 3, 5];
-  static const List<String> _popularStops = [
-    'Invertis University',
-    'Satellite Bus Stand',
-    'Civil Lines',
-    'Rajendra Nagar',
-    'Chauki Chauraha',
-    'DD Puram',
-    'Faridpur',
-    'Bareilly Mod',
-    'Shahjahanpur',
-    'Badaun',
-  ];
 
   @override
   void dispose() {
     _customValue.dispose();
-    _searchController.dispose();
     _mapController.dispose();
     super.dispose();
   }
@@ -63,6 +46,12 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
   void _flyTo(LatLng target, [double zoom = 16]) {
     setState(() => _position = target);
     _mapController.move(target, zoom);
+  }
+
+  void _panBy(double dLng, double dLat) {
+    final cur = _position ?? _invertisCenter;
+    final target = LatLng(cur.latitude + dLat, cur.longitude + dLng);
+    _flyTo(target, _mapController.camera.zoom);
   }
 
   Future<void> _locateMeOnMap() async {
@@ -416,173 +405,37 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
         );
 
       case 'map':
-        final query = _searchQuery.trim().toLowerCase();
-        final filteredStops = query.isEmpty
-            ? <MapEntry<String, List<double>>>[]
-            : StopCoords.all.entries
-                .where((e) => e.key.toLowerCase().contains(query))
-                .toList();
-
         return Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Search Input
             Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
                 color: isDark ? AppColors.darkSurface : const Color(0xFFF8FAFC),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: isDark ? AppColors.darkBorder : const Color(0xFFCBD5E1)),
+                border: Border.all(color: isDark ? AppColors.darkBorder : const Color(0xFFE2E8F0)),
               ),
-              child: TextField(
-                controller: _searchController,
-                onChanged: (val) {
-                  setState(() {
-                    _searchQuery = val;
-                    _showSearchResults = val.trim().isNotEmpty;
-                  });
-                },
-                style: TextStyle(color: textDark, fontSize: 13),
-                decoration: InputDecoration(
-                  hintText: lang.lang == 'hi'
-                      ? 'स्टॉप खोजें (जैसे Satellite, Civil Lines)...'
-                      : 'Search stop or landmark (e.g. Satellite)...',
-                  hintStyle: TextStyle(color: textMuted, fontSize: 12.5),
-                  prefixIcon: const Icon(LucideIcons.search, size: 16, color: Color(0xFF64748B)),
-                  suffixIcon: _searchController.text.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(LucideIcons.x, size: 15, color: Color(0xFF94A3B8)),
-                          splashRadius: 16,
-                          onPressed: () {
-                            _searchController.clear();
-                            setState(() {
-                              _searchQuery = '';
-                              _showSearchResults = false;
-                            });
-                          },
-                        )
-                      : null,
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-                ),
-              ),
-            ),
-
-            // Dropdown results if searching
-            if (_showSearchResults && filteredStops.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Container(
-                constraints: const BoxConstraints(maxHeight: 160),
-                decoration: BoxDecoration(
-                  color: isDark ? AppColors.darkCard : Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: isDark ? AppColors.darkBorder : const Color(0xFFE2E8F0)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.12),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  padding: EdgeInsets.zero,
-                  itemCount: filteredStops.length,
-                  itemBuilder: (ctx, idx) {
-                    final entry = filteredStops[idx];
-                    return InkWell(
-                      onTap: () {
-                        _flyTo(LatLng(entry.value[0], entry.value[1]), 16);
-                        _searchController.clear();
-                        setState(() {
-                          _searchQuery = '';
-                          _showSearchResults = false;
-                        });
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        decoration: BoxDecoration(
-                          border: Border(
-                            bottom: BorderSide(
-                              color: isDark ? AppColors.darkBorder : const Color(0xFFF1F5F9),
-                            ),
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(LucideIcons.mapPin, size: 15, color: Color(0xFF2563EB)),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                entry.key,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                  color: textDark,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-
-            const SizedBox(height: 8),
-
-            // Popular Stop Chips
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
               child: Row(
-                children: _popularStops.map((stopName) {
-                  final coords = StopCoords.all[stopName];
-                  if (coords == null) return const SizedBox.shrink();
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: InkWell(
-                      onTap: () => _flyTo(LatLng(coords[0], coords[1]), 16),
-                      borderRadius: BorderRadius.circular(20),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: isDark ? const Color(0x332563EB) : const Color(0xFFEFF6FF),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: isDark ? const Color(0xFF1E40AF) : const Color(0xFFDBEAFE),
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(LucideIcons.mapPin, size: 12, color: Color(0xFF2563EB)),
-                            const SizedBox(width: 4),
-                            Text(
-                              stopName.replaceAll(' Bus Stand', ''),
-                              style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF1D4ED8),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                children: [
+                  const Icon(LucideIcons.compass, size: 16, color: Color(0xFF2563EB)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      lang.lang == 'hi'
+                          ? 'मैप ड्रैग करें या स्क्रीन एरो (↑ ↓ ← →) से पिन सेट करें'
+                          : 'Drag map or use screen arrows (↑ ↓ ← →) to pan',
+                      style: TextStyle(fontSize: 12, color: textMuted),
                     ),
-                  );
-                }).toList(),
+                  ),
+                ],
               ),
             ),
-
             const SizedBox(height: 10),
 
             // Map View with Stationary Center Pin and Floating Controls
             Container(
-              height: 310,
+              height: 340,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(color: isDark ? AppColors.darkBorder : const Color(0xFFCBD5E1), width: 1.5),
@@ -682,6 +535,100 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
                     ),
                   ),
 
+                  // Directional Pan Pad (Top Left)
+                  Positioned(
+                    top: 10,
+                    left: 10,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.95),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFCBD5E1), width: 1.5),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.12),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          InkWell(
+                            onTap: () => _panBy(0, 0.0015),
+                            borderRadius: BorderRadius.circular(8),
+                            child: Container(
+                              width: 30,
+                              height: 26,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF8FAFC),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: const Color(0xFFE2E8F0)),
+                              ),
+                              child: const Icon(Icons.keyboard_arrow_up, size: 18, color: Color(0xFF1E293B)),
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              InkWell(
+                                onTap: () => _panBy(-0.0018, 0),
+                                borderRadius: BorderRadius.circular(8),
+                                child: Container(
+                                  width: 30,
+                                  height: 26,
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF8FAFC),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                                  ),
+                                  child: const Icon(Icons.keyboard_arrow_left, size: 18, color: Color(0xFF1E293B)),
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              InkWell(
+                                onTap: () => _panBy(0.0018, 0),
+                                borderRadius: BorderRadius.circular(8),
+                                child: Container(
+                                  width: 30,
+                                  height: 26,
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF8FAFC),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                                  ),
+                                  child: const Icon(Icons.keyboard_arrow_right, size: 18, color: Color(0xFF1E293B)),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 3),
+                          InkWell(
+                            onTap: () => _panBy(0, -0.0015),
+                            borderRadius: BorderRadius.circular(8),
+                            child: Container(
+                              width: 30,
+                              height: 26,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF8FAFC),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: const Color(0xFFE2E8F0)),
+                              ),
+                              child: const Icon(Icons.keyboard_arrow_down, size: 18, color: Color(0xFF1E293B)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
                   // Floating Map Navigation Controls (Top Right)
                   Positioned(
                     top: 10,
@@ -713,14 +660,6 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
                           borderColor: const Color(0xFFBFDBFE),
                           tooltip: lang.lang == 'hi' ? 'मेरी लोकेशन पर जाएं' : 'Go to My Location',
                           onTap: _locateMeOnMap,
-                        ),
-                        const SizedBox(height: 6),
-                        _buildFloatingMapButton(
-                          icon: LucideIcons.graduationCap,
-                          color: const Color(0xFF16A34A),
-                          borderColor: const Color(0xFFBBF7D0),
-                          tooltip: lang.lang == 'hi' ? 'इनवर्टिस यूनिवर्सिटी' : 'Invertis University',
-                          onTap: () => _flyTo(_invertisCenter, 15),
                         ),
                       ],
                     ),
