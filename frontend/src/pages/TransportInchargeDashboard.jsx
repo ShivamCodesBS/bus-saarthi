@@ -18,6 +18,7 @@ import { ComplaintSkeleton, RouteSkeleton, UserRowSkeleton } from '../components
 import UnifiedMap from '../components/UnifiedMap';
 import { useStaleWhileRevalidate } from '../hooks/useStaleWhileRevalidate';
 import { useModalA11y } from '../hooks/useModalA11y';
+import AlertsAndHistory from '../components/AlertsAndHistory';
 
 
 // Grievance lifecycle states, mirroring the backend enum.
@@ -987,9 +988,10 @@ const TransportInchargeDashboard = () => {
           {[
             { id: 'overview', icon: <MapPin size={16} />, label: 'Fleet & Tracking', color: '#0066cc', bg: '#e6f0fa' },
             { id: 'merge', icon: <GitMerge size={16} />, label: 'Merge & Cancel', color: '#e67e22', bg: '#fef3e2' },
-            { id: 'routes', icon: <Navigation size={16} />, label: 'Manage Routes', color: '#28a745', bg: '#e6fae6' },
-            { id: 'users', icon: <Users size={16} />, label: 'Users', color: '#7c3aed', bg: '#f3e8ff' },
-            { id: 'grievances', icon: <MessageSquare size={16} />, label: 'Complaints', color: '#cf1322', bg: '#fff1f0' }
+            { id: 'routes',         icon: <Navigation size={16} />,    label: 'Manage Routes',    color: '#28a745', bg: '#e6fae6' },
+            { id: 'users',          icon: <Users size={16} />,         label: 'Users',            color: '#7c3aed', bg: '#f3e8ff' },
+            { id: 'grievances',     icon: <MessageSquare size={16} />, label: 'Complaints',       color: '#cf1322', bg: '#fff1f0' },
+            { id: 'alerts-history', icon: <History size={16} />,      label: 'Alerts & History', color: '#dc2626', bg: '#fef2f2' },
           ].map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', whiteSpace: 'nowrap', padding: activeTab === tab.id ? '0.55rem 1.1rem' : '0.55rem 1rem', borderRadius: '50px', border: activeTab === tab.id ? `2px solid ${tab.color}` : '2px solid var(--border-color)', backgroundColor: activeTab === tab.id ? tab.bg : 'var(--white)', color: activeTab === tab.id ? tab.color : 'var(--text-light)', fontWeight: activeTab === tab.id ? '700' : '600', cursor: 'pointer', transition: 'all 0.2s', boxShadow: activeTab === tab.id ? `0 2px 10px ${tab.color}33` : 'var(--shadow)' }}>
               <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px', height: '24px', borderRadius: '50%', backgroundColor: activeTab === tab.id ? tab.color : 'var(--bg-color)', color: activeTab === tab.id ? 'white' : 'var(--text-light)' }}>{tab.icon}</span>
@@ -1818,6 +1820,13 @@ const TransportInchargeDashboard = () => {
                 );
               })}
             </div>
+          </div>
+        )}
+
+        {/* ----------------- TAB: ALERTS & HISTORY ----------------- */}
+        {activeTab === 'alerts-history' && (
+          <div className="animate-fade-in pb-12">
+            <AlertsAndHistory user={user} routesList={routesList} />
           </div>
         )}
       </main>

@@ -22,6 +22,7 @@ import { useStaleWhileRevalidate } from '../hooks/useStaleWhileRevalidate';
 import { useModalA11y } from '../hooks/useModalA11y';
 import { useTripStatus } from '../hooks/useTripStatus';
 import UnifiedMap from '../components/UnifiedMap';
+import AlertsAndHistory from '../components/AlertsAndHistory';
 
 // Grievance lifecycle states, mirroring the backend enum.
 const GRIEVANCE_STATUS = {
@@ -1177,7 +1178,8 @@ const AdminDashboard = () => {
             { id: 'routes',      icon: <Navigation size={16} />,   label: 'Routes',      color: '#28a745', bg: '#e6fae6' },
             { id: 'users',       icon: <Users size={16} />,        label: 'Users',       color: '#7c3aed', bg: '#f3e8ff' },
             { id: 'grievances',  icon: <MessageSquare size={16} />, label: 'Complaints', color: '#cf1322', bg: '#fff1f0' },
-            { id: 'attendance',  icon: <CheckCircle2 size={16} />, label: 'Attendance',  color: '#d97706', bg: '#fffbeb' },
+            { id: 'attendance',     icon: <CheckCircle2 size={16} />, label: 'Attendance',       color: '#d97706', bg: '#fffbeb' },
+            { id: 'alerts-history', icon: <History size={16} />,      label: 'Alerts & History', color: '#dc2626', bg: '#fef2f2' },
           ].map(tab => {
             const isActive = activeTab === tab.id;
             return (
@@ -2477,6 +2479,13 @@ const AdminDashboard = () => {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* ----------------- TAB: ALERTS & HISTORY ----------------- */}
+        {activeTab === 'alerts-history' && (
+          <div className="animate-fade-in pb-12">
+            <AlertsAndHistory user={user} routesList={routesList} />
           </div>
         )}
 
