@@ -128,9 +128,9 @@ export class NotificationsService {
       else if (String(msgType).startsWith('wake_alarm'))
         channelId = 'bus_saarthi_wake_alarm';
       else if (String(msgType).startsWith('grievance'))
-        channelId = 'bus_saarthi_grievance';
+        channelId = 'bus_saarthi_grievance_v2';
       else if (msgType === 'merge' || msgType === 'route_cancel')
-        channelId = 'bus_saarthi_route';
+        channelId = 'bus_saarthi_route_v2';
       else if (msgType === 'broadcast') channelId = 'bus_saarthi_broadcast_v2';
 
       const title = payload.title ?? 'Bus Saarthi';
