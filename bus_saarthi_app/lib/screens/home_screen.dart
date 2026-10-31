@@ -236,7 +236,171 @@ class _HomeViewState extends State<_HomeView> {
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
+
+              // Current Active Location Preview with Mini Map
+              () {
+                final alarmData = tracking.alarmData;
+                final double? alarmLat = alarmData != null
+                    ? (double.tryParse('${alarmData['lat']}'))
+                    : null;
+                final double? alarmLng = alarmData != null
+                    ? (double.tryParse('${alarmData['lng']}'))
+                    : null;
+                final double alarmThreshold = alarmData != null
+                    ? (double.tryParse('${alarmData['thresholdKm']}') ?? 2.0)
+                    : 2.0;
+
+                if (alarmLat == null || alarmLng == null) {
+                  return const SizedBox.shrink();
+                }
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 14),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isDark ? const Color(0xFF334155) : const Color(0xFFDBEAFE),
+                        width: 1.5,
+                      ),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                          color: isDark ? const Color(0xFF0F172A) : const Color(0xFFEFF6FF),
+                          child: Row(
+                            children: [
+                              const Icon(LucideIcons.mapPin, size: 16, color: Color(0xFF2563EB)),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  lang.t('currentAlarmLocation'),
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: isDark ? const Color(0xFF93C5FD) : const Color(0xFF1E40AF),
+                                  ),
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: isDark ? const Color(0xFF1E3A8A) : const Color(0xFFDBEAFE),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  '🎯 ${alarmThreshold % 1 == 0 ? alarmThreshold.toInt() : alarmThreshold} km ${lang.t('currentAlarmRadius')}',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF1D4ED8),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        SizedBox(
+                          height: 135,
+                          child: FlutterMap(
+                            options: MapOptions(
+                              initialCenter: LatLng(alarmLat, alarmLng),
+                              initialZoom: 14.5,
+                              interactionOptions: const InteractionOptions(flags: InteractiveFlag.none),
+                            ),
+                            children: [
+                              TileLayer(
+                                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                              ),
+                              CircleLayer(
+                                circles: [
+                                  CircleMarker(
+                                    point: LatLng(alarmLat, alarmLng),
+                                    radius: alarmThreshold * 1000,
+                                    useRadiusInMeter: true,
+                                    color: const Color(0x281D4ED8),
+                                    borderColor: const Color(0xFF1D4ED8),
+                                    borderStrokeWidth: 2,
+                                  ),
+                                ],
+                              ),
+                              MarkerLayer(
+                                markers: [
+                                  Marker(
+                                    point: LatLng(alarmLat, alarmLng),
+                                    width: 32,
+                                    height: 32,
+                                    child: Container(
+                                      decoration: const BoxDecoration(
+                                        color: Color(0xFF1D4ED8),
+                                        shape: BoxShape.circle,
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black26,
+                                            blurRadius: 4,
+                                            offset: Offset(0, 2),
+                                          ),
+                                        ],
+                                      ),
+                                      child: const Icon(
+                                        LucideIcons.alarmClock,
+                                        size: 17,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                '📍 ${alarmLat.toStringAsFixed(4)}°, ${alarmLng.toStringAsFixed(4)}°',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark ? AppColors.darkTextMuted : const Color(0xFF64748B),
+                                ),
+                              ),
+                              Row(
+                                children: [
+                                  Container(
+                                    width: 7,
+                                    height: 7,
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFF10B981),
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 5),
+                                  const Text(
+                                    'Active Geofence',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF10B981),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }(),
 
               // Option 1: Change Location
               InkWell(

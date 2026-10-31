@@ -61,6 +61,13 @@ const Home = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [telemetry, setTelemetry] = useState(null);
   const [alarmSet, setAlarmSet] = useState(() => localStorage.getItem('wake_alarm_enabled') === 'true');
+  const [alarmData, setAlarmData] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('wake_alarm_data') || 'null');
+    } catch {
+      return null;
+    }
+  });
   const [alarmLoading, setAlarmLoading] = useState(false);
   const [showAlarmModal, setShowAlarmModal] = useState(false);
   const [showAlarmOptionsModal, setShowAlarmOptionsModal] = useState(false);
@@ -238,6 +245,11 @@ const Home = () => {
       if (res.data?.alarmSet && res.data?.alarm) {
         const alarm = res.data.alarm;
         setAlarmSet(true);
+        setAlarmData({
+          lat: alarm.lat,
+          lng: alarm.lng,
+          thresholdKm: alarm.thresholdKm,
+        });
         localStorage.setItem('wake_alarm_enabled', 'true');
         localStorage.setItem('wake_alarm_data', JSON.stringify({
           lat: alarm.lat,
@@ -246,6 +258,7 @@ const Home = () => {
         }));
       } else {
         setAlarmSet(false);
+        setAlarmData(null);
         localStorage.removeItem('wake_alarm_enabled');
         localStorage.removeItem('wake_alarm_data');
       }
@@ -253,6 +266,11 @@ const Home = () => {
       // If backend fails, keep local state
       const stored = localStorage.getItem('wake_alarm_enabled') === 'true';
       setAlarmSet(stored);
+      if (stored) {
+        try {
+          setAlarmData(JSON.parse(localStorage.getItem('wake_alarm_data') || 'null'));
+        } catch (_) {}
+      }
     }
   };
   syncWakeAlarm();
@@ -434,6 +452,11 @@ const Home = () => {
       if (data?.login_id === myLoginId) {
         if (data.alarmSet && data.alarm) {
           setAlarmSet(true);
+          setAlarmData({
+            lat: data.alarm.lat,
+            lng: data.alarm.lng,
+            thresholdKm: data.alarm.thresholdKm,
+          });
           localStorage.setItem('wake_alarm_enabled', 'true');
           localStorage.setItem(
             'wake_alarm_data',
@@ -445,6 +468,7 @@ const Home = () => {
           );
         } else {
           setAlarmSet(false);
+          setAlarmData(null);
           localStorage.removeItem('wake_alarm_enabled');
           localStorage.removeItem('wake_alarm_data');
         }
@@ -492,6 +516,7 @@ const Home = () => {
         headers: { Authorization: `Bearer ${token}` }
       });
       setAlarmSet(false);
+      setAlarmData(null);
       setShowAlarmOptionsModal(false);
       localStorage.removeItem('wake_alarm_enabled');
       localStorage.removeItem('wake_alarm_data');
@@ -1095,6 +1120,7 @@ const Home = () => {
 
       {showAlarmOptionsModal && (
         <WakeAlarmOptionsModal
+          alarmData={alarmData}
           onClose={() => setShowAlarmOptionsModal(false)}
           onChangeLocation={() => {
             setShowAlarmOptionsModal(false);
@@ -1109,7 +1135,16 @@ const Home = () => {
         <WakeAlarmModal
           user={user}
           onClose={() => setShowAlarmModal(false)}
-          onAlarmSet={(state) => setAlarmSet(state)}
+          onAlarmSet={(state) => {
+            setAlarmSet(state);
+            if (!state) {
+              setAlarmData(null);
+            } else {
+              try {
+                setAlarmData(JSON.parse(localStorage.getItem('wake_alarm_data') || 'null'));
+              } catch (_) {}
+            }
+          }}
         />
       )}
     </div>

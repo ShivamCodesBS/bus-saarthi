@@ -36,7 +36,7 @@ class BusSaarthiApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => AuthProvider()..init()),
         ChangeNotifierProvider(create: (_) => LanguageProvider()..init()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()..init()),
       ],

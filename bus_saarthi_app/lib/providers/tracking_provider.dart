@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
@@ -139,6 +140,7 @@ class TrackingProvider extends ChangeNotifier {
   bool isLive = false;
   bool autoFollow = true;
   bool alarmSet = false;
+  Map<String, dynamic>? alarmData;
   bool alarmLoading = false;
   SosPhase sosPhase = SosPhase.idle;
   int sosCountdown = 0;
@@ -233,6 +235,19 @@ class TrackingProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     if (_disposed) return;
     alarmSet = prefs.getString('wake_alarm_enabled') == 'true';
+    if (alarmSet) {
+      try {
+        final rawAlarm = prefs.getString('wake_alarm_data');
+        if (rawAlarm != null) {
+          final decoded = jsonDecode(rawAlarm);
+          if (decoded is Map) {
+            alarmData = Map<String, dynamic>.from(decoded);
+          }
+        }
+      } catch (_) {}
+    } else {
+      alarmData = null;
+    }
     try {
       final raw = prefs.getString('passenger_seen_notif_ids');
       if (raw != null) {
@@ -267,14 +282,20 @@ class TrackingProvider extends ChangeNotifier {
       if (data is Map && isAlarmSet && data['alarm'] is Map) {
         final alarm = data['alarm'] as Map;
         alarmSet = true;
+        alarmData = {
+          'lat': double.tryParse('${alarm['lat']}') ?? 0.0,
+          'lng': double.tryParse('${alarm['lng']}') ?? 0.0,
+          'thresholdKm': double.tryParse('${alarm['thresholdKm']}') ?? 2.0,
+        };
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('wake_alarm_enabled', 'true');
         await prefs.setString(
           'wake_alarm_data',
-          '{"lat":${alarm['lat']},"lng":${alarm['lng']},"thresholdKm":${alarm['thresholdKm']}}',
+          '{"lat":${alarmData!['lat']},"lng":${alarmData!['lng']},"thresholdKm":${alarmData!['thresholdKm']}}',
         );
       } else {
         alarmSet = false;
+        alarmData = null;
         final prefs = await SharedPreferences.getInstance();
         await prefs.remove('wake_alarm_enabled');
         await prefs.remove('wake_alarm_data');
@@ -625,13 +646,19 @@ class TrackingProvider extends ChangeNotifier {
       if (isAlarmSet && data['alarm'] is Map) {
         final alarm = data['alarm'] as Map;
         alarmSet = true;
+        alarmData = {
+          'lat': double.tryParse('${alarm['lat']}') ?? 0.0,
+          'lng': double.tryParse('${alarm['lng']}') ?? 0.0,
+          'thresholdKm': double.tryParse('${alarm['thresholdKm']}') ?? 2.0,
+        };
         await prefs.setString('wake_alarm_enabled', 'true');
         await prefs.setString(
           'wake_alarm_data',
-          '{"lat":${alarm['lat']},"lng":${alarm['lng']},"thresholdKm":${alarm['thresholdKm']}}',
+          '{"lat":${alarmData!['lat']},"lng":${alarmData!['lng']},"thresholdKm":${alarmData!['thresholdKm']}}',
         );
       } else {
         alarmSet = false;
+        alarmData = null;
         await prefs.remove('wake_alarm_enabled');
         await prefs.remove('wake_alarm_data');
       }
@@ -767,6 +794,7 @@ class TrackingProvider extends ChangeNotifier {
       );
       if (_disposed || generation != _alarmRequestGeneration) return false;
       alarmSet = false;
+      alarmData = null;
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('wake_alarm_enabled');
       await prefs.remove('wake_alarm_data');
@@ -796,6 +824,11 @@ class TrackingProvider extends ChangeNotifier {
         options: Options(headers: _authHeaders),
       );
       if (_disposed || generation != _alarmRequestGeneration) return false;
+      alarmData = {
+        'lat': lat,
+        'lng': lng,
+        'thresholdKm': thresholdKm,
+      };
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('wake_alarm_enabled', 'true');
       await prefs.setString(

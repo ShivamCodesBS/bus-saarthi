@@ -1,11 +1,35 @@
 import React from 'react';
 import { useModalA11y } from '../hooks/useModalA11y';
 import { useLang } from '../context/LanguageContext';
+import { MapContainer, TileLayer, Marker, Circle } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { X, AlarmClock, MapPin, BellOff, ChevronRight, Loader2 } from 'lucide-react';
 
-const WakeAlarmOptionsModal = ({ onClose, onChangeLocation, onTurnOff, loading = false }) => {
+// Fix default leaflet marker icon
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
+
+const WakeAlarmOptionsModal = ({ alarmData, onClose, onChangeLocation, onTurnOff, loading = false }) => {
   useModalA11y(true, onClose);
   const { t } = useLang();
+
+  const currentAlarm = alarmData || (() => {
+    try {
+      return JSON.parse(localStorage.getItem('wake_alarm_data') || 'null');
+    } catch {
+      return null;
+    }
+  })();
+
+  const hasCoords = currentAlarm?.lat != null && currentAlarm?.lng != null;
+  const lat = hasCoords ? parseFloat(currentAlarm.lat) : 0;
+  const lng = hasCoords ? parseFloat(currentAlarm.lng) : 0;
+  const thresholdKm = currentAlarm?.thresholdKm ? parseFloat(currentAlarm.thresholdKm) : 2;
 
   return (
     <div
@@ -113,6 +137,99 @@ const WakeAlarmOptionsModal = ({ onClose, onChangeLocation, onTurnOff, loading =
 
         {/* Action Options */}
         <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+          {/* Current Active Location Preview with Mini Map */}
+          {hasCoords && (
+            <div
+              style={{
+                borderRadius: '16px',
+                overflow: 'hidden',
+                border: '1.5px solid #bfdbfe',
+                background: '#f8fafc',
+                boxShadow: '0 2px 4px rgba(37, 99, 235, 0.04)',
+              }}
+            >
+              {/* Card Header */}
+              <div
+                style={{
+                  padding: '0.65rem 0.95rem',
+                  background: '#eff6ff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  borderBottom: '1px solid #dbeafe',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <MapPin size={16} color="#2563eb" />
+                  <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#1e40af' }}>
+                    {t('currentAlarmLocation')}
+                  </span>
+                </div>
+                <span
+                  style={{
+                    fontSize: '0.72rem',
+                    fontWeight: 700,
+                    color: '#1d4ed8',
+                    background: '#dbeafe',
+                    padding: '3px 9px',
+                    borderRadius: '999px',
+                  }}
+                >
+                  🎯 {thresholdKm} km {t('currentAlarmRadius')}
+                </span>
+              </div>
+
+              {/* Map Preview */}
+              <div style={{ height: '145px', width: '100%', position: 'relative' }}>
+                <MapContainer
+                  center={[lat, lng]}
+                  zoom={14}
+                  zoomControl={false}
+                  scrollWheelZoom={false}
+                  dragging={false}
+                  doubleClickZoom={false}
+                  touchZoom={false}
+                  style={{ height: '100%', width: '100%' }}
+                >
+                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                  <Circle
+                    center={[lat, lng]}
+                    radius={thresholdKm * 1000}
+                    pathOptions={{
+                      color: '#2563eb',
+                      fillColor: '#3b82f6',
+                      fillOpacity: 0.22,
+                      weight: 2,
+                    }}
+                  />
+                  <Marker position={[lat, lng]} />
+                </MapContainer>
+              </div>
+
+              {/* Card Footer */}
+              <div
+                style={{
+                  padding: '0.5rem 0.95rem',
+                  fontSize: '0.72rem',
+                  color: '#64748b',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  background: 'white',
+                  borderTop: '1px solid #f1f5f9',
+                }}
+              >
+                <span style={{ fontWeight: 600 }}>
+                  📍 {lat.toFixed(4)}°, {lng.toFixed(4)}°
+                </span>
+                <span style={{ color: '#10b981', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981', display: 'inline-block' }} />
+                  Active Geofence
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Option 1: Change Location */}
           <button
             onClick={onChangeLocation}

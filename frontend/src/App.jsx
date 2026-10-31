@@ -3,7 +3,6 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'r
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LanguageProvider } from './context/LanguageContext';
 import ProtectedRoute from './components/ProtectedRoute';
-import Splash from './pages/Splash';
 import Login from './pages/Login';
 import NotFound from './pages/NotFound';
 import { Toaster, toast, useToasterStore } from 'react-hot-toast';
@@ -201,7 +200,14 @@ function App() {
             <BoundaryWithReset>
               <Routes>
                 {/* Public Routes */}
-                <Route path="/" element={<Splash />} />
+                <Route 
+                  path="/" 
+                  element={
+                    <PublicRoute>
+                      <Login />
+                    </PublicRoute>
+                  } 
+                />
                 <Route 
                   path="/login" 
                   element={
@@ -210,6 +216,7 @@ function App() {
                     </PublicRoute>
                   } 
                 />
+                <Route path="/splash" element={<Navigate to="/" replace />} />
                 
                 {/* Protected Routes */}
                 <Route 

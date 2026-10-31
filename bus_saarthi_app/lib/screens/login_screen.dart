@@ -331,7 +331,6 @@ class _TopBar extends StatelessWidget {
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.95),
             border: const Border(
-              top: BorderSide(color: Color(0xFF333333), width: 5),
               bottom: BorderSide(color: AppColors.secondaryOrange, width: 3.5),
             ),
             boxShadow: [

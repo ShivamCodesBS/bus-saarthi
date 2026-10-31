@@ -155,7 +155,6 @@ const Login = () => {
         zIndex: 10,
         background: 'rgba(255, 255, 255, 0.95)',
         backdropFilter: 'blur(10px)',
-        borderTop: '6px solid #333333',
         borderBottom: '4px solid var(--secondary-orange)',
         padding: '0.75rem 5%',
         display: 'flex',
