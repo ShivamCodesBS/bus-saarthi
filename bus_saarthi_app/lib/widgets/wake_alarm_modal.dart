@@ -469,26 +469,28 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
                               width: 44,
                               height: 44,
                               alignment: Alignment.center,
-                              child: Container(
-                                width: 40,
-                                height: 40,
-                                decoration: BoxDecoration(
-                                  gradient: const LinearGradient(
-                                    colors: [Color(0xFF2563EB), Color(0xFF1D4ED8)],
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                  ),
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.white, width: 2.5),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: const Color(0xFF2563EB).withValues(alpha: 0.45),
-                                      blurRadius: 10,
-                                      offset: const Offset(0, 4),
+                              child: IgnorePointer(
+                                child: Container(
+                                  width: 40,
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    gradient: const LinearGradient(
+                                      colors: [Color(0xFF2563EB), Color(0xFF1D4ED8)],
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
                                     ),
-                                  ],
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: Colors.white, width: 2.5),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: const Color(0xFF2563EB).withValues(alpha: 0.45),
+                                        blurRadius: 10,
+                                        offset: const Offset(0, 4),
+                                      ),
+                                    ],
+                                  ),
+                                  child: const Icon(LucideIcons.mapPin, size: 20, color: Colors.white),
                                 ),
-                                child: const Icon(LucideIcons.mapPin, size: 20, color: Colors.white),
                               ),
                             ),
                           ],
