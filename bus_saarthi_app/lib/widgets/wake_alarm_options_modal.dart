@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -12,7 +13,7 @@ import '../services/api_client.dart';
 /// Active alarm options modal: display current target location on a mini map,
 /// change location, or turn off the alarm.
 /// Styled 1:1 with the Web WakeAlarmOptionsModal and mobile WakeAlarmModal.
-class WakeAlarmOptionsModal extends StatelessWidget {
+class WakeAlarmOptionsModal extends StatefulWidget {
   final VoidCallback onClose;
   final VoidCallback onChangeLocation;
 
@@ -21,6 +22,58 @@ class WakeAlarmOptionsModal extends StatelessWidget {
     required this.onClose,
     required this.onChangeLocation,
   });
+
+  @override
+  State<WakeAlarmOptionsModal> createState() => _WakeAlarmOptionsModalState();
+}
+
+class _WakeAlarmOptionsModalState extends State<WakeAlarmOptionsModal> {
+  late final MapController _mapController = MapController();
+
+  @override
+  void dispose() {
+    _mapController.dispose();
+    super.dispose();
+  }
+
+  double _getZoomForRadius(double radiusKm) {
+    final km = radiusKm.clamp(0.2, 50.0);
+    final zoom = 13.5 - (math.log(km) / math.ln2);
+    return zoom.clamp(6.0, 16.0);
+  }
+
+  Widget _buildMiniMapButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    required String tooltip,
+    Color color = const Color(0xFF0F172A),
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.95),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFFCBD5E1), width: 1.2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.12),
+                blurRadius: 4,
+                offset: const Offset(0, 1),
+              ),
+            ],
+          ),
+          alignment: Alignment.center,
+          child: Icon(icon, size: 16, color: color),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -134,7 +187,7 @@ class WakeAlarmOptionsModal extends StatelessWidget {
                       ),
                     ),
                     IconButton(
-                      onPressed: onClose,
+                      onPressed: widget.onClose,
                       icon: Icon(
                         LucideIcons.x,
                         size: 20,
@@ -175,53 +228,147 @@ class WakeAlarmOptionsModal extends StatelessWidget {
                         child: Column(
                           children: [
                             SizedBox(
-                              height: 140,
+                              height: 185,
                               width: double.infinity,
-                              child: AbsorbPointer(
-                                absorbing: true,
-                                child: FlutterMap(
-                                  options: MapOptions(
-                                    initialCenter: LatLng(lat, lng),
-                                    initialZoom: 14,
-                                    interactionOptions: const InteractionOptions(
-                                      flags: InteractiveFlag.none,
+                              child: Stack(
+                                children: [
+                                  FlutterMap(
+                                    mapController: _mapController,
+                                    options: MapOptions(
+                                      initialCenter: LatLng(lat, lng),
+                                      initialZoom: _getZoomForRadius(thresholdKm),
+                                      interactionOptions: const InteractionOptions(
+                                        flags: InteractiveFlag.all,
+                                      ),
+                                    ),
+                                    children: [
+                                      TileLayer(
+                                        urlTemplate:
+                                            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                                                                  userAgentPackageName: 'com.bussaarthi.bus_saarthi_app',
+                                      ),
+                                      CircleLayer(
+                                        circles: [
+                                          CircleMarker(
+                                            point: LatLng(lat, lng),
+                                            radius: thresholdKm * 1000,
+                                            useRadiusInMeter: true,
+                                            color: const Color(0xFF2563EB).withValues(alpha: 0.22),
+                                            borderColor: const Color(0xFF2563EB),
+                                            borderStrokeWidth: 2,
+                                          ),
+                                        ],
+                                      ),
+                                      MarkerLayer(
+                                        markers: [
+                                          Marker(
+                                            point: LatLng(lat, lng),
+                                            width: 34,
+                                            height: 34,
+                                            child: const IgnorePointer(
+                                              child: Icon(
+                                                LucideIcons.mapPin,
+                                                size: 32,
+                                                color: Color(0xFF2563EB),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                  // Floating Zoom In / Zoom Out and Recenter controls
+                                  Positioned(
+                                    top: 8,
+                                    right: 8,
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        _buildMiniMapButton(
+                                          icon: LucideIcons.plus,
+                                          tooltip: 'Zoom In',
+                                          onTap: () {
+                                            try {
+                                              _mapController.move(
+                                                _mapController.camera.center,
+                                                _mapController.camera.zoom + 1,
+                                              );
+                                            } catch (_) {}
+                                          },
+                                        ),
+                                        const SizedBox(height: 5),
+                                        _buildMiniMapButton(
+                                          icon: LucideIcons.minus,
+                                          tooltip: 'Zoom Out',
+                                          onTap: () {
+                                            try {
+                                              _mapController.move(
+                                                _mapController.camera.center,
+                                                _mapController.camera.zoom - 1,
+                                              );
+                                            } catch (_) {}
+                                          },
+                                        ),
+                                        const SizedBox(height: 5),
+                                        _buildMiniMapButton(
+                                          icon: LucideIcons.crosshair,
+                                          tooltip: 'Fit Circle to Map',
+                                          color: const Color(0xFF2563EB),
+                                          onTap: () {
+                                            try {
+                                              _mapController.move(
+                                                LatLng(lat, lng),
+                                                _getZoomForRadius(thresholdKm),
+                                              );
+                                            } catch (_) {}
+                                          },
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                  children: [
-                                    TileLayer(
-                                      urlTemplate:
-                                          'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-                                       subdomains: const ['a', 'b', 'c', 'd'],
-                                       userAgentPackageName: 'com.bussaarthi.bus_saarthi_app',
-                                    ),
-                                    CircleLayer(
-                                      circles: [
-                                        CircleMarker(
-                                          point: LatLng(lat, lng),
-                                          radius: thresholdKm * 1000,
-                                          useRadiusInMeter: true,
-                                          color: const Color(0xFF2563EB).withValues(alpha: 0.22),
-                                          borderColor: const Color(0xFF2563EB),
-                                          borderStrokeWidth: 2,
-                                        ),
-                                      ],
-                                    ),
-                                    MarkerLayer(
-                                      markers: [
-                                        Marker(
-                                          point: LatLng(lat, lng),
-                                          width: 34,
-                                          height: 34,
-                                          child: const Icon(
-                                            LucideIcons.mapPin,
-                                            size: 32,
-                                            color: Color(0xFF2563EB),
+                                  // Coverage badge
+                                  Positioned(
+                                    bottom: 8,
+                                    left: 8,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withValues(alpha: 0.94),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: const Color(0xFFCBD5E1), width: 1),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withValues(alpha: 0.12),
+                                            blurRadius: 4,
+                                            offset: const Offset(0, 1),
                                           ),
-                                        ),
-                                      ],
+                                        ],
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Container(
+                                            width: 8,
+                                            height: 8,
+                                            decoration: const BoxDecoration(
+                                              color: Color(0xFF2563EB),
+                                              shape: BoxShape.circle,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 5),
+                                          Text(
+                                            "${lang.lang == 'hi' ? 'दायरा:' : 'Radius:'} ${thresholdKm >= 1 ? thresholdKm.toStringAsFixed(1) : (thresholdKm * 1000).toInt().toString()} ${lang.lang == 'hi' ? 'किमी' : 'km'}",
+                                            style: const TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold,
+                                              color: Color(0xFF1E293B),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
                             ),
                             Container(
@@ -281,7 +428,7 @@ class WakeAlarmOptionsModal extends StatelessWidget {
 
                     // Option 1: Change Location
                     InkWell(
-                      onTap: onChangeLocation,
+                      onTap: widget.onChangeLocation,
                       borderRadius: BorderRadius.circular(16),
                       child: Container(
                         padding: const EdgeInsets.all(14),
@@ -351,7 +498,7 @@ class WakeAlarmOptionsModal extends StatelessWidget {
                     // Option 2: Turn Off Alarm
                     InkWell(
                       onTap: () async {
-                        onClose();
+                        widget.onClose();
                         final ok = await tracking.cancelWakeAlarm();
                         if (context.mounted) {
                           ApiClient.toast(
@@ -432,7 +579,7 @@ class WakeAlarmOptionsModal extends StatelessWidget {
                     // Dismiss / Keep Active Link
                     Center(
                       child: TextButton(
-                        onPressed: onClose,
+                        onPressed: widget.onClose,
                         child: Text(
                           lang.t('keepAlarmActive'),
                           style: TextStyle(

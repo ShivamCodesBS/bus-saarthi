@@ -10,6 +10,7 @@ import '../core/theme.dart';
 import '../models/grievance_model.dart';
 import '../providers/auth_provider.dart';
 import '../providers/parent_provider.dart';
+import '../widgets/floating_icons_background.dart';
 import '../widgets/user_avatar.dart';
 import 'login_screen.dart';
 import 'settings_screen.dart';
@@ -231,44 +232,54 @@ class _ParentViewState extends State<_ParentView>
           ),
 
           Expanded(
-            child: TabBarView(
-              controller: _tabs,
+            child: Stack(
               children: [
-                _OverviewTab(
-                    parent: parent,
+                Positioned.fill(
+                  child: FloatingIconsBackground(
                     isDark: isDark,
-                    textDark: textDark,
-                    textLight: textLight,
-                    borderColor: borderColor,
-                    cardBg: cardBg),
-                _AttendanceTab(
-                    parent: parent,
-                    isDark: isDark,
-                    textDark: textDark,
-                    textLight: textLight,
-                    borderColor: borderColor,
-                    cardBg: cardBg),
-                _AnnouncementsTab(
-                    parent: parent,
-                    isDark: isDark,
-                    textDark: textDark,
-                    textLight: textLight,
-                    borderColor: borderColor,
-                    cardBg: cardBg),
-                _ComplaintsTab(
-                    parent: parent,
-                    isDark: isDark,
-                    textDark: textDark,
-                    textLight: textLight,
-                    borderColor: borderColor,
-                    cardBg: cardBg),
-                _AnalyticsTab(
-                    parent: parent,
-                    isDark: isDark,
-                    textDark: textDark,
-                    textLight: textLight,
-                    borderColor: borderColor,
-                    cardBg: cardBg),
+                    iconColor: const Color(0xFF8B5CF6),
+                  ),
+                ),
+                TabBarView(
+                  controller: _tabs,
+                  children: [
+                    _OverviewTab(
+                        parent: parent,
+                        isDark: isDark,
+                        textDark: textDark,
+                        textLight: textLight,
+                        borderColor: borderColor,
+                        cardBg: cardBg),
+                    _AttendanceTab(
+                        parent: parent,
+                        isDark: isDark,
+                        textDark: textDark,
+                        textLight: textLight,
+                        borderColor: borderColor,
+                        cardBg: cardBg),
+                    _AnnouncementsTab(
+                        parent: parent,
+                        isDark: isDark,
+                        textDark: textDark,
+                        textLight: textLight,
+                        borderColor: borderColor,
+                        cardBg: cardBg),
+                    _ComplaintsTab(
+                        parent: parent,
+                        isDark: isDark,
+                        textDark: textDark,
+                        textLight: textLight,
+                        borderColor: borderColor,
+                        cardBg: cardBg),
+                    _AnalyticsTab(
+                        parent: parent,
+                        isDark: isDark,
+                        textDark: textDark,
+                        textLight: textLight,
+                        borderColor: borderColor,
+                        cardBg: cardBg),
+                  ],
+                ),
               ],
             ),
           ),
@@ -613,8 +624,7 @@ class _ParentMap extends StatelessWidget {
       options: MapOptions(initialCenter: center, initialZoom: 15),
       children: [
         TileLayer(
-          urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-          subdomains: const ['a', 'b', 'c', 'd'],
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'com.bussaarthi.bus_saarthi_app',
         ),
         if (polyline.length > 1)

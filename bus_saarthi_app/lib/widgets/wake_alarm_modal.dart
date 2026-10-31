@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
@@ -29,6 +30,7 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
   bool _isCustomThreshold = false;
   final TextEditingController _customValue = TextEditingController();
   final MapController _mapController = MapController();
+  final MapController _confirmMapController = MapController();
   bool _loading = false;
   String _gpsStatus = 'idle'; // 'idle' | 'loading' | 'error'
 
@@ -39,7 +41,59 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
   void dispose() {
     _customValue.dispose();
     _mapController.dispose();
+    _confirmMapController.dispose();
     super.dispose();
+  }
+
+  double _getZoomForRadius(double radiusKm) {
+    final km = radiusKm.clamp(0.2, 50.0);
+    final zoom = 13.5 - (math.log(km) / math.ln2);
+    return zoom.clamp(6.0, 16.0);
+  }
+
+  void _setThreshold(double km, {bool isCustom = false}) {
+    setState(() {
+      _thresholdKm = km;
+      _isCustomThreshold = isCustom;
+    });
+    if (_position != null) {
+      try {
+        _confirmMapController.move(_position!, _getZoomForRadius(km));
+      } catch (_) {}
+    }
+  }
+
+  Widget _buildMiniMapButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    required String tooltip,
+    Color color = const Color(0xFF0F172A),
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.95),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFFCBD5E1), width: 1.2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.12),
+                blurRadius: 4,
+                offset: const Offset(0, 1),
+              ),
+            ],
+          ),
+          alignment: Alignment.center,
+          child: Icon(icon, size: 16, color: color),
+        ),
+      ),
+    );
   }
 
   void _flyTo(LatLng target, [double zoom = 16]) {
@@ -134,6 +188,11 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
       setState(() {
         _position = LatLng(pos.latitude, pos.longitude);
         _step = 'confirm';
+      });
+      Future.delayed(const Duration(milliseconds: 150), () {
+        try {
+          _confirmMapController.move(_position!, _getZoomForRadius(_thresholdKm));
+        } catch (_) {}
       });
     } catch (_) {
       if (!mounted) return;
@@ -457,8 +516,7 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
                     ),
                     children: [
                       TileLayer(
-                        urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-                        subdomains: const ['a', 'b', 'c', 'd'],
+                        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                         userAgentPackageName: 'com.bussaarthi.bus_saarthi_app',
                       ),
                       if (_position != null)
@@ -599,7 +657,16 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
             ],
             const SizedBox(height: 14),
             ElevatedButton(
-              onPressed: _position != null ? () => setState(() => _step = 'confirm') : null,
+              onPressed: _position != null
+                  ? () {
+                      setState(() => _step = 'confirm');
+                      Future.delayed(const Duration(milliseconds: 150), () {
+                        try {
+                          _confirmMapController.move(_position!, _getZoomForRadius(_thresholdKm));
+                        } catch (_) {}
+                      });
+                    }
+                  : null,
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF2563EB),
                 foregroundColor: Colors.white,
@@ -631,46 +698,142 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
                 child: Column(
                   children: [
                     SizedBox(
-                      height: 140,
+                      height: 185,
                       width: double.infinity,
-                      child: AbsorbPointer(
-                        absorbing: true,
-                        child: FlutterMap(
-                          options: MapOptions(
-                            initialCenter: _position!,
-                            initialZoom: 14,
-                            interactionOptions: const InteractionOptions(flags: InteractiveFlag.none),
+                      child: Stack(
+                        children: [
+                          FlutterMap(
+                            mapController: _confirmMapController,
+                            options: MapOptions(
+                              initialCenter: _position!,
+                              initialZoom: _getZoomForRadius(_thresholdKm),
+                              interactionOptions: const InteractionOptions(
+                                flags: InteractiveFlag.all,
+                              ),
+                            ),
+                            children: [
+                              TileLayer(
+                                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                userAgentPackageName: 'com.bussaarthi.bus_saarthi_app',
+                              ),
+                              CircleLayer(
+                                circles: [
+                                  CircleMarker(
+                                    point: _position!,
+                                    radius: _thresholdKm * 1000,
+                                    useRadiusInMeter: true,
+                                    color: const Color(0xFF2563EB).withValues(alpha: 0.22),
+                                    borderColor: const Color(0xFF2563EB),
+                                    borderStrokeWidth: 2,
+                                  ),
+                                ],
+                              ),
+                              MarkerLayer(
+                                markers: [
+                                  Marker(
+                                    point: _position!,
+                                    width: 34,
+                                    height: 34,
+                                    child: const IgnorePointer(
+                                      child: Icon(LucideIcons.mapPin, size: 32, color: Color(0xFF2563EB)),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
-                          children: [
-                            TileLayer(
-                              urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-                              subdomains: const ['a', 'b', 'c', 'd'],
-                              userAgentPackageName: 'com.bussaarthi.bus_saarthi_app',
-                            ),
-                            CircleLayer(
-                              circles: [
-                                CircleMarker(
-                                  point: _position!,
-                                  radius: _thresholdKm * 1000,
-                                  useRadiusInMeter: true,
-                                  color: const Color(0xFF2563EB).withValues(alpha: 0.22),
-                                  borderColor: const Color(0xFF2563EB),
-                                  borderStrokeWidth: 2,
+                          // Floating Controls (Zoom In, Zoom Out, Recenter to Circle)
+                          Positioned(
+                            top: 8,
+                            right: 8,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _buildMiniMapButton(
+                                  icon: LucideIcons.plus,
+                                  tooltip: 'Zoom In',
+                                  onTap: () {
+                                    try {
+                                      _confirmMapController.move(
+                                        _confirmMapController.camera.center,
+                                        _confirmMapController.camera.zoom + 1,
+                                      );
+                                    } catch (_) {}
+                                  },
+                                ),
+                                const SizedBox(height: 5),
+                                _buildMiniMapButton(
+                                  icon: LucideIcons.minus,
+                                  tooltip: 'Zoom Out',
+                                  onTap: () {
+                                    try {
+                                      _confirmMapController.move(
+                                        _confirmMapController.camera.center,
+                                        _confirmMapController.camera.zoom - 1,
+                                      );
+                                    } catch (_) {}
+                                  },
+                                ),
+                                const SizedBox(height: 5),
+                                _buildMiniMapButton(
+                                  icon: LucideIcons.crosshair,
+                                  tooltip: 'Fit Circle to Map',
+                                  color: const Color(0xFF2563EB),
+                                  onTap: () {
+                                    try {
+                                      _confirmMapController.move(
+                                        _position!,
+                                        _getZoomForRadius(_thresholdKm),
+                                      );
+                                    } catch (_) {}
+                                  },
                                 ),
                               ],
                             ),
-                            MarkerLayer(
-                              markers: [
-                                Marker(
-                                  point: _position!,
-                                  width: 34,
-                                  height: 34,
-                                  child: const Icon(LucideIcons.mapPin, size: 32, color: Color(0xFF2563EB)),
-                                ),
-                              ],
+                          ),
+                          // Coverage badge
+                          Positioned(
+                            bottom: 8,
+                            left: 8,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.94),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: const Color(0xFFCBD5E1), width: 1),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.12),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 1),
+                                  ),
+                                ],
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFF2563EB),
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    "${lang.lang == 'hi' ? 'दायरा:' : 'Radius:'} ${_thresholdKm >= 1 ? _thresholdKm.toStringAsFixed(1) : (_thresholdKm * 1000).toInt().toString()} ${lang.lang == 'hi' ? 'किमी' : 'km'}",
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF1E293B),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
                     Container(
@@ -722,10 +885,7 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
                     child: Padding(
                       padding: const EdgeInsets.only(right: 6),
                       child: InkWell(
-                        onTap: () => setState(() {
-                          _thresholdKm = km;
-                          _isCustomThreshold = false;
-                        }),
+                        onTap: () => _setThreshold(km),
                         borderRadius: BorderRadius.circular(12),
                         child: Container(
                           padding: const EdgeInsets.symmetric(vertical: 10),
@@ -794,7 +954,7 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       onChanged: (val) {
                         final v = double.tryParse(val);
-                        if (v != null && v > 0) setState(() => _thresholdKm = v);
+                        if (v != null && v > 0) _setThreshold(v, isCustom: true);
                       },
                       style: TextStyle(color: textDark, fontSize: 14),
                       decoration: InputDecoration(

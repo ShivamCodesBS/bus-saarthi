@@ -30,6 +30,107 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
+const MiniMapAutoFitControls = ({ center, radiusKm }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (center && radiusKm) {
+      const zoom = Math.max(6, Math.min(16, 13.5 - Math.log2(radiusKm)));
+      map.setView(center, zoom, { animate: true });
+    }
+  }, [center, radiusKm, map]);
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        top: 8,
+        right: 8,
+        zIndex: 1000,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '4px',
+      }}
+    >
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          map.zoomIn();
+        }}
+        title="Zoom In"
+        style={{
+          width: 28,
+          height: 28,
+          borderRadius: 6,
+          border: '1px solid #cbd5e1',
+          background: 'white',
+          color: '#1e293b',
+          fontWeight: 'bold',
+          fontSize: '15px',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+        }}
+      >
+        +
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          map.zoomOut();
+        }}
+        title="Zoom Out"
+        style={{
+          width: 28,
+          height: 28,
+          borderRadius: 6,
+          border: '1px solid #cbd5e1',
+          background: 'white',
+          color: '#1e293b',
+          fontWeight: 'bold',
+          fontSize: '15px',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+        }}
+      >
+        −
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          const zoom = Math.max(6, Math.min(16, 13.5 - Math.log2(radiusKm)));
+          map.setView(center, zoom, { animate: true });
+        }}
+        title="Fit Circle to View"
+        style={{
+          width: 28,
+          height: 28,
+          borderRadius: 6,
+          border: '1px solid #cbd5e1',
+          background: 'white',
+          color: '#2563eb',
+          fontWeight: 'bold',
+          fontSize: '12px',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+        }}
+      >
+        🎯
+      </button>
+    </div>
+  );
+};
+
 const stopMarkerIcon = L.divIcon({
   className: 'custom-stop-marker',
   html: `
@@ -609,8 +710,8 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
                   dragging={true}
                 >
                   <TileLayer
-                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
-                    attribution='&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://osm.org/copyright">OSM</a>'
+                    url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                     subdomains={['a', 'b', 'c', 'd']}
                   />
                   <MapClickHandler
@@ -799,20 +900,20 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
                     boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)',
                   }}
                 >
-                  <div style={{ height: '140px', width: '100%', position: 'relative' }}>
+                  <div style={{ height: '185px', width: '100%', position: 'relative' }}>
                     <MapContainer
                       center={position}
-                      zoom={14}
+                      zoom={Math.max(6, Math.min(16, 13.5 - Math.log2(thresholdKm)))}
                       style={{ height: '100%', width: '100%' }}
                       zoomControl={false}
                       attributionControl={false}
-                      dragging={false}
-                      touchZoom={false}
-                      doubleClickZoom={false}
-                      scrollWheelZoom={false}
+                      dragging={true}
+                      touchZoom={true}
+                      doubleClickZoom={true}
+                      scrollWheelZoom={true}
                     >
                       <TileLayer
-                        url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
+                        url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
                         subdomains={['a', 'b', 'c', 'd']}
                       />
                       <Circle
@@ -825,37 +926,9 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
                           weight: 2,
                         }}
                       />
+                      <Marker position={position} icon={stopMarkerIcon} interactive={false} />
+                      <MiniMapAutoFitControls center={position} radiusKm={thresholdKm} />
                     </MapContainer>
-                    {/* Fixed Center Pin overlay */}
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: '50%',
-                        left: '50%',
-                        transform: 'translate(-50%, -100%)',
-                        pointerEvents: 'none',
-                        zIndex: 1000,
-                      }}
-                    >
-                      <div
-                        style={{
-                          background: '#2563eb',
-                          borderRadius: '10px 10px 10px 0',
-                          transform: 'rotate(-45deg)',
-                          width: '28px',
-                          height: '28px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          boxShadow: '0 4px 10px rgba(37, 99, 235, 0.4)',
-                          border: '2px solid white',
-                        }}
-                      >
-                        <div style={{ transform: 'rotate(45deg)' }}>
-                          <MapPin size={14} color="white" fill="white" />
-                        </div>
-                      </div>
-                    </div>
                   </div>
                   <div
                     style={{

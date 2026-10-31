@@ -17,6 +17,7 @@ import '../providers/language_provider.dart';
 import '../providers/tracking_provider.dart';
 import '../services/api_client.dart';
 import '../services/map_cache_service.dart';
+import '../widgets/floating_icons_background.dart';
 import '../widgets/hamburger_drawer.dart';
 import '../widgets/wake_alarm_modal.dart';
 import '../widgets/wake_alarm_options_modal.dart';
@@ -181,7 +182,15 @@ class _HomeViewState extends State<_HomeView> {
               Expanded(
                 child: Container(
                   color: isDark ? AppColors.darkBg : AppColors.lightBg,
-                  child: SingleChildScrollView(
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: FloatingIconsBackground(
+                          isDark: isDark,
+                          iconColor: const Color(0xFFFF6B00),
+                        ),
+                      ),
+                      SingleChildScrollView(
                     padding: const EdgeInsets.fromLTRB(12, 12, 12, 90),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -290,8 +299,10 @@ class _HomeViewState extends State<_HomeView> {
                       ],
                     ),
                   ),
-                ),
+                ],
               ),
+            ),
+          ),
             ],
           ),
 
@@ -2164,8 +2175,7 @@ class _LiveBusMapState extends State<LiveBusMap> {
         ),
         children: [
           TileLayer(
-            urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-            subdomains: const ['a', 'b', 'c', 'd'],
+            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
             userAgentPackageName: 'com.bussaarthi.bus_saarthi_app',
           ),
           if (polyline.length > 1)
@@ -2221,8 +2231,8 @@ class _LiveBusMapState extends State<LiveBusMap> {
       ),
       children: [
         TileLayer(
-          urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-          subdomains: const ['a', 'b', 'c', 'd'],
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          userAgentPackageName: 'com.bussaarthi.bus_saarthi_app',
           tileProvider: _tileProvider!,
         ),
         if (polyline.length > 1)
@@ -2539,9 +2549,7 @@ class _GlassCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: isDark
-            ? const Color(0x990F172A)
-            : const Color(0x99FFFFFF), // white/60
+        color: isDark ? const Color(0xFF0F172A) : Colors.white,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(
           color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
@@ -2560,7 +2568,7 @@ class _GlassCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0x801E293B) : const Color(0x80F8FAFC),
+              color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
               border: Border(
                 bottom: BorderSide(
                   color: isDark
