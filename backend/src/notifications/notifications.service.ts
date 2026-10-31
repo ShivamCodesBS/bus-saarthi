@@ -166,7 +166,7 @@ export class NotificationsService {
               channelId === 'bus_saarthi_wake_alarm' ||
               channelId === 'bus_saarthi_sos'
                 ? 'alarm'
-                : 'notification',
+                : 'default',
           },
         },
       });
