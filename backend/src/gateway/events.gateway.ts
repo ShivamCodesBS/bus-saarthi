@@ -480,7 +480,21 @@ export class EventsGateway
       login_id: loginId,
       name,
       profile_pic: profilePic,
+      route_id: payload.routeId,
+      fee_status: payload.feeStatus,
     });
+  }
+
+  /**
+   * Realtime wake alarm synchronization across all client devices/tabs.
+   */
+  @OnEvent('wake_alarm.updated')
+  handleWakeAlarmUpdated(payload: any) {
+    if (payload?.login_id) {
+      this.server
+        .to(`user_${payload.login_id}`)
+        .emit('wake_alarm_updated', payload);
+    }
   }
 
   /**

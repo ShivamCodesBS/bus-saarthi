@@ -19,6 +19,7 @@ class StudentSocketService {
   void Function(Map<String, dynamic> data)? onRouteCancelled;
   void Function(Map<String, dynamic> data)? onGlobalBroadcast;
   void Function(Map<String, dynamic> data)? onWakeAlarmTrigger;
+  void Function(Map<String, dynamic> data)? onWakeAlarmUpdated;
   void Function(Map<String, dynamic> data)? onSosCancelled;
   void Function(Map<String, dynamic> data)? onSosAlert;
   void Function(Map<String, dynamic> data)? onProfileUpdate;
@@ -71,8 +72,14 @@ class StudentSocketService {
       if (data is Map) onGlobalBroadcast?.call(Map<String, dynamic>.from(data));
     });
     _socket!.on('wake_alarm_trigger', (data) {
-      if (data is Map)
+      if (data is Map) {
         onWakeAlarmTrigger?.call(Map<String, dynamic>.from(data));
+      }
+    });
+    _socket!.on('wake_alarm_updated', (data) {
+      if (data is Map) {
+        onWakeAlarmUpdated?.call(Map<String, dynamic>.from(data));
+      }
     });
     _socket!.on('sos_cancelled', (data) {
       if (data is Map) onSosCancelled?.call(Map<String, dynamic>.from(data));

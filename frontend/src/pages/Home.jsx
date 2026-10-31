@@ -428,6 +428,29 @@ const Home = () => {
       } catch(e) { console.warn('Audio play failed', e); }
     });
 
+    // Realtime cross-device wake alarm sync
+    socket.on('wake_alarm_updated', (data) => {
+      const myLoginId = user?.loginId || user?.login_id;
+      if (data?.login_id === myLoginId) {
+        if (data.alarmSet && data.alarm) {
+          setAlarmSet(true);
+          localStorage.setItem('wake_alarm_enabled', 'true');
+          localStorage.setItem(
+            'wake_alarm_data',
+            JSON.stringify({
+              lat: data.alarm.lat,
+              lng: data.alarm.lng,
+              thresholdKm: data.alarm.thresholdKm,
+            }),
+          );
+        } else {
+          setAlarmSet(false);
+          localStorage.removeItem('wake_alarm_enabled');
+          localStorage.removeItem('wake_alarm_data');
+        }
+      }
+    });
+
     // Listen for SOS cancelled event (from admin or self-cancel)
     socket.on('sos_cancelled', (data) => {
       if (data.login_id === (user?.loginId || user?.login_id)) {

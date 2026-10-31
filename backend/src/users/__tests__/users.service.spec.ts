@@ -344,7 +344,7 @@ describe('UsersService', () => {
   });
 
   describe('setWakeAlarm', () => {
-    it('should set wake alarm', async () => {
+    it('should set wake alarm and emit event', async () => {
       prisma.user.findUnique.mockResolvedValue({
         id: 'user-1',
         loginId: 'S001',
@@ -359,6 +359,60 @@ describe('UsersService', () => {
 
       expect(result.status).toBe('success');
       expect(prisma.user.update).toHaveBeenCalled();
+    });
+  });
+
+  describe('getWakeAlarm', () => {
+    it('should return boolean alarmSet true when wakeAlarm has valid coordinates', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        wakeAlarm: {
+          enabled: true,
+          lat: 27.8471,
+          lng: 79.9189,
+          thresholdKm: 2,
+          firedAt: null,
+        },
+      });
+
+      const result = await service.getWakeAlarm('S001');
+
+      expect(result.status).toBe('success');
+      expect(result.alarmSet).toBe(true);
+      expect(typeof result.alarmSet).toBe('boolean');
+      expect(result.alarm?.lat).toBe(27.8471);
+    });
+
+    it('should return boolean alarmSet false when wakeAlarm is disabled', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        wakeAlarm: {
+          enabled: false,
+        },
+      });
+
+      const result = await service.getWakeAlarm('S001');
+
+      expect(result.status).toBe('success');
+      expect(result.alarmSet).toBe(false);
+      expect(typeof result.alarmSet).toBe('boolean');
+      expect(result.alarm).toBeNull();
+    });
+  });
+
+  describe('cancelWakeAlarm', () => {
+    it('should cancel wake alarm and emit event', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        loginId: 'S001',
+      });
+      prisma.user.update.mockResolvedValue({});
+
+      const result = await service.cancelWakeAlarm('S001');
+
+      expect(result.status).toBe('success');
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { loginId: 'S001' },
+        data: { wakeAlarm: { enabled: false } },
+      });
     });
   });
 });

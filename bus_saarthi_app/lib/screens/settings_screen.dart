@@ -57,6 +57,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _togglePush(bool next) async {
     if (next) {
+      final userToken = context.read<AuthProvider>().user?.token;
       final granted = await FcmService.requestPermission();
       if (!granted) {
         if (!mounted) return;
@@ -68,7 +69,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
         return;
       }
-      final userToken = context.read<AuthProvider>().user?.token;
       if (userToken != null) await FcmService.enable(userToken);
       await NotificationPreferences.setPushNotificationsEnabled(true);
       if (!mounted) return;

@@ -976,6 +976,7 @@ class _AttendanceTabState extends State<_AttendanceTab> {
 
   void _pickLeaveDate(BuildContext context) async {
     final now = DateTime.now();
+    final parentProvider = context.read<ParentProvider>();
     final picked = await showDatePicker(
       context: context,
       initialDate: now,
@@ -985,7 +986,7 @@ class _AttendanceTabState extends State<_AttendanceTab> {
     if (picked == null || !mounted) return;
     final iso =
         '${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
-    await context.read<ParentProvider>().markLeave(iso);
+    await parentProvider.markLeave(iso);
   }
 
   static DateTime? _parseDate(Object? v) =>

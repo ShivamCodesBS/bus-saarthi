@@ -258,7 +258,13 @@ class TrackingProvider extends ChangeNotifier {
       );
       if (_disposed) return;
       final data = res.data;
-      if (data is Map && data['alarmSet'] == true && data['alarm'] is Map) {
+      final isAlarmSet = (data is Map) &&
+          ((data['alarmSet'] == true) ||
+              (data['alarmSet'] != null &&
+                  data['alarmSet'] != false &&
+                  data['alarmSet'] != 0));
+
+      if (data is Map && isAlarmSet && data['alarm'] is Map) {
         final alarm = data['alarm'] as Map;
         alarmSet = true;
         final prefs = await SharedPreferences.getInstance();
@@ -606,6 +612,30 @@ class TrackingProvider extends ChangeNotifier {
         duration: const Duration(seconds: 10),
       );
       notifyListeners();
+    };
+
+    _socket.onWakeAlarmUpdated = (data) async {
+      final targetLogin = data['login_id']?.toString();
+      if (targetLogin != null && targetLogin != user.loginId) return;
+      final isAlarmSet = (data['alarmSet'] == true) ||
+          (data['alarmSet'] != null &&
+              data['alarmSet'] != false &&
+              data['alarmSet'] != 0);
+      final prefs = await SharedPreferences.getInstance();
+      if (isAlarmSet && data['alarm'] is Map) {
+        final alarm = data['alarm'] as Map;
+        alarmSet = true;
+        await prefs.setString('wake_alarm_enabled', 'true');
+        await prefs.setString(
+          'wake_alarm_data',
+          '{"lat":${alarm['lat']},"lng":${alarm['lng']},"thresholdKm":${alarm['thresholdKm']}}',
+        );
+      } else {
+        alarmSet = false;
+        await prefs.remove('wake_alarm_enabled');
+        await prefs.remove('wake_alarm_data');
+      }
+      _notify();
     };
 
     _socket.onSosAlert = (data) async {

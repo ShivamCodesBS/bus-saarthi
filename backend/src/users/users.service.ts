@@ -482,6 +482,12 @@ export class UsersService {
       }
     }
 
+    this.eventEmitter.emit('wake_alarm.updated', {
+      login_id: loginId,
+      alarmSet: true,
+      alarm: alarmData,
+    });
+
     return { status: 'success', message: 'Wake alarm set', alarm: alarmData };
   }
 
@@ -498,6 +504,12 @@ export class UsersService {
       await this.cache.del(`wake:alarms:active:${user.routeId}`);
     }
 
+    this.eventEmitter.emit('wake_alarm.updated', {
+      login_id: loginId,
+      alarmSet: false,
+      alarm: null,
+    });
+
     return { status: 'success', message: 'Wake alarm cancelled' };
   }
 
@@ -512,7 +524,9 @@ export class UsersService {
     if (!user) throw new NotFoundException(`User ${loginId} not found`);
 
     const alarm = user.wakeAlarm as any;
-    const isEnabled = alarm?.enabled === true && alarm?.lat && alarm?.lng;
+    const isEnabled = Boolean(
+      alarm?.enabled === true && alarm?.lat != null && alarm?.lng != null,
+    );
 
     return {
       status: 'success',
