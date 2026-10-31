@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
+import '../core/stop_coords.dart';
 import '../core/theme.dart';
 import '../providers/language_provider.dart';
 import '../providers/tracking_provider.dart';
@@ -28,16 +29,99 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
   double _thresholdKm = 2;
   bool _isCustomThreshold = false;
   final TextEditingController _customValue = TextEditingController();
+  final TextEditingController _searchController = TextEditingController();
+  final MapController _mapController = MapController();
   bool _loading = false;
   String _gpsStatus = 'idle'; // 'idle' | 'loading' | 'error'
+  bool _isMoving = false;
+  String _searchQuery = '';
+  bool _showSearchResults = false;
 
   static const LatLng _invertisCenter = LatLng(28.3180, 79.4670);
   static const List<double> _kmOptions = [1, 2, 3, 5];
+  static const List<String> _popularStops = [
+    'Invertis University',
+    'Satellite Bus Stand',
+    'Civil Lines',
+    'Rajendra Nagar',
+    'Chauki Chauraha',
+    'DD Puram',
+    'Faridpur',
+    'Bareilly Mod',
+    'Shahjahanpur',
+    'Badaun',
+  ];
 
   @override
   void dispose() {
     _customValue.dispose();
+    _searchController.dispose();
+    _mapController.dispose();
     super.dispose();
+  }
+
+  void _flyTo(LatLng target, [double zoom = 16]) {
+    setState(() => _position = target);
+    _mapController.move(target, zoom);
+  }
+
+  Future<void> _locateMeOnMap() async {
+    try {
+      final status = await Permission.locationWhenInUse.request();
+      if (!status.isGranted) {
+        if (mounted) {
+          ApiClient.toast(context, 'Location permission denied', kind: ToastKind.error);
+        }
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 8),
+        ),
+      );
+      if (!mounted) return;
+      _flyTo(LatLng(pos.latitude, pos.longitude), 16);
+      ApiClient.toast(context, 'Centered on your location', kind: ToastKind.success);
+    } catch (_) {
+      if (mounted) {
+        ApiClient.toast(context, 'Could not get GPS location', kind: ToastKind.error);
+      }
+    }
+  }
+
+  Widget _buildFloatingMapButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    required String tooltip,
+    Color color = const Color(0xFF0F172A),
+    Color? borderColor,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: borderColor ?? const Color(0xFFCBD5E1), width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.12),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          alignment: Alignment.center,
+          child: Icon(icon, size: 18, color: color),
+        ),
+      ),
+    );
   }
 
   Future<void> _useGps() async {
@@ -118,10 +202,11 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
     final Color textMuted = isDark ? AppColors.darkTextMuted : const Color(0xFF64748B);
     final Color cardBg = isDark ? AppColors.darkCard : Colors.white;
     final Color borderColor = isDark ? AppColors.darkBorder : const Color(0xFFE2E8F0);
+    final bool isMapStep = _step == 'map';
 
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 440),
+        constraints: BoxConstraints(maxWidth: isMapStep ? 540 : 440),
         child: Container(
           decoration: BoxDecoration(
             color: cardBg,
@@ -198,8 +283,8 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
                                     : 'Get notified when bus is near')
                                 : _step == 'map'
                                 ? (lang.lang == 'hi'
-                                    ? 'मानचित्र पर अपना स्टॉप चुनें'
-                                    : 'Pinpoint your boarding spot')
+                                    ? 'मैप घुमाकर पिन को स्टॉप पर सेट करें'
+                                    : 'Pan map to place pin on your stop')
                                 : (lang.lang == 'hi'
                                     ? 'अलार्म दायरा और पुष्टि'
                                     : 'Set trigger radius & confirm'),
@@ -331,62 +416,355 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
         );
 
       case 'map':
+        final query = _searchQuery.trim().toLowerCase();
+        final filteredStops = query.isEmpty
+            ? <MapEntry<String, List<double>>>[]
+            : StopCoords.all.entries
+                .where((e) => e.key.toLowerCase().contains(query))
+                .toList();
+
         return Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Search Input
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
                 color: isDark ? AppColors.darkSurface : const Color(0xFFF8FAFC),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: isDark ? AppColors.darkBorder : const Color(0xFFE2E8F0)),
+                border: Border.all(color: isDark ? AppColors.darkBorder : const Color(0xFFCBD5E1)),
               ),
+              child: TextField(
+                controller: _searchController,
+                onChanged: (val) {
+                  setState(() {
+                    _searchQuery = val;
+                    _showSearchResults = val.trim().isNotEmpty;
+                  });
+                },
+                style: TextStyle(color: textDark, fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: lang.lang == 'hi'
+                      ? 'स्टॉप खोजें (जैसे Satellite, Civil Lines)...'
+                      : 'Search stop or landmark (e.g. Satellite)...',
+                  hintStyle: TextStyle(color: textMuted, fontSize: 12.5),
+                  prefixIcon: const Icon(LucideIcons.search, size: 16, color: Color(0xFF64748B)),
+                  suffixIcon: _searchController.text.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(LucideIcons.x, size: 15, color: Color(0xFF94A3B8)),
+                          splashRadius: 16,
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() {
+                              _searchQuery = '';
+                              _showSearchResults = false;
+                            });
+                          },
+                        )
+                      : null,
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                ),
+              ),
+            ),
+
+            // Dropdown results if searching
+            if (_showSearchResults && filteredStops.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Container(
+                constraints: const BoxConstraints(maxHeight: 160),
+                decoration: BoxDecoration(
+                  color: isDark ? AppColors.darkCard : Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: isDark ? AppColors.darkBorder : const Color(0xFFE2E8F0)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.12),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  padding: EdgeInsets.zero,
+                  itemCount: filteredStops.length,
+                  itemBuilder: (ctx, idx) {
+                    final entry = filteredStops[idx];
+                    return InkWell(
+                      onTap: () {
+                        _flyTo(LatLng(entry.value[0], entry.value[1]), 16);
+                        _searchController.clear();
+                        setState(() {
+                          _searchQuery = '';
+                          _showSearchResults = false;
+                        });
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          border: Border(
+                            bottom: BorderSide(
+                              color: isDark ? AppColors.darkBorder : const Color(0xFFF1F5F9),
+                            ),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(LucideIcons.mapPin, size: 15, color: Color(0xFF2563EB)),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                entry.key,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: textDark,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 8),
+
+            // Popular Stop Chips
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
               child: Row(
+                children: _popularStops.map((stopName) {
+                  final coords = StopCoords.all[stopName];
+                  if (coords == null) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: InkWell(
+                      onTap: () => _flyTo(LatLng(coords[0], coords[1]), 16),
+                      borderRadius: BorderRadius.circular(20),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0x332563EB) : const Color(0xFFEFF6FF),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: isDark ? const Color(0xFF1E40AF) : const Color(0xFFDBEAFE),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(LucideIcons.mapPin, size: 12, color: Color(0xFF2563EB)),
+                            const SizedBox(width: 4),
+                            Text(
+                              stopName.replaceAll(' Bus Stand', ''),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF1D4ED8),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            // Map View with Stationary Center Pin and Floating Controls
+            Container(
+              height: 310,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: isDark ? AppColors.darkBorder : const Color(0xFFCBD5E1), width: 1.5),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.08),
+                    blurRadius: 14,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Stack(
                 children: [
-                  const Icon(LucideIcons.compass, size: 16, color: Color(0xFF2563EB)),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      lang.lang == 'hi'
-                          ? 'मैप पर टैप करें या पिन को सही स्थान पर रखें'
-                          : 'Tap on the map or drag the pin to your exact pickup spot',
-                      style: TextStyle(fontSize: 12, color: textMuted),
+                  FlutterMap(
+                    mapController: _mapController,
+                    options: MapOptions(
+                      initialCenter: _position ?? _invertisCenter,
+                      initialZoom: 15,
+                      onPositionChanged: (camera, hasGesture) {
+                        if (hasGesture) {
+                          setState(() {
+                            _position = camera.center;
+                            _isMoving = true;
+                          });
+                        }
+                      },
+                      onMapEvent: (evt) {
+                        if (evt is MapEventMoveEnd) {
+                          if (_isMoving) setState(() => _isMoving = false);
+                        }
+                      },
+                      onTap: (_, latlng) {
+                        _flyTo(latlng, _mapController.camera.zoom);
+                      },
+                    ),
+                    children: [
+                      TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
+                    ],
+                  ),
+
+                  // Center Pin Target (Uber/Google Maps style)
+                  Center(
+                    child: IgnorePointer(
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 160),
+                        curve: Curves.easeOut,
+                        transform: Matrix4.translationValues(0, _isMoving ? -14 : 0, 0),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 38,
+                              height: 38,
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [Color(0xFF2563EB), Color(0xFF1D4ED8)],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
+                                borderRadius: const BorderRadius.only(
+                                  topLeft: Radius.circular(12),
+                                  topRight: Radius.circular(12),
+                                  bottomLeft: Radius.circular(12),
+                                  bottomRight: Radius.zero,
+                                ),
+                                border: Border.all(color: Colors.white, width: 2.5),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: const Color(0xFF2563EB).withValues(alpha: 0.45),
+                                    blurRadius: 18,
+                                    offset: const Offset(0, 8),
+                                  ),
+                                ],
+                              ),
+                              transform: Matrix4.rotationZ(-0.785398),
+                              child: Center(
+                                child: Transform.rotate(
+                                  angle: 0.785398,
+                                  child: const Icon(LucideIcons.mapPin, size: 18, color: Colors.white),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            AnimatedContainer(
+                              duration: const Duration(milliseconds: 160),
+                              width: _isMoving ? 7 : 12,
+                              height: _isMoving ? 3 : 5,
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.35),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Floating Map Navigation Controls (Top Right)
+                  Positioned(
+                    top: 10,
+                    right: 10,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _buildFloatingMapButton(
+                          icon: Icons.add,
+                          tooltip: lang.lang == 'hi' ? 'बड़ा करें (+)' : 'Zoom In (+)',
+                          onTap: () {
+                            final cur = _mapController.camera.zoom;
+                            _mapController.move(_position ?? _invertisCenter, (cur + 1).clamp(3.0, 18.0));
+                          },
+                        ),
+                        const SizedBox(height: 6),
+                        _buildFloatingMapButton(
+                          icon: Icons.remove,
+                          tooltip: lang.lang == 'hi' ? 'छोटा करें (-)' : 'Zoom Out (-)',
+                          onTap: () {
+                            final cur = _mapController.camera.zoom;
+                            _mapController.move(_position ?? _invertisCenter, (cur - 1).clamp(3.0, 18.0));
+                          },
+                        ),
+                        const SizedBox(height: 6),
+                        _buildFloatingMapButton(
+                          icon: LucideIcons.crosshair,
+                          color: const Color(0xFF2563EB),
+                          borderColor: const Color(0xFFBFDBFE),
+                          tooltip: lang.lang == 'hi' ? 'मेरी लोकेशन पर जाएं' : 'Go to My Location',
+                          onTap: _locateMeOnMap,
+                        ),
+                        const SizedBox(height: 6),
+                        _buildFloatingMapButton(
+                          icon: LucideIcons.graduationCap,
+                          color: const Color(0xFF16A34A),
+                          borderColor: const Color(0xFFBBF7D0),
+                          tooltip: lang.lang == 'hi' ? 'इनवर्टिस यूनिवर्सिटी' : 'Invertis University',
+                          onTap: () => _flyTo(_invertisCenter, 15),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Floating Map Helper Badge (Bottom Left)
+                  Positioned(
+                    bottom: 10,
+                    left: 10,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0F172A).withValues(alpha: 0.8),
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.2),
+                            blurRadius: 6,
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(LucideIcons.compass, size: 13, color: Color(0xFF60A5FA)),
+                          const SizedBox(width: 5),
+                          Text(
+                            _isMoving
+                                ? (lang.lang == 'hi' ? 'पिन सेट किया जा रहा है...' : 'Positioning pin...')
+                                : (lang.lang == 'hi' ? 'पिन केंद्र में सेट है' : 'Pin fixed at center'),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 10),
-            Container(
-              height: 240,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: isDark ? AppColors.darkBorder : const Color(0xFFCBD5E1)),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: FlutterMap(
-                options: MapOptions(
-                  initialCenter: _position ?? _invertisCenter,
-                  initialZoom: 15,
-                  onTap: (_, latlng) => setState(() => _position = latlng),
-                ),
-                children: [
-                  TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
-                  if (_position != null)
-                    MarkerLayer(
-                      markers: [
-                        Marker(
-                          point: _position!,
-                          width: 34,
-                          height: 34,
-                          child: const Icon(LucideIcons.mapPin, size: 32, color: Color(0xFF2563EB)),
-                        ),
-                      ],
-                    ),
-                ],
-              ),
-            ),
+
             if (_position != null) ...[
               const SizedBox(height: 8),
               Container(
@@ -630,9 +1008,7 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
                 border: Border.all(color: const Color(0xFFDBEAFE)),
               ),
               child: Text(
-                '⚡ ' + (lang.lang == 'hi'
-                    ? 'इसके बाद आपका GPS चालू रहना ज़रूरी नहीं है। सर्वर ऑटोमैटिक अलर्ट भेजेगा।'
-                    : 'Your GPS does not need to stay on. The server will alert you automatically.'),
+                '⚡ ${lang.lang == 'hi' ? 'इसके बाद आपका GPS चालू रहना ज़रूरी नहीं है। सर्वर ऑटोमैटिक अलर्ट भेजेगा।' : 'Your GPS does not need to stay on. The server will alert you automatically.'}',
                 style: const TextStyle(fontSize: 11, color: Color(0xFF1E40AF), height: 1.4),
               ),
             ),
@@ -740,7 +1116,7 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
             // Option 2: Live Map Card - 1:1 match with WakeAlarmOptionsModal
             InkWell(
               onTap: () {
-                if (_position == null) _position = _invertisCenter;
+                _position ??= _invertisCenter;
                 setState(() => _step = 'map');
               },
               borderRadius: BorderRadius.circular(16),

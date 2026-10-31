@@ -1,12 +1,28 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useModalA11y } from '../hooks/useModalA11y';
 import { useLang } from '../context/LanguageContext';
-import { MapContainer, TileLayer, Marker, Circle, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Circle, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { X, MapPin, Navigation, AlarmClock, ChevronRight, ArrowLeft, Loader2, Compass } from 'lucide-react';
+import {
+  X,
+  MapPin,
+  Navigation,
+  AlarmClock,
+  ChevronRight,
+  ArrowLeft,
+  Loader2,
+  Compass,
+  Plus,
+  Minus,
+  Search,
+  Crosshair,
+  School,
+  Check,
+} from 'lucide-react';
 import axios from 'axios';
 import { BACKEND_URL } from '../config';
+import { STOP_COORDS } from '../lib/stopCoords';
 import toast from 'react-hot-toast';
 
 // Fix default leaflet marker icon
@@ -27,45 +43,65 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
 }
 
-// Leaflet map component that allows pin dragging and clicking
-function DraggableMarker({ position, onPositionChange }) {
-  const markerRef = useRef(null);
+// Controller to track map movements, zoom, and clicks smoothly
+function MapController({ onPositionChange, setIsMoving, setMapInstance }) {
+  const map = useMap();
+
+  useEffect(() => {
+    setMapInstance(map);
+  }, [map, setMapInstance]);
 
   useMapEvents({
+    movestart() {
+      setIsMoving(true);
+    },
+    move() {
+      const center = map.getCenter();
+      onPositionChange([center.lat, center.lng]);
+    },
+    moveend() {
+      setIsMoving(false);
+      const center = map.getCenter();
+      onPositionChange([center.lat, center.lng]);
+    },
     click(e) {
+      map.flyTo([e.latlng.lat, e.latlng.lng], map.getZoom(), { duration: 0.4 });
       onPositionChange([e.latlng.lat, e.latlng.lng]);
     },
   });
 
-  return position ? (
-    <Marker
-      draggable
-      position={position}
-      ref={markerRef}
-      eventHandlers={{
-        dragend() {
-          const marker = markerRef.current;
-          if (marker) {
-            const latlng = marker.getLatLng();
-            onPositionChange([latlng.lat, latlng.lng]);
-          }
-        },
-      }}
-    />
-  ) : null;
+  return null;
 }
 
 const KM_OPTIONS = [1, 2, 3, 5];
 
+// Popular stops shortcuts for quick one-tap snapping
+const POPULAR_STOPS = [
+  'Invertis University',
+  'Satellite Bus Stand',
+  'Civil Lines',
+  'Rajendra Nagar',
+  'Chauki Chauraha',
+  'DD Puram',
+  'Faridpur',
+  'Bareilly Mod',
+  'Shahjahanpur',
+  'Badaun',
+];
+
 const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
-  const { t, lang } = useLang();
+  const { lang } = useLang();
   const [step, setStep] = useState('choose'); // 'choose' | 'gps' | 'map' | 'confirm'
-  const [position, setPosition] = useState(null);
+  const [position, setPosition] = useState(INVERTIS_CENTER);
   const [thresholdKm, setThresholdKm] = useState(2);
   const [isCustomThreshold, setIsCustomThreshold] = useState(false);
   const [customValue, setCustomValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [gpsStatus, setGpsStatus] = useState('idle'); // 'idle' | 'loading' | 'success' | 'error'
+  const [isMoving, setIsMoving] = useState(false);
+  const [mapInstance, setMapInstance] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearchResults, setShowSearchResults] = useState(false);
 
   useModalA11y(true, onClose);
 
@@ -79,7 +115,8 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
     }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setPosition([pos.coords.latitude, pos.coords.longitude]);
+        const coords = [pos.coords.latitude, pos.coords.longitude];
+        setPosition(coords);
         setGpsStatus('success');
         setStep('confirm');
       },
@@ -92,18 +129,46 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
   }, [lang]);
 
   const handleSetOnMap = () => {
-    if (!position) {
-      setPosition(INVERTIS_CENTER);
-    }
     setStep('map');
   };
+
+  const handleFlyTo = (coords, zoom = 16) => {
+    setPosition(coords);
+    if (mapInstance) {
+      mapInstance.flyTo(coords, zoom, { duration: 0.8 });
+    }
+  };
+
+  const handleLocateMeOnMap = () => {
+    if (!navigator.geolocation) {
+      toast.error('GPS not supported');
+      return;
+    }
+    toast.loading(lang === 'hi' ? 'GPS लोकेशन खोजी जा रही है...' : 'Finding your location...', { id: 'gps-locating' });
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        toast.dismiss('gps-locating');
+        const coords = [pos.coords.latitude, pos.coords.longitude];
+        handleFlyTo(coords, 16);
+        toast.success(lang === 'hi' ? 'आपकी लोकेशन पर केंद्रित किया गया' : 'Centered on your location');
+      },
+      () => {
+        toast.dismiss('gps-locating');
+        toast.error(lang === 'hi' ? 'GPS लोकेशन नहीं मिल सकी' : 'Could not get GPS location');
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  };
+
+  const filteredStops = Object.entries(STOP_COORDS).filter(([name]) =>
+    name.toLowerCase().includes(searchQuery.toLowerCase().trim())
+  );
 
   const handleConfirm = async () => {
     if (!position) return;
     setLoading(true);
 
     try {
-      // 1. Register Service Worker and get push subscription
       let subscription = null;
       if ('serviceWorker' in navigator && 'PushManager' in window) {
         try {
@@ -116,14 +181,18 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
               applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
             });
           } else {
-            toast(lang === 'hi' ? 'सूचनाएं बंद हैं। ऐप खुला होने पर ही अलार्म बजेगा।' : 'Notifications blocked. Alarm will only work when app is open.', { icon: '⚠️' });
+            toast(
+              lang === 'hi'
+                ? 'सूचनाएं बंद हैं। ऐप खुला होने पर ही अलार्म बजेगा।'
+                : 'Notifications blocked. Alarm will only work when app is open.',
+              { icon: '⚠️' }
+            );
           }
         } catch (pushErr) {
           console.warn('Push setup failed:', pushErr);
         }
       }
 
-      // 2. Save alarm to backend
       const token = user?.token || JSON.parse(localStorage.getItem('bus_saarthi_user') || '{}').token;
       await axios.put(
         `${BACKEND_URL}/api/users/me/wake-alarm`,
@@ -136,7 +205,6 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      // 3. Store locally
       localStorage.setItem('wake_alarm_enabled', 'true');
       localStorage.setItem('wake_alarm_data', JSON.stringify({ lat: position[0], lng: position[1], thresholdKm }));
 
@@ -154,6 +222,8 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
       setLoading(false);
     }
   };
+
+  const isMapStep = step === 'map';
 
   return (
     <div
@@ -178,16 +248,17 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
           background: 'white',
           borderRadius: '24px',
           width: '100%',
-          maxWidth: '440px',
+          maxWidth: isMapStep ? '560px' : '440px',
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
           boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
           border: '1px solid rgba(226, 232, 240, 0.8)',
-          maxHeight: '90vh',
+          maxHeight: '92vh',
+          transition: 'max-width 0.25s ease',
         }}
       >
-        {/* Header - Identical to WakeAlarmOptionsModal */}
+        {/* Header - Unified with WakeAlarmOptionsModal */}
         <div
           style={{
             padding: '1.25rem 1.5rem',
@@ -201,7 +272,7 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
             {step !== 'choose' ? (
               <button
                 type="button"
-                onClick={() => setStep(step === 'confirm' ? 'choose' : 'choose')}
+                onClick={() => setStep('choose')}
                 style={{
                   background: '#eff6ff',
                   border: 'none',
@@ -239,7 +310,7 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
                 {step === 'choose'
                   ? (lang === 'hi' ? 'बस नजदीक आने पर सूचना पाएं' : 'Get notified when bus is near')
                   : step === 'map'
-                  ? (lang === 'hi' ? 'मानचित्र पर अपना स्टॉप चुनें' : 'Pinpoint your boarding spot')
+                  ? (lang === 'hi' ? 'मैप घुमाकर पिन को स्टॉप पर सेट करें' : 'Pan map to place pin on your stop')
                   : (lang === 'hi' ? 'अलार्म दायरा और पुष्टि' : 'Set trigger radius & confirm')}
               </p>
             </div>
@@ -263,7 +334,7 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
         </div>
 
         {/* Modal Body */}
-        <div style={{ padding: '1.25rem 1.5rem', overflowY: 'auto' }}>
+        <div style={{ padding: isMapStep ? '1rem 1.25rem 1.25rem 1.25rem' : '1.25rem 1.5rem', overflowY: 'auto' }}>
           {/* STEP 1: Choose Location Method */}
           {step === 'choose' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.95rem' }}>
@@ -375,7 +446,7 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
                     {lang === 'hi' ? 'मानचित्र पर स्टॉप चुनें' : 'Select on Live Map'}
                   </div>
                   <div style={{ fontSize: '0.78rem', color: '#16a34a', marginTop: '2px' }}>
-                    {lang === 'hi' ? 'मानचित्र पर अपना सही पिक-अप पॉइंट चुनें' : 'Drag a pin to your exact pickup point'}
+                    {lang === 'hi' ? 'मानचित्र पर अपना सही पिक-अप पॉइंट चुनें' : 'Drag or search for your exact pickup point'}
                   </div>
                 </div>
                 <ChevronRight size={18} color="#4ade80" />
@@ -463,93 +534,419 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
             </div>
           )}
 
-          {/* STEP: Interactive Map Selection */}
+          {/* STEP 2: Ultra-Convenient Interactive Map Selection */}
           {step === 'map' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <div
-                style={{
-                  padding: '0.65rem 0.95rem',
-                  borderRadius: '12px',
-                  background: '#f8fafc',
-                  border: '1px solid #e2e8f0',
-                  fontSize: '0.78rem',
-                  color: '#475569',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                }}
-              >
-                <Compass size={16} color="#2563eb" />
-                <span>
-                  {lang === 'hi'
-                    ? 'मानचित्र पर कहीं भी टैप करें या पिन को अपने स्टॉप पर खींचें।'
-                    : 'Tap anywhere on the map or drag the pin to your exact pickup spot.'}
-                </span>
+              {/* Quick Search & Filter Input */}
+              <div style={{ position: 'relative' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    background: '#f8fafc',
+                    borderRadius: '12px',
+                    padding: '0.55rem 0.85rem',
+                    border: '1.5px solid #cbd5e1',
+                  }}
+                >
+                  <Search size={16} color="#64748b" />
+                  <input
+                    type="text"
+                    placeholder={
+                      lang === 'hi'
+                        ? 'स्टॉप खोजें (जैसे Satellite, Civil Lines)...'
+                        : 'Search stop or landmark (e.g. Satellite, Civil Lines)...'
+                    }
+                    value={searchQuery}
+                    onFocus={() => setShowSearchResults(true)}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      setShowSearchResults(true);
+                    }}
+                    style={{
+                      border: 'none',
+                      background: 'transparent',
+                      outline: 'none',
+                      width: '100%',
+                      fontSize: '0.84rem',
+                      color: '#0f172a',
+                    }}
+                  />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearchQuery('');
+                        setShowSearchResults(false);
+                      }}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                    >
+                      <X size={15} color="#94a3b8" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Search Results Dropdown */}
+                {showSearchResults && searchQuery.trim() && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: '100%',
+                      left: 0,
+                      right: 0,
+                      marginTop: '4px',
+                      background: 'white',
+                      borderRadius: '12px',
+                      boxShadow: '0 10px 25px -5px rgba(0,0,0,0.2)',
+                      border: '1px solid #cbd5e1',
+                      maxHeight: '180px',
+                      overflowY: 'auto',
+                      zIndex: 2000,
+                    }}
+                  >
+                    {filteredStops.length > 0 ? (
+                      filteredStops.map(([name, coords]) => (
+                        <div
+                          key={name}
+                          onClick={() => {
+                            handleFlyTo(coords, 16);
+                            setSearchQuery('');
+                            setShowSearchResults(false);
+                          }}
+                          style={{
+                            padding: '0.65rem 0.95rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.65rem',
+                            cursor: 'pointer',
+                            borderBottom: '1px solid #f1f5f9',
+                            fontSize: '0.82rem',
+                            color: '#1e293b',
+                            fontWeight: 500,
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = '#f0f7ff')}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = 'white')}
+                        >
+                          <MapPin size={15} color="#2563eb" />
+                          <span>{name}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div style={{ padding: '0.75rem', fontSize: '0.8rem', color: '#64748b', textAlign: 'center' }}>
+                        {lang === 'hi' ? 'कोई स्टॉप नहीं मिला' : 'No matching stops'}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
+              {/* Quick Popular Stop Chips */}
               <div
                 style={{
-                  height: '240px',
-                  borderRadius: '16px',
+                  display: 'flex',
+                  gap: '6px',
+                  overflowX: 'auto',
+                  paddingBottom: '2px',
+                  scrollbarWidth: 'none',
+                }}
+              >
+                {POPULAR_STOPS.map((stopName) => {
+                  const coords = STOP_COORDS[stopName];
+                  if (!coords) return null;
+                  return (
+                    <button
+                      key={stopName}
+                      type="button"
+                      onClick={() => handleFlyTo(coords, 16)}
+                      style={{
+                        padding: '0.35rem 0.75rem',
+                        borderRadius: '20px',
+                        border: '1px solid #dbeafe',
+                        background: '#eff6ff',
+                        color: '#1d4ed8',
+                        fontSize: '0.74rem',
+                        fontWeight: 600,
+                        whiteSpace: 'nowrap',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        flexShrink: 0,
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = '#dbeafe')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = '#eff6ff')}
+                    >
+                      <MapPin size={12} color="#2563eb" />
+                      {stopName.replace(' Bus Stand', '')}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Map Canvas with Center Pin and Floating Controls */}
+              <div
+                style={{
+                  position: 'relative',
+                  height: '310px',
+                  borderRadius: '18px',
                   overflow: 'hidden',
                   border: '1.5px solid #cbd5e1',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+                  boxShadow: '0 4px 14px rgba(0,0,0,0.08)',
                 }}
               >
                 <MapContainer
                   center={position || INVERTIS_CENTER}
                   zoom={15}
                   style={{ height: '100%', width: '100%' }}
+                  zoomControl={false}
+                  scrollWheelZoom={true}
+                  doubleClickZoom={true}
+                  touchZoom={true}
                 >
-                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                  <DraggableMarker position={position || INVERTIS_CENTER} onPositionChange={setPosition} />
+                  <TileLayer
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    attribution='&copy; <a href="https://osm.org/copyright">OSM</a>'
+                  />
+                  <MapController
+                    onPositionChange={setPosition}
+                    setIsMoving={setIsMoving}
+                    setMapInstance={setMapInstance}
+                  />
                 </MapContainer>
+
+                {/* Center Pin Target (Uber/Google Maps style) */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    transform: isMoving
+                      ? 'translate(-50%, -100%) translateY(-12px)'
+                      : 'translate(-50%, -100%) translateY(0)',
+                    transition: 'transform 0.16s cubic-bezier(0.17, 0.67, 0.24, 0.99)',
+                    pointerEvents: 'none',
+                    zIndex: 1000,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                  }}
+                >
+                  <div
+                    style={{
+                      background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+                      borderRadius: '12px 12px 12px 0',
+                      transform: 'rotate(-45deg)',
+                      width: '38px',
+                      height: '38px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      boxShadow: '0 8px 20px rgba(37, 99, 235, 0.45)',
+                      border: '2.5px solid white',
+                    }}
+                  >
+                    <div style={{ transform: 'rotate(45deg)' }}>
+                      <MapPin size={18} color="white" fill="white" />
+                    </div>
+                  </div>
+                  {/* Ground Shadow / Dot */}
+                  <div
+                    style={{
+                      width: '12px',
+                      height: '5px',
+                      background: 'rgba(0,0,0,0.3)',
+                      borderRadius: '50%',
+                      marginTop: '2px',
+                      transform: isMoving ? 'scale(0.5)' : 'scale(1)',
+                      transition: 'transform 0.16s ease',
+                    }}
+                  />
+                </div>
+
+                {/* Floating Map Navigation Controls (Top Right) */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '12px',
+                    right: '12px',
+                    zIndex: 1000,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px',
+                  }}
+                >
+                  {/* Zoom In */}
+                  <button
+                    type="button"
+                    title={lang === 'hi' ? 'बड़ा करें (+)' : 'Zoom In (+)'}
+                    onClick={() => mapInstance?.zoomIn()}
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '10px',
+                      background: 'white',
+                      border: '1px solid #cbd5e1',
+                      boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      color: '#0f172a',
+                    }}
+                  >
+                    <Plus size={18} strokeWidth={2.5} />
+                  </button>
+
+                  {/* Zoom Out */}
+                  <button
+                    type="button"
+                    title={lang === 'hi' ? 'छोटा करें (-)' : 'Zoom Out (-)'}
+                    onClick={() => mapInstance?.zoomOut()}
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '10px',
+                      background: 'white',
+                      border: '1px solid #cbd5e1',
+                      boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      color: '#0f172a',
+                    }}
+                  >
+                    <Minus size={18} strokeWidth={2.5} />
+                  </button>
+
+                  {/* Locate Me (GPS) */}
+                  <button
+                    type="button"
+                    title={lang === 'hi' ? 'मेरी लोकेशन पर जाएं' : 'Go to My Location'}
+                    onClick={handleLocateMeOnMap}
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '10px',
+                      background: 'white',
+                      border: '1.5px solid #bfdbfe',
+                      boxShadow: '0 2px 6px rgba(37,99,235,0.2)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      color: '#2563eb',
+                    }}
+                  >
+                    <Crosshair size={18} strokeWidth={2.5} />
+                  </button>
+
+                  {/* Reset to Invertis */}
+                  <button
+                    type="button"
+                    title={lang === 'hi' ? 'इनवर्टिस यूनिवर्सिटी' : 'Invertis Campus'}
+                    onClick={() => handleFlyTo(INVERTIS_CENTER, 15)}
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '10px',
+                      background: 'white',
+                      border: '1.5px solid #bbf7d0',
+                      boxShadow: '0 2px 6px rgba(34,197,94,0.2)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      color: '#16a34a',
+                    }}
+                  >
+                    <School size={18} strokeWidth={2.2} />
+                  </button>
+                </div>
+
+                {/* Floating Map Helper Badge (Bottom Left) */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    bottom: '10px',
+                    left: '10px',
+                    zIndex: 1000,
+                    background: 'rgba(15, 23, 42, 0.75)',
+                    backdropFilter: 'blur(4px)',
+                    color: 'white',
+                    padding: '4px 10px',
+                    borderRadius: '20px',
+                    fontSize: '0.72rem',
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+                  }}
+                >
+                  <Compass size={13} color="#60a5fa" />
+                  <span>
+                    {isMoving
+                      ? (lang === 'hi' ? 'पिन सेट किया जा रहा है...' : 'Positioning pin...')
+                      : (lang === 'hi' ? 'पिन केंद्र में सेट है' : 'Pin fixed at center')}
+                  </span>
+                </div>
               </div>
 
+              {/* Coordinates & Status Bar */}
               {position && (
                 <div
                   style={{
-                    padding: '0.45rem 0.85rem',
-                    borderRadius: '10px',
+                    padding: '0.55rem 0.95rem',
+                    borderRadius: '12px',
                     background: '#f0fdf4',
-                    border: '1px solid #bbf7d0',
+                    border: '1.5px solid #bbf7d0',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
-                    fontSize: '0.74rem',
+                    fontSize: '0.78rem',
                     color: '#15803d',
                     fontWeight: 600,
                   }}
                 >
                   <span>📍 {position[0].toFixed(4)}°, {position[1].toFixed(4)}°</span>
-                  <span style={{ color: '#16a34a' }}>{lang === 'hi' ? 'पिन सेट' : 'Pin Placed'}</span>
+                  <span style={{ color: '#16a34a', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Check size={14} />
+                    {lang === 'hi' ? 'बिंदु तैयार' : 'Target Selected'}
+                  </span>
                 </div>
               )}
 
+              {/* Action Button */}
               <button
                 type="button"
                 onClick={() => setStep('confirm')}
                 disabled={!position}
                 style={{
-                  marginTop: '0.25rem',
                   width: '100%',
-                  padding: '0.85rem',
+                  padding: '0.9rem',
                   borderRadius: '14px',
                   border: 'none',
                   background: position ? '#2563eb' : '#94a3b8',
                   color: 'white',
                   fontWeight: 700,
-                  fontSize: '0.92rem',
+                  fontSize: '0.95rem',
                   cursor: position ? 'pointer' : 'not-allowed',
-                  boxShadow: '0 2px 8px rgba(37, 99, 235, 0.25)',
+                  boxShadow: '0 4px 14px rgba(37, 99, 235, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  transition: 'background 0.2s',
                 }}
               >
-                {lang === 'hi' ? 'लोकेशन कन्फ़र्म करें →' : 'Confirm Location →'}
+                <span>{lang === 'hi' ? 'यह स्थान कन्फ़र्म करें →' : 'Confirm This Location →'}</span>
               </button>
             </div>
           )}
 
-          {/* STEP: Confirm with Threshold Radius */}
+          {/* STEP 3: Confirm with Threshold Radius */}
           {step === 'confirm' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.95rem' }}>
               {/* Mini Map Preview with Radius Geofence Circle - Matching WakeAlarmOptionsModal */}
@@ -585,8 +982,37 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
                           weight: 2,
                         }}
                       />
-                      <Marker position={position} />
                     </MapContainer>
+                    {/* Fixed Center Pin overlay */}
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '50%',
+                        left: '50%',
+                        transform: 'translate(-50%, -100%)',
+                        pointerEvents: 'none',
+                        zIndex: 1000,
+                      }}
+                    >
+                      <div
+                        style={{
+                          background: '#2563eb',
+                          borderRadius: '10px 10px 10px 0',
+                          transform: 'rotate(-45deg)',
+                          width: '28px',
+                          height: '28px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          boxShadow: '0 4px 10px rgba(37, 99, 235, 0.4)',
+                          border: '2px solid white',
+                        }}
+                      >
+                        <div style={{ transform: 'rotate(45deg)' }}>
+                          <MapPin size={14} color="white" fill="white" />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                   <div
                     style={{
@@ -611,7 +1037,7 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
                         border: 'none',
                         color: '#2563eb',
                         fontWeight: 600,
-                        fontSize: '0.72rem',
+                        fontSize: '0.74rem',
                         cursor: 'pointer',
                         padding: 0,
                       }}
