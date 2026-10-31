@@ -19,6 +19,7 @@ import '../services/api_client.dart';
 import '../services/map_cache_service.dart';
 import '../widgets/hamburger_drawer.dart';
 import '../widgets/wake_alarm_modal.dart';
+import '../widgets/wake_alarm_options_modal.dart';
 import 'full_map_screen.dart';
 
 /// 1:1 port of the web Home page: glass header with the notification
@@ -55,6 +56,7 @@ class _HomeViewState extends State<_HomeView> {
   bool _showMap = false;
   bool _showNotifications = false;
   bool _showAlarmModal = false;
+  bool _showAlarmOptionsModal = false;
   final GlobalKey _bellKey = GlobalKey();
   final AudioPlayer _beepPlayer = AudioPlayer();
   Map<String, dynamic>? _lastBroadcast;
@@ -134,433 +136,13 @@ class _HomeViewState extends State<_HomeView> {
   Future<void> _handleWakeAlarm(TrackingProvider tracking) async {
     if (tracking.alarmLoading) return;
     if (tracking.alarmSet) {
-      _showWakeAlarmOptions(tracking);
+      setState(() => _showAlarmOptionsModal = true);
     } else {
       setState(() => _showAlarmModal = true);
     }
   }
 
-  void _showWakeAlarmOptions(TrackingProvider tracking) {
-    final lang = context.read<LanguageProvider>();
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardBg = isDark ? AppColors.darkCard : Colors.white;
-    final textDark = isDark ? AppColors.darkText : const Color(0xFF0F172A);
-    final textMuted = isDark ? AppColors.darkTextMuted : const Color(0xFF64748B);
 
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (ctx) => SafeArea(
-        child: Container(
-          margin: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: cardBg,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: isDark ? AppColors.darkBorder : const Color(0xFFE2E8F0),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.15),
-                blurRadius: 20,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Header
-              Row(
-                children: [
-                  Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFEFF6FF),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Icon(
-                          LucideIcons.alarmClock,
-                          size: 22,
-                          color: Color(0xFF2563EB),
-                        ),
-                      ),
-                      Positioned(
-                        top: 2,
-                        right: 2,
-                        child: Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF10B981),
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 1.5),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          lang.t('alarmActiveTitle'),
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: textDark,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          lang.t('alarmActiveSubtitle'),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: textMuted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    icon: Icon(LucideIcons.x, size: 20, color: textMuted),
-                    onPressed: () => Navigator.pop(ctx),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-
-              // Current Active Location Preview with Mini Map
-              () {
-                final alarmData = tracking.alarmData;
-                final double? alarmLat = alarmData != null
-                    ? (double.tryParse('${alarmData['lat']}'))
-                    : null;
-                final double? alarmLng = alarmData != null
-                    ? (double.tryParse('${alarmData['lng']}'))
-                    : null;
-                final double alarmThreshold = alarmData != null
-                    ? (double.tryParse('${alarmData['thresholdKm']}') ?? 2.0)
-                    : 2.0;
-
-                if (alarmLat == null || alarmLng == null) {
-                  return const SizedBox.shrink();
-                }
-
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: isDark ? const Color(0xFF334155) : const Color(0xFFDBEAFE),
-                        width: 1.5,
-                      ),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Column(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                          color: isDark ? const Color(0xFF0F172A) : const Color(0xFFEFF6FF),
-                          child: Row(
-                            children: [
-                              const Icon(LucideIcons.mapPin, size: 16, color: Color(0xFF2563EB)),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  lang.t('currentAlarmLocation'),
-                                  style: TextStyle(
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: isDark ? const Color(0xFF93C5FD) : const Color(0xFF1E40AF),
-                                  ),
-                                ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: isDark ? const Color(0xFF1E3A8A) : const Color(0xFFDBEAFE),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  '🎯 ${alarmThreshold % 1 == 0 ? alarmThreshold.toInt() : alarmThreshold} km ${lang.t('currentAlarmRadius')}',
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF1D4ED8),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        SizedBox(
-                          height: 135,
-                          child: FlutterMap(
-                            options: MapOptions(
-                              initialCenter: LatLng(alarmLat, alarmLng),
-                              initialZoom: 14.5,
-                              interactionOptions: const InteractionOptions(flags: InteractiveFlag.none),
-                            ),
-                            children: [
-                              TileLayer(
-                                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                              ),
-                              CircleLayer(
-                                circles: [
-                                  CircleMarker(
-                                    point: LatLng(alarmLat, alarmLng),
-                                    radius: alarmThreshold * 1000,
-                                    useRadiusInMeter: true,
-                                    color: const Color(0x281D4ED8),
-                                    borderColor: const Color(0xFF1D4ED8),
-                                    borderStrokeWidth: 2,
-                                  ),
-                                ],
-                              ),
-                              MarkerLayer(
-                                markers: [
-                                  Marker(
-                                    point: LatLng(alarmLat, alarmLng),
-                                    width: 32,
-                                    height: 32,
-                                    child: Container(
-                                      decoration: const BoxDecoration(
-                                        color: Color(0xFF1D4ED8),
-                                        shape: BoxShape.circle,
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black26,
-                                            blurRadius: 4,
-                                            offset: Offset(0, 2),
-                                          ),
-                                        ],
-                                      ),
-                                      child: const Icon(
-                                        LucideIcons.alarmClock,
-                                        size: 17,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                          color: isDark ? const Color(0xFF1E293B) : Colors.white,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                '📍 ${alarmLat.toStringAsFixed(4)}°, ${alarmLng.toStringAsFixed(4)}°',
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w600,
-                                  color: isDark ? AppColors.darkTextMuted : const Color(0xFF64748B),
-                                ),
-                              ),
-                              Row(
-                                children: [
-                                  Container(
-                                    width: 7,
-                                    height: 7,
-                                    decoration: const BoxDecoration(
-                                      color: Color(0xFF10B981),
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 5),
-                                  const Text(
-                                    'Active Geofence',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                      color: Color(0xFF10B981),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              }(),
-
-              // Option 1: Change Location
-              InkWell(
-                onTap: () {
-                  Navigator.pop(ctx);
-                  setState(() => _showAlarmModal = true);
-                },
-                borderRadius: BorderRadius.circular(16),
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF0F7FF),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: isDark ? const Color(0xFF334155) : const Color(0xFFBFDBFE),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 42,
-                        height: 42,
-                        decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF1E3A8A) : const Color(0xFFDBEAFE),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Icon(
-                          LucideIcons.mapPin,
-                          size: 22,
-                          color: Color(0xFF1D4ED8),
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              lang.t('changeLocation'),
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                                color: isDark ? Colors.white : const Color(0xFF1E3A8A),
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              lang.t('changeLocationSubtitle'),
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Color(0xFF3B82F6),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Icon(
-                        LucideIcons.chevronRight,
-                        size: 20,
-                        color: Color(0xFF60A5FA),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              // Option 2: Turn Off Alarm
-              InkWell(
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  final ok = await tracking.cancelWakeAlarm();
-                  if (mounted) {
-                    ApiClient.toast(
-                      context,
-                      ok
-                          ? '🔕 Wake alarm cancelled.'
-                          : 'We could not cancel the alarm. Please try again.',
-                      kind: ok ? ToastKind.success : ToastKind.error,
-                    );
-                  }
-                },
-                borderRadius: BorderRadius.circular(16),
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF2A1515) : const Color(0xFFFFF5F5),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: isDark ? const Color(0xFF451A1A) : const Color(0xFFFECACA),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 42,
-                        height: 42,
-                        decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF4C1D1D) : const Color(0xFFFEE2E2),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Icon(
-                          LucideIcons.bellOff,
-                          size: 22,
-                          color: Color(0xFFDC2626),
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              lang.t('turnOffAlarm'),
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                                color: isDark ? const Color(0xFFFCA5A5) : const Color(0xFF991B1B),
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              lang.t('turnOffAlarmSubtitle'),
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: isDark ? const Color(0xFFF87171) : const Color(0xFFEF4444),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Icon(
-                        LucideIcons.chevronRight,
-                        size: 20,
-                        color: Color(0xFFF87171),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // Keep Active Button
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: Text(
-                  lang.t('keepAlarmActive'),
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: textMuted,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -751,7 +333,22 @@ class _HomeViewState extends State<_HomeView> {
               onAcknowledge: tracking.acknowledgeBroadcast,
             ),
 
-          // ── Wake alarm modal ──
+          // ── Wake alarm active options modal ──
+          if (_showAlarmOptionsModal)
+            _ModalScrim(
+              onDismiss: () => setState(() => _showAlarmOptionsModal = false),
+              child: WakeAlarmOptionsModal(
+                onClose: () => setState(() => _showAlarmOptionsModal = false),
+                onChangeLocation: () {
+                  setState(() {
+                    _showAlarmOptionsModal = false;
+                    _showAlarmModal = true;
+                  });
+                },
+              ),
+            ),
+
+          // ── Wake alarm set modal ──
           if (_showAlarmModal)
             _ModalScrim(
               onDismiss: () => setState(() => _showAlarmModal = false),
