@@ -608,8 +608,9 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
                   dragging={true}
                 >
                   <TileLayer
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                    attribution='&copy; <a href="https://osm.org/copyright">OSM</a>'
+                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
+                    attribution='&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://osm.org/copyright">OSM</a>'
+                    subdomains={['a', 'b', 'c', 'd']}
                   />
                   <MapClickHandler
                     onLocationSelect={(coords) => setPosition(coords)}
@@ -815,7 +816,10 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
                       doubleClickZoom={false}
                       scrollWheelZoom={false}
                     >
-                      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                      <TileLayer
+                        url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
+                        subdomains={['a', 'b', 'c', 'd']}
+                      />
                       <Circle
                         center={position}
                         radius={thresholdKm * 1000}

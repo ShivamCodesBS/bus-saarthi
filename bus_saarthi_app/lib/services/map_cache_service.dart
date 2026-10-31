@@ -9,10 +9,16 @@ import 'package:path_provider/path_provider.dart';
 class MapCacheService {
   static Future<FileCacheStore>? _storeFuture;
 
-  /// Initialize the cache store
+  /// Initialize the cache store with fresh cache namespace to invalidate any blocked 403 tiles
   static Future<FileCacheStore> _initStore() async {
     final dir = await getTemporaryDirectory();
-    return FileCacheStore('${dir.path}${Platform.pathSeparator}MapTiles');
+    final oldDir = Directory('${dir.path}${Platform.pathSeparator}MapTiles');
+    if (await oldDir.exists()) {
+      try {
+        await oldDir.delete(recursive: true);
+      } catch (_) {}
+    }
+    return FileCacheStore('${dir.path}${Platform.pathSeparator}MapTilesV2');
   }
 
   /// Get the cached tile provider for OpenStreetMap tiles

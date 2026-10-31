@@ -2164,7 +2164,8 @@ class _LiveBusMapState extends State<LiveBusMap> {
         ),
         children: [
           TileLayer(
-            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+            subdomains: const ['a', 'b', 'c', 'd'],
             userAgentPackageName: 'com.bussaarthi.bus_saarthi_app',
           ),
           if (polyline.length > 1)
@@ -2220,7 +2221,8 @@ class _LiveBusMapState extends State<LiveBusMap> {
       ),
       children: [
         TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+          subdomains: const ['a', 'b', 'c', 'd'],
           tileProvider: _tileProvider!,
         ),
         if (polyline.length > 1)

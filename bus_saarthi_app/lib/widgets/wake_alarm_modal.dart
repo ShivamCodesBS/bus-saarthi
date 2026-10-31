@@ -457,7 +457,8 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
                     ),
                     children: [
                       TileLayer(
-                        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+                        subdomains: const ['a', 'b', 'c', 'd'],
                         userAgentPackageName: 'com.bussaarthi.bus_saarthi_app',
                       ),
                       if (_position != null)
@@ -639,7 +640,11 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
                             interactionOptions: const InteractionOptions(flags: InteractiveFlag.none),
                           ),
                           children: [
-                            TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
+                            TileLayer(
+                              urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+                              subdomains: const ['a', 'b', 'c', 'd'],
+                              userAgentPackageName: 'com.bussaarthi.bus_saarthi_app',
+                            ),
                             CircleLayer(
                               circles: [
                                 CircleMarker(

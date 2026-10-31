@@ -579,13 +579,13 @@ const UnifiedMap = ({
     <>
       <MapResizer onMapReady={handleMapReady} />
       
-      {/* Tile Layer - OpenStreetMap (free, no API key required) */}
+      {/* Tile Layer - CartoDB Voyager (fast CDN, no 403 blocks) */}
       <TileLayer
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
+        attribution='&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         maxZoom={19}
         minZoom={3}
-        subdomains={['a', 'b', 'c']}
+        subdomains={['a', 'b', 'c', 'd']}
       />
       
       {/* Route Polyline — only while the trip is live. When the bus is

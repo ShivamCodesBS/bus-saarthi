@@ -130,7 +130,9 @@ class DriverMapWidgetState extends State<DriverMapWidget> with TickerProviderSta
           children: [
             // OpenStreetMap tiles
             TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+              subdomains: const ['a', 'b', 'c', 'd'],
+              userAgentPackageName: 'com.bussaarthi.bus_saarthi_app',
               userAgentPackageName: 'com.invertis.bus_saarthi',
               maxZoom: 19,
             ),

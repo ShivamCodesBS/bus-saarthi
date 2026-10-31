@@ -191,7 +191,10 @@ const WakeAlarmOptionsModal = ({ alarmData, onClose, onChangeLocation, onTurnOff
                   touchZoom={false}
                   style={{ height: '100%', width: '100%' }}
                 >
-                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                  <TileLayer
+                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
+                    subdomains={['a', 'b', 'c', 'd']}
+                  />
                   <Circle
                     center={[lat, lng]}
                     radius={thresholdKm * 1000}
