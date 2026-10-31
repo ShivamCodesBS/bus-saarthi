@@ -123,7 +123,7 @@ export class NotificationsService {
       }
       if (!msgType) msgType = 'general';
 
-      let channelId = 'bus_saarthi_general';
+      let channelId = 'bus_saarthi_general_v2';
       if (msgType === 'sos') channelId = 'bus_saarthi_sos';
       else if (String(msgType).startsWith('wake_alarm'))
         channelId = 'bus_saarthi_wake_alarm';
@@ -131,7 +131,7 @@ export class NotificationsService {
         channelId = 'bus_saarthi_grievance';
       else if (msgType === 'merge' || msgType === 'route_cancel')
         channelId = 'bus_saarthi_route';
-      else if (msgType === 'broadcast') channelId = 'bus_saarthi_broadcast';
+      else if (msgType === 'broadcast') channelId = 'bus_saarthi_broadcast_v2';
 
       const title = payload.title ?? 'Bus Saarthi';
       const body = payload.body ?? '';
