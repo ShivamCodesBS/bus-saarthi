@@ -283,15 +283,16 @@ export class NotificationsService {
   }
 
   async broadcastMessage(message: string, title?: string, sender?: string) {
+    const senderName = sender || 'Administration';
     const broadcast = await this.prisma.broadcast.create({
-      data: { message, title },
+      data: { message, title, sender: senderName },
     });
 
     const broadcastPayload = {
       id: broadcast.id,
       title: title || 'Notice',
       message,
-      sender: sender || 'Administration',
+      sender: senderName,
       timestamp: broadcast.timestamp,
     };
 
@@ -347,6 +348,59 @@ export class NotificationsService {
       orderBy: { timestamp: 'desc' },
       take: 20,
     });
+  }
+
+  async getBroadcastHistory(options: {
+    search?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const page = Math.max(1, options.page || 1);
+    const limit = Math.min(100, Math.max(1, options.limit || 20));
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (options.search) {
+      where.OR = [
+        { message: { contains: options.search, mode: 'insensitive' } },
+        { title: { contains: options.search, mode: 'insensitive' } },
+        { sender: { contains: options.search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [broadcasts, total] = await Promise.all([
+      this.prisma.broadcast.findMany({
+        where,
+        orderBy: { timestamp: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.broadcast.count({ where }),
+    ]);
+
+    return {
+      status: 'success',
+      data: broadcasts.map((b) => ({
+        id: b.id,
+        title: b.title || 'Notice',
+        message: b.message,
+        sender: b.sender || 'Administration',
+        timestamp: b.timestamp.toISOString(),
+      })),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async deleteBroadcast(id: string) {
+    await this.prisma.broadcast.delete({
+      where: { id },
+    });
+    return { status: 'success', message: 'Broadcast deleted' };
   }
 
   /**

@@ -216,6 +216,7 @@ model Broadcast {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   message   String
   title     String?  @db.VarChar(200)
+  sender    String?  @default("Administration") @db.VarChar(100)
   timestamp DateTime @default(now()) @map("timestamp") @db.Timestamptz(6)
 
   @@map("broadcasts")
@@ -253,13 +254,18 @@ model Notification {
 }
 
 model SosAlert {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  loginId   String   @map("login_id") @db.VarChar(50)
-  passenger String?  @db.VarChar(100)
-  route     String   @db.VarChar(20)
-  time      DateTime @default(now()) @map("time") @db.Timestamptz(6)
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  loginId    String    @map("login_id") @db.VarChar(50)
+  passenger  String?   @db.VarChar(100)
+  route      String    @db.VarChar(20)
+  time       DateTime  @default(now()) @map("time") @db.Timestamptz(6)
+  status     String    @default("active") @db.VarChar(20)
+  resolvedBy String?   @map("resolved_by") @db.VarChar(50)
+  resolvedAt DateTime? @map("resolved_at") @db.Timestamptz(6)
+  notes      String?
 
   @@index([time])
+  @@index([status])
   @@map("sos_alerts")
 }
 

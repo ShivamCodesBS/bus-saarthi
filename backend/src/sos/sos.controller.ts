@@ -5,6 +5,8 @@ import {
   Request,
   UseGuards,
   Body,
+  Query,
+  Param,
   BadRequestException,
 } from '@nestjs/common';
 import { SosService } from './sos.service';
@@ -54,6 +56,37 @@ export class SosController {
   @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
   getActive() {
     return this.sosService.getActiveAlerts();
+  }
+
+  @Get('history')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
+  getHistory(
+    @Query('status') status?: string,
+    @Query('route') route?: string,
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.sosService.getHistory({
+      status,
+      route,
+      search,
+      page: page ? parseInt(page, 10) : 1,
+      limit: limit ? parseInt(limit, 10) : 20,
+    });
+  }
+
+  @Post(':id/resolve')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
+  resolve(
+    @Param('id') id: string,
+    @Request() req: any,
+    @Body() body: { notes?: string },
+  ) {
+    const staffId = req.user.name || req.user.loginId;
+    return this.sosService.resolve(id, staffId, body?.notes);
   }
 
   @Get('my-status')

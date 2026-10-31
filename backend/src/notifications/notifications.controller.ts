@@ -2,6 +2,8 @@ import {
   Controller,
   Post,
   Get,
+  Delete,
+  Param,
   Body,
   UseGuards,
   Request,
@@ -75,5 +77,27 @@ export class NotificationsController {
       body.title,
       sender,
     );
+  }
+
+  @Get('broadcast/history')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
+  getBroadcastHistory(
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.notificationsService.getBroadcastHistory({
+      search,
+      page: page ? parseInt(page, 10) : 1,
+      limit: limit ? parseInt(limit, 10) : 20,
+    });
+  }
+
+  @Delete('broadcast/:id')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
+  deleteBroadcast(@Param('id') id: string) {
+    return this.notificationsService.deleteBroadcast(id);
   }
 }
