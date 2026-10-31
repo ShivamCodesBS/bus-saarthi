@@ -145,15 +145,22 @@ class FcmService {
         AndroidFlutterLocalNotificationsPlugin>();
     if (androidImpl == null) return;
 
-    // General notifications channel
+    // Re-create channels to clear any old broken sound configuration
+    try {
+      await androidImpl.deleteNotificationChannel(channelId: 'bus_saarthi_general');
+      await androidImpl.deleteNotificationChannel(channelId: 'bus_saarthi_broadcast');
+      await androidImpl.deleteNotificationChannel(channelId: 'bus_saarthi_route');
+      await androidImpl.deleteNotificationChannel(channelId: 'bus_saarthi_grievance');
+    } catch (_) {}
+
+    // General notifications channel v2
     await androidImpl.createNotificationChannel(
       AndroidNotificationChannel(
-        'bus_saarthi_general',
+        'bus_saarthi_general_v2',
         'General Notifications',
         description: 'Bus tracking, route updates, and general notifications',
-        importance: Importance.high,
+        importance: Importance.max,
         playSound: true,
-        sound: RawResourceAndroidNotificationSound('notification'),
         enableVibration: true,
         vibrationPattern: Int64List.fromList(_vibrationGeneral),
         enableLights: true,
@@ -183,7 +190,7 @@ class FcmService {
         'bus_saarthi_wake_alarm',
         'Wake Alarms',
         description: 'Bus arrival wake alarms',
-        importance: Importance.high,
+        importance: Importance.max,
         playSound: true,
         sound: RawResourceAndroidNotificationSound('alarm'),
         enableVibration: true,
@@ -193,15 +200,14 @@ class FcmService {
       ),
     );
 
-    // Grievance/Complaint channel
+    // Grievance/Complaint channel v2
     await androidImpl.createNotificationChannel(
       AndroidNotificationChannel(
-        'bus_saarthi_grievance',
+        'bus_saarthi_grievance_v2',
         'Complaint Updates',
         description: 'Complaint status updates and responses',
-        importance: Importance.high,
+        importance: Importance.max,
         playSound: true,
-        sound: RawResourceAndroidNotificationSound('notification'),
         enableVibration: true,
         vibrationPattern: Int64List.fromList(_vibrationGrievance),
         enableLights: true,
@@ -209,15 +215,14 @@ class FcmService {
       ),
     );
 
-    // Route/Merge Updates channel
+    // Route/Merge Updates channel v2
     await androidImpl.createNotificationChannel(
       AndroidNotificationChannel(
-        'bus_saarthi_route',
+        'bus_saarthi_route_v2',
         'Route Updates',
         description: 'Route changes, merges, and cancellations',
-        importance: Importance.high,
+        importance: Importance.max,
         playSound: true,
-        sound: RawResourceAndroidNotificationSound('notification'),
         enableVibration: true,
         vibrationPattern: Int64List.fromList(_vibrationRoute),
         enableLights: true,
@@ -225,15 +230,14 @@ class FcmService {
       ),
     );
 
-    // Broadcast/Announcements channel
+    // Broadcast/Announcements channel v2
     await androidImpl.createNotificationChannel(
       AndroidNotificationChannel(
-        'bus_saarthi_broadcast',
+        'bus_saarthi_broadcast_v2',
         'Announcements',
         description: 'Official announcements and broadcasts',
-        importance: Importance.defaultImportance,
+        importance: Importance.max,
         playSound: true,
-        sound: RawResourceAndroidNotificationSound('notification'),
         enableVibration: true,
         vibrationPattern: Int64List.fromList(_vibrationBroadcast),
         enableLights: true,
@@ -309,19 +313,19 @@ class FcmService {
     } else if (channelType == 'wake_alarm' || channelType == 'wake_alarm_trigger') {
       channelId = 'bus_saarthi_wake_alarm';
     } else if (channelType.toString().startsWith('grievance')) {
-      channelId = 'bus_saarthi_grievance';
+      channelId = 'bus_saarthi_grievance_v2';
     } else if (channelType == 'merge' || channelType == 'route_cancel') {
-      channelId = 'bus_saarthi_route';
+      channelId = 'bus_saarthi_route_v2';
     } else if (channelType == 'broadcast') {
-      channelId = 'bus_saarthi_broadcast';
+      channelId = 'bus_saarthi_broadcast_v2';
     } else {
-      channelId = 'bus_saarthi_general';
+      channelId = 'bus_saarthi_general_v2';
     }
 
     final soundResource =
         (channelId == 'bus_saarthi_wake_alarm' || channelId == 'bus_saarthi_sos')
             ? const RawResourceAndroidNotificationSound('alarm')
-            : const RawResourceAndroidNotificationSound('notification');
+            : null;
 
     // Determine style based on message data
     final contentBody = body;
@@ -333,8 +337,8 @@ class FcmService {
           channelId,
           'Bus Saarthi',
           channelDescription: 'Bus Saarthi Notifications',
-          importance: Importance.high,
-          priority: Priority.high,
+          importance: Importance.max,
+          priority: Priority.max,
           playSound: true,
           sound: soundResource,
           styleInformation: BigTextStyleInformation(contentBody),
@@ -346,8 +350,8 @@ class FcmService {
           channelId,
           'Bus Saarthi',
           channelDescription: 'Bus Saarthi Notifications',
-          importance: Importance.high,
-          priority: Priority.high,
+          importance: Importance.max,
+          priority: Priority.max,
           playSound: true,
           sound: soundResource,
           styleInformation: InboxStyleInformation(
@@ -361,8 +365,8 @@ class FcmService {
           channelId,
           'Bus Saarthi',
           channelDescription: 'Bus Saarthi Notifications',
-          importance: Importance.high,
-          priority: Priority.high,
+          importance: Importance.max,
+          priority: Priority.max,
           playSound: true,
           sound: soundResource,
           styleInformation: BigTextStyleInformation(body),

@@ -20,7 +20,7 @@
         <!-- Default Notification Channel for Firebase Cloud Messaging -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="bus_saarthi_general" />
+            android:value="bus_saarthi_general_v2" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
