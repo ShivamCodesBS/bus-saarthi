@@ -31,7 +31,6 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
   final MapController _mapController = MapController();
   bool _loading = false;
   String _gpsStatus = 'idle'; // 'idle' | 'loading' | 'error'
-  bool _isMoving = false;
 
   static const LatLng _invertisCenter = LatLng(28.3180, 79.4670);
   static const List<double> _kmOptions = [1, 2, 3, 5];
@@ -46,12 +45,6 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
   void _flyTo(LatLng target, [double zoom = 16]) {
     setState(() => _position = target);
     _mapController.move(target, zoom);
-  }
-
-  void _panBy(double dLng, double dLat) {
-    final cur = _position ?? _invertisCenter;
-    final target = LatLng(cur.latitude + dLat, cur.longitude + dLng);
-    _flyTo(target, _mapController.camera.zoom);
   }
 
   Future<void> _locateMeOnMap() async {
@@ -272,8 +265,8 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
                                     : 'Get notified when bus is near')
                                 : _step == 'map'
                                 ? (lang.lang == 'hi'
-                                    ? 'मैप घुमाकर पिन को स्टॉप पर सेट करें'
-                                    : 'Pan map to place pin on your stop')
+                                    ? 'मैप पर क्लिक करके स्टॉप मार्क करें'
+                                    : 'Tap on map to mark your stop')
                                 : (lang.lang == 'hi'
                                     ? 'अलार्म दायरा और पुष्टि'
                                     : 'Set trigger radius & confirm'),
@@ -423,8 +416,8 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
                   Expanded(
                     child: Text(
                       lang.lang == 'hi'
-                          ? 'मैप ड्रैग करें या स्क्रीन एरो (↑ ↓ ← →) से पिन सेट करें'
-                          : 'Drag map or use screen arrows (↑ ↓ ← →) to pan',
+                          ? 'मैप पर कहीं भी क्लिक करके स्टॉप चुनें, या ड्रैग करके घूमें'
+                          : 'Tap anywhere on map to mark stop, or drag to pan',
                       style: TextStyle(fontSize: 12, color: textMuted),
                     ),
                   ),
@@ -433,7 +426,7 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
             ),
             const SizedBox(height: 10),
 
-            // Map View with Stationary Center Pin and Floating Controls
+            // Map View with Clickable Marker and Floating Zoom Controls
             Container(
               height: 340,
               decoration: BoxDecoration(
@@ -455,178 +448,51 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
                     options: MapOptions(
                       initialCenter: _position ?? _invertisCenter,
                       initialZoom: 15,
-                      onPositionChanged: (camera, hasGesture) {
-                        if (hasGesture) {
-                          setState(() {
-                            _position = camera.center;
-                            _isMoving = true;
-                          });
-                        }
-                      },
-                      onMapEvent: (evt) {
-                        if (evt is MapEventMoveEnd) {
-                          if (_isMoving) setState(() => _isMoving = false);
-                        }
-                      },
+                      interactionOptions: const InteractionOptions(
+                        flags: InteractiveFlag.all,
+                      ),
                       onTap: (_, latlng) {
-                        _flyTo(latlng, _mapController.camera.zoom);
+                        setState(() => _position = latlng);
                       },
                     ),
                     children: [
-                      TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
-                    ],
-                  ),
-
-                  // Center Pin Target (Uber/Google Maps style)
-                  Center(
-                    child: IgnorePointer(
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 160),
-                        curve: Curves.easeOut,
-                        transform: Matrix4.translationValues(0, _isMoving ? -14 : 0, 0),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              width: 38,
-                              height: 38,
-                              decoration: BoxDecoration(
-                                gradient: const LinearGradient(
-                                  colors: [Color(0xFF2563EB), Color(0xFF1D4ED8)],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                ),
-                                borderRadius: const BorderRadius.only(
-                                  topLeft: Radius.circular(12),
-                                  topRight: Radius.circular(12),
-                                  bottomLeft: Radius.circular(12),
-                                  bottomRight: Radius.zero,
-                                ),
-                                border: Border.all(color: Colors.white, width: 2.5),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: const Color(0xFF2563EB).withValues(alpha: 0.45),
-                                    blurRadius: 18,
-                                    offset: const Offset(0, 8),
+                      TileLayer(
+                        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        userAgentPackageName: 'com.bussaarthi.bus_saarthi_app',
+                      ),
+                      if (_position != null)
+                        MarkerLayer(
+                          markers: [
+                            Marker(
+                              point: _position!,
+                              width: 44,
+                              height: 44,
+                              alignment: Alignment.center,
+                              child: Container(
+                                width: 40,
+                                height: 40,
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(
+                                    colors: [Color(0xFF2563EB), Color(0xFF1D4ED8)],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
                                   ),
-                                ],
-                              ),
-                              transform: Matrix4.rotationZ(-0.785398),
-                              child: Center(
-                                child: Transform.rotate(
-                                  angle: 0.785398,
-                                  child: const Icon(LucideIcons.mapPin, size: 18, color: Colors.white),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.white, width: 2.5),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: const Color(0xFF2563EB).withValues(alpha: 0.45),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ],
                                 ),
-                              ),
-                            ),
-                            const SizedBox(height: 3),
-                            AnimatedContainer(
-                              duration: const Duration(milliseconds: 160),
-                              width: _isMoving ? 7 : 12,
-                              height: _isMoving ? 3 : 5,
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.35),
-                                borderRadius: BorderRadius.circular(6),
+                                child: const Icon(LucideIcons.mapPin, size: 20, color: Colors.white),
                               ),
                             ),
                           ],
                         ),
-                      ),
-                    ),
-                  ),
-
-                  // Directional Pan Pad (Top Left)
-                  Positioned(
-                    top: 10,
-                    left: 10,
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.95),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFFCBD5E1), width: 1.5),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.12),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          InkWell(
-                            onTap: () => _panBy(0, 0.0015),
-                            borderRadius: BorderRadius.circular(8),
-                            child: Container(
-                              width: 30,
-                              height: 26,
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF8FAFC),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: const Color(0xFFE2E8F0)),
-                              ),
-                              child: const Icon(Icons.keyboard_arrow_up, size: 18, color: Color(0xFF1E293B)),
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              InkWell(
-                                onTap: () => _panBy(-0.0018, 0),
-                                borderRadius: BorderRadius.circular(8),
-                                child: Container(
-                                  width: 30,
-                                  height: 26,
-                                  alignment: Alignment.center,
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFF8FAFC),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                                  ),
-                                  child: const Icon(Icons.keyboard_arrow_left, size: 18, color: Color(0xFF1E293B)),
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              InkWell(
-                                onTap: () => _panBy(0.0018, 0),
-                                borderRadius: BorderRadius.circular(8),
-                                child: Container(
-                                  width: 30,
-                                  height: 26,
-                                  alignment: Alignment.center,
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFF8FAFC),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                                  ),
-                                  child: const Icon(Icons.keyboard_arrow_right, size: 18, color: Color(0xFF1E293B)),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 3),
-                          InkWell(
-                            onTap: () => _panBy(0, -0.0015),
-                            borderRadius: BorderRadius.circular(8),
-                            child: Container(
-                              width: 30,
-                              height: 26,
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF8FAFC),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: const Color(0xFFE2E8F0)),
-                              ),
-                              child: const Icon(Icons.keyboard_arrow_down, size: 18, color: Color(0xFF1E293B)),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                    ],
                   ),
 
                   // Floating Map Navigation Controls (Top Right)
@@ -641,7 +507,7 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
                           tooltip: lang.lang == 'hi' ? 'बड़ा करें (+)' : 'Zoom In (+)',
                           onTap: () {
                             final cur = _mapController.camera.zoom;
-                            _mapController.move(_position ?? _invertisCenter, (cur + 1).clamp(3.0, 18.0));
+                            _mapController.move(_mapController.camera.center, (cur + 1).clamp(3.0, 18.0));
                           },
                         ),
                         const SizedBox(height: 6),
@@ -650,7 +516,7 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
                           tooltip: lang.lang == 'hi' ? 'छोटा करें (-)' : 'Zoom Out (-)',
                           onTap: () {
                             final cur = _mapController.camera.zoom;
-                            _mapController.move(_position ?? _invertisCenter, (cur - 1).clamp(3.0, 18.0));
+                            _mapController.move(_mapController.camera.center, (cur - 1).clamp(3.0, 18.0));
                           },
                         ),
                         const SizedBox(height: 6),
@@ -684,12 +550,12 @@ class _WakeAlarmModalState extends State<WakeAlarmModal> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(LucideIcons.compass, size: 13, color: Color(0xFF60A5FA)),
+                          const Icon(LucideIcons.mapPin, size: 13, color: Color(0xFF60A5FA)),
                           const SizedBox(width: 5),
                           Text(
-                            _isMoving
-                                ? (lang.lang == 'hi' ? 'पिन सेट किया जा रहा है...' : 'Positioning pin...')
-                                : (lang.lang == 'hi' ? 'पिन केंद्र में सेट है' : 'Pin fixed at center'),
+                            _position != null
+                                ? (lang.lang == 'hi' ? 'स्टॉप चुना गया' : 'Stop Selected')
+                                : (lang.lang == 'hi' ? 'मैप पर क्लिक करें' : 'Tap to mark'),
                             style: const TextStyle(
                               fontSize: 11,
                               color: Colors.white,

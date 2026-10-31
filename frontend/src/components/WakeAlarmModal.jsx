@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useModalA11y } from '../hooks/useModalA11y';
 import { useLang } from '../context/LanguageContext';
-import { MapContainer, TileLayer, Circle, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Circle, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import {
@@ -17,9 +17,6 @@ import {
   Minus,
   Crosshair,
   Check,
-  ChevronUp,
-  ChevronDown,
-  ChevronLeft,
 } from 'lucide-react';
 import axios from 'axios';
 import { BACKEND_URL } from '../config';
@@ -33,6 +30,31 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
+const stopMarkerIcon = L.divIcon({
+  className: 'custom-stop-marker',
+  html: `
+    <div style="
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: 2.5px solid white;
+      box-shadow: 0 4px 14px rgba(37,99,235,0.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: grab;
+    ">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0Z"/>
+        <circle cx="12" cy="10" r="3"/>
+      </svg>
+    </div>
+  `,
+  iconSize: [36, 36],
+  iconAnchor: [18, 18],
+});
+
 const INVERTIS_CENTER = [28.3180, 79.4670]; // Invertis University
 const VAPID_PUBLIC_KEY = 'BGhJZ_87jdyNrfmo6cZDJ7-ububtXfroy89VdBNNTn9o9837VbC3AVrUqJlzkd6PdI676sIQI-APdKayBup44EY';
 
@@ -43,8 +65,8 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
 }
 
-// Controller to track map movements, zoom, and invalidate size smoothly without 60fps React re-renders
-function MapController({ onPositionChange, setIsMoving, setMapInstance }) {
+// Controller to handle single-click location marking, dragging, and invalidate size smoothly
+function MapClickHandler({ onLocationSelect, setMapInstance }) {
   const map = useMap();
 
   useEffect(() => {
@@ -59,13 +81,8 @@ function MapController({ onPositionChange, setIsMoving, setMapInstance }) {
   }, [map, setMapInstance]);
 
   useMapEvents({
-    movestart() {
-      setIsMoving(true);
-    },
-    moveend() {
-      setIsMoving(false);
-      const center = map.getCenter();
-      onPositionChange([center.lat, center.lng]);
+    click(e) {
+      onLocationSelect([e.latlng.lat, e.latlng.lng]);
     },
   });
 
@@ -321,7 +338,7 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
                 {step === 'choose'
                   ? (lang === 'hi' ? 'बस नजदीक आने पर सूचना पाएं' : 'Get notified when bus is near')
                   : step === 'map'
-                  ? (lang === 'hi' ? 'मैप घुमाकर पिन को स्टॉप पर सेट करें' : 'Pan map to place pin on your stop')
+                  ? (lang === 'hi' ? 'मैप पर क्लिक करके स्टॉप मार्क करें' : 'Click on map to mark your stop')
                   : (lang === 'hi' ? 'अलार्म दायरा और पुष्टि' : 'Set trigger radius & confirm')}
               </p>
             </div>
@@ -564,12 +581,12 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
                 <Compass size={16} color="#2563eb" style={{ flexShrink: 0 }} />
                 <span>
                   {lang === 'hi'
-                    ? 'मैप को माउस से ड्रैग करें या कीबोर्ड/स्क्रीन एरो (↑ ↓ ← →) से सेट करें'
-                    : 'Drag map with mouse or use arrow keys/screen buttons (↑ ↓ ← →) to pan'}
+                    ? 'मैप पर कहीं भी सिंगल-क्लिक करके स्टॉप मार्क करें, या ड्रैग करके घूमें'
+                    : 'Click anywhere on map to mark your stop, or drag to pan'}
                 </span>
               </div>
 
-              {/* Map Canvas with Center Pin and Floating Controls */}
+              {/* Map Canvas with Clickable/Draggable Marker and Floating Zoom Controls */}
               <div
                 style={{
                   position: 'relative',
@@ -583,10 +600,10 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
                 <MapContainer
                   center={position || INVERTIS_CENTER}
                   zoom={15}
-                  style={{ height: '100%', width: '100%', cursor: isMoving ? 'grabbing' : 'grab' }}
+                  style={{ height: '100%', width: '100%' }}
                   zoomControl={false}
                   scrollWheelZoom={true}
-                  doubleClickZoom={true}
+                  doubleClickZoom={false}
                   touchZoom={true}
                   dragging={true}
                 >
@@ -594,160 +611,24 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                     attribution='&copy; <a href="https://osm.org/copyright">OSM</a>'
                   />
-                  <MapController
-                    onPositionChange={setPosition}
-                    setIsMoving={setIsMoving}
+                  <MapClickHandler
+                    onLocationSelect={(coords) => setPosition(coords)}
                     setMapInstance={setMapInstance}
                   />
+                  {position && (
+                    <Marker
+                      position={position}
+                      icon={stopMarkerIcon}
+                      draggable={true}
+                      eventHandlers={{
+                        dragend(e) {
+                          const latlng = e.target.getLatLng();
+                          setPosition([latlng.lat, latlng.lng]);
+                        },
+                      }}
+                    />
+                  )}
                 </MapContainer>
-
-                {/* Center Pin Target (Uber/Google Maps style) */}
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: '50%',
-                    left: '50%',
-                    transform: isMoving
-                      ? 'translate(-50%, -100%) translateY(-12px)'
-                      : 'translate(-50%, -100%) translateY(0)',
-                    transition: 'transform 0.16s cubic-bezier(0.17, 0.67, 0.24, 0.99)',
-                    pointerEvents: 'none',
-                    zIndex: 1000,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                  }}
-                >
-                  <div
-                    style={{
-                      background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
-                      borderRadius: '12px 12px 12px 0',
-                      transform: 'rotate(-45deg)',
-                      width: '38px',
-                      height: '38px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      boxShadow: '0 8px 20px rgba(37, 99, 235, 0.45)',
-                      border: '2.5px solid white',
-                    }}
-                  >
-                    <div style={{ transform: 'rotate(45deg)' }}>
-                      <MapPin size={18} color="white" fill="white" />
-                    </div>
-                  </div>
-                  {/* Ground Shadow / Dot */}
-                  <div
-                    style={{
-                      width: '12px',
-                      height: '5px',
-                      background: 'rgba(0,0,0,0.3)',
-                      borderRadius: '50%',
-                      marginTop: '2px',
-                      transform: isMoving ? 'scale(0.5)' : 'scale(1)',
-                      transition: 'transform 0.16s ease',
-                    }}
-                  />
-                </div>
-
-                {/* Directional Pan Pad for Easy Up/Down/Left/Right on PC (Top Left) */}
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: '12px',
-                    left: '12px',
-                    zIndex: 1000,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: '2px',
-                    background: 'rgba(255, 255, 255, 0.95)',
-                    backdropFilter: 'blur(6px)',
-                    padding: '4px',
-                    borderRadius: '14px',
-                    border: '1.5px solid #cbd5e1',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
-                  }}
-                >
-                  <button
-                    type="button"
-                    title={lang === 'hi' ? 'ऊपर ले जाएं (↑)' : 'Pan Up (↑)'}
-                    onClick={() => mapInstance?.panBy([0, -100])}
-                    style={{
-                      width: '32px',
-                      height: '28px',
-                      borderRadius: '8px',
-                      background: '#f8fafc',
-                      border: '1px solid #e2e8f0',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer',
-                      color: '#1e293b',
-                    }}
-                  >
-                    <ChevronUp size={16} strokeWidth={2.5} />
-                  </button>
-                  <div style={{ display: 'flex', gap: '4px' }}>
-                    <button
-                      type="button"
-                      title={lang === 'hi' ? 'बाएं ले जाएं (←)' : 'Pan Left (←)'}
-                      onClick={() => mapInstance?.panBy([-100, 0])}
-                      style={{
-                        width: '32px',
-                        height: '28px',
-                        borderRadius: '8px',
-                        background: '#f8fafc',
-                        border: '1px solid #e2e8f0',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        cursor: 'pointer',
-                        color: '#1e293b',
-                      }}
-                    >
-                      <ChevronLeft size={16} strokeWidth={2.5} />
-                    </button>
-                    <button
-                      type="button"
-                      title={lang === 'hi' ? 'दाएं ले जाएं (→)' : 'Pan Right (→)'}
-                      onClick={() => mapInstance?.panBy([100, 0])}
-                      style={{
-                        width: '32px',
-                        height: '28px',
-                        borderRadius: '8px',
-                        background: '#f8fafc',
-                        border: '1px solid #e2e8f0',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        cursor: 'pointer',
-                        color: '#1e293b',
-                      }}
-                    >
-                      <ChevronRight size={16} strokeWidth={2.5} />
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    title={lang === 'hi' ? 'नीचे ले जाएं (↓)' : 'Pan Down (↓)'}
-                    onClick={() => mapInstance?.panBy([0, 100])}
-                    style={{
-                      width: '32px',
-                      height: '28px',
-                      borderRadius: '8px',
-                      background: '#f8fafc',
-                      border: '1px solid #e2e8f0',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer',
-                      color: '#1e293b',
-                    }}
-                  >
-                    <ChevronDown size={16} strokeWidth={2.5} />
-                  </button>
-                </div>
 
                 {/* Floating Map Navigation Controls (Top Right) */}
                 <div
@@ -848,11 +729,11 @@ const WakeAlarmModal = ({ onClose, onAlarmSet, user }) => {
                     boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
                   }}
                 >
-                  <Compass size={13} color="#60a5fa" />
+                  <MapPin size={13} color="#60a5fa" />
                   <span>
-                    {isMoving
-                      ? (lang === 'hi' ? 'पिन सेट किया जा रहा है...' : 'Positioning pin...')
-                      : (lang === 'hi' ? 'पिन केंद्र में सेट है' : 'Pin fixed at center')}
+                    {position
+                      ? (lang === 'hi' ? 'स्टॉप चुना गया' : 'Stop Marked')
+                      : (lang === 'hi' ? 'मैप पर क्लिक करें' : 'Click map to mark')}
                   </span>
                 </div>
               </div>
