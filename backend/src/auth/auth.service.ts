@@ -58,13 +58,14 @@ export class AuthService {
     name: string;
     role: UserRole;
     route_id: string | null;
+    tokenVersion?: number;
   }): string {
     const payload = {
       login_id: user.login_id,
       role: user.role,
       name: user.name,
       route_id: user.route_id,
-      tokenVersion: 0, // Will be validated on each request via cache
+      tokenVersion: user.tokenVersion ?? 0,
     };
     return this.jwtService.sign(payload, { expiresIn: ACCESS_TOKEN_EXPIRY });
   }
@@ -110,6 +111,7 @@ export class AuthService {
           name: true,
           role: true,
           routeId: true,
+          tokenVersion: true,
         },
       });
 
@@ -134,6 +136,7 @@ export class AuthService {
         name: user.name,
         role: user.role,
         route_id: user.routeId,
+        tokenVersion: user.tokenVersion,
       });
 
       // Generate and store new refresh token
@@ -228,6 +231,7 @@ export class AuthService {
       name: user.name,
       role: user.role,
       route_id: user.routeId,
+      tokenVersion: user.tokenVersion,
     });
 
     const { token: refreshToken, expiresAt } =
@@ -260,6 +264,7 @@ export class AuthService {
     name: string;
     role: UserRole;
     route_id: string | null;
+    tokenVersion?: number;
   }): string {
     return this.generateAccessToken(user);
   }
