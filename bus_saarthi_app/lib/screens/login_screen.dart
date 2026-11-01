@@ -776,7 +776,7 @@ class _TwoRoleTabs extends StatelessWidget {
 
     final String passengerLabel = isPassenger && passengerKind == 'staff'
         ? (lang.lang == 'hi' ? 'स्टाफ़' : 'Staff')
-        : (lang.lang == 'hi' ? 'यात्री' : 'Passenger');
+        : (lang.lang == 'hi' ? 'विद्यार्थी' : 'Student');
 
     final IconData passengerIcon =
         isPassenger && passengerKind == 'staff' ? LucideIcons.briefcase : LucideIcons.graduationCap;

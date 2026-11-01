@@ -224,7 +224,7 @@ const Login = () => {
               label:
                 loginType === 'passenger' && passengerKind === 'staff'
                   ? (lang === 'hi' ? 'स्टाफ़' : 'Staff')
-                  : (lang === 'hi' ? 'यात्री' : 'Passenger'),
+                  : (lang === 'hi' ? 'विद्यार्थी' : 'Student'),
               icon:
                 loginType === 'passenger' && passengerKind === 'staff'
                   ? Briefcase

@@ -271,6 +271,10 @@ export class AuthService {
 
   private humanRole(role: UserRole): string {
     switch (role) {
+      case UserRole.passenger:
+        return 'Student';
+      case UserRole.teacher:
+        return 'Staff / Teacher';
       case UserRole.transport_incharge:
         return 'Transport Incharge';
       case UserRole.tech_admin:
