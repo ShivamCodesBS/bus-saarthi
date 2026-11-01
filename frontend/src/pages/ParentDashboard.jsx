@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   MapPin, Bus, User, LogOut, Calendar, CheckCircle2,
   XCircle, Clock, TrendingUp, Phone, Navigation,
-  Gauge, Compass, AlertOctagon, Menu, X, Activity, ChevronLeft, ChevronRight,
+  Gauge, Compass, AlertOctagon, Menu, X, Activity, ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   IndianRupee, Megaphone, Settings, Eye, ArrowLeft, GitMerge,
   MessageSquareWarning, RotateCcw, Check, Wrench, Timer, ShieldAlert,
   AlertTriangle
@@ -169,6 +169,7 @@ const ParentDashboard = () => {
 
   const [activeTab, setActiveTab] = useState('overview');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isMapExpanded, setIsMapExpanded] = useState(true);
 
   // Data states
   const [parentData, setParentData] = useState(null);
@@ -486,26 +487,48 @@ const ParentDashboard = () => {
             <p style={{ margin: 0, fontSize: '0.68rem', opacity: 0.9 }}>Invertis Bus Saarthi · Guardian View</p>
           </div>
         </div>
-        <button
-          onClick={() => { logout(); navigate('/login'); }}
-          style={{
-            background: 'rgba(255,255,255,0.18)',
-            border: 'none',
-            borderRadius: '10px',
-            padding: '6px 12px',
-            cursor: 'pointer',
-            color: 'white',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            fontSize: '0.8rem',
-            fontWeight: 600,
-            transition: 'background 0.2s',
-          }}
-          title="Sign Out"
-        >
-          <LogOut size={16} /> Logout
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button
+            onClick={() => navigate('/settings')}
+            style={{
+              background: 'rgba(255,255,255,0.18)',
+              border: 'none',
+              borderRadius: '10px',
+              padding: '6px 12px',
+              cursor: 'pointer',
+              color: 'white',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              transition: 'all 0.2s',
+            }}
+            title="Settings"
+          >
+            <Settings size={15} /> <span>Settings</span>
+          </button>
+          <button
+            onClick={() => { logout(); navigate('/login'); }}
+            style={{
+              background: 'rgba(255,255,255,0.18)',
+              border: 'none',
+              borderRadius: '10px',
+              padding: '6px 12px',
+              cursor: 'pointer',
+              color: 'white',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              transition: 'all 0.2s',
+            }}
+            title="Sign Out"
+          >
+            <LogOut size={15} /> <span>Logout</span>
+          </button>
+        </div>
       </header>
 
       {/* ========= CHILD INFO BANNER ========= */}
@@ -576,10 +599,17 @@ const ParentDashboard = () => {
           { id: 'complaints', icon: <MessageSquareWarning size={16} />, label: 'Complaints' },
           { id: 'announcements', icon: <Megaphone size={16} />, label: 'Notices' },
           { id: 'analytics', icon: <Activity size={16} />, label: 'Analytics' },
+          { id: 'settings', icon: <Settings size={16} />, label: 'Settings', isNav: true },
         ].map(tab => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => {
+              if (tab.isNav) {
+                navigate('/settings');
+              } else {
+                setActiveTab(tab.id);
+              }
+            }}
             style={{
               flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: '6px',
               padding: '0.85rem 1.25rem', border: 'none', cursor: 'pointer',
@@ -665,6 +695,253 @@ const ParentDashboard = () => {
               </div>
             )}
 
+            {/* Route & Driver Info - UP FRONT for quick access */}
+            {(routeInfo || child?.routeId) && (
+              <div style={{
+                background: 'var(--card-bg)', borderRadius: '20px',
+                border: '1px solid var(--border-color)', padding: '1.25rem',
+                boxShadow: '0 4px 16px rgba(0,0,0,0.06)',
+                display: 'flex', flexDirection: 'column', gap: '0.9rem',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ background: PURPLE_LIGHT, borderRadius: '10px', padding: '6px', color: PURPLE, display: 'flex' }}>
+                      <Bus size={18} />
+                    </div>
+                    <div>
+                      <h3 style={{ margin: 0, fontWeight: 800, color: 'var(--text-dark)', fontSize: '1rem' }}>
+                        {childMergeInfo ? `Bus ${childMergeInfo.targetBusNumber}` : (routeInfo?.busNumber ? `Bus ${routeInfo.busNumber}` : `Route ${child?.routeId}`)}
+                      </h3>
+                      <p style={{ margin: 0, fontSize: '0.76rem', color: 'var(--text-light)', fontWeight: 500 }}>
+                        {childMergeInfo?.targetRouteName || routeInfo?.routeName || 'Assigned Transit Route'}
+                      </p>
+                    </div>
+                  </div>
+                  <span style={{
+                    background: telemetry && !telemetryStale ? '#e6fae6' : '#f3f4f6',
+                    color: telemetry && !telemetryStale ? '#16a34a' : '#6b7280',
+                    fontWeight: 700, fontSize: '0.72rem', padding: '4px 10px', borderRadius: '12px',
+                    display: 'inline-flex', alignItems: 'center', gap: '5px'
+                  }}>
+                    <span style={{
+                      width: '7px', height: '7px', borderRadius: '50%',
+                      background: telemetry && !telemetryStale ? '#16a34a' : '#9ca3af',
+                    }} />
+                    {telemetry && !telemetryStale ? 'Active on Route' : 'Standby / Offline'}
+                  </span>
+                </div>
+
+                {/* Driver Contact Section */}
+                <div style={{
+                  background: 'var(--bg-color)',
+                  borderRadius: '14px',
+                  padding: '0.85rem 1rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '0.75rem',
+                  flexWrap: 'wrap',
+                  border: '1px solid var(--border-color)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{
+                      width: '40px', height: '40px', borderRadius: '50%',
+                      background: `linear-gradient(135deg, ${PURPLE_LIGHT}, ${PURPLE}33)`,
+                      color: PURPLE, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontWeight: 700, fontSize: '0.9rem', flexShrink: 0,
+                      border: `1.5px solid ${PURPLE}40`,
+                    }}>
+                      <User size={20} />
+                    </div>
+                    <div>
+                      <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--text-light)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                        Assigned Driver
+                      </p>
+                      <p style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: 'var(--text-dark)' }}>
+                        {routeInfo?.driver?.name || 'Assigned Driver'}
+                      </p>
+                      <p style={{ margin: 0, fontSize: '0.76rem', color: 'var(--text-light)' }}>
+                        {routeInfo?.driver?.phone || 'Contact via Transport Office'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {routeInfo?.driver?.phone ? (
+                    <a
+                      href={`tel:${routeInfo.driver.phone}`}
+                      style={{
+                        background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                        color: 'white',
+                        textDecoration: 'none',
+                        padding: '8px 16px',
+                        borderRadius: '12px',
+                        fontWeight: 700,
+                        fontSize: '0.82rem',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        boxShadow: '0 3px 10px rgba(22,163,74,0.3)',
+                        transition: 'transform 0.15s, box-shadow 0.15s',
+                        flexShrink: 0,
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-1px)'}
+                      onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}
+                    >
+                      <Phone size={14} /> Call Driver
+                    </a>
+                  ) : (
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-light)', fontStyle: 'italic' }}>
+                      Driver phone not registered
+                    </span>
+                  )}
+                </div>
+
+                {/* Stops */}
+                {routeInfo?.stops && (() => {
+                  let stops = [];
+                  try { stops = typeof routeInfo.stops === 'string' ? JSON.parse(routeInfo.stops) : routeInfo.stops; } catch {}
+                  return stops.length > 0 ? (
+                    <div style={{ marginTop: '0.2rem' }}>
+                      <p style={{ margin: '0 0 0.4rem 0', color: 'var(--text-light)', fontSize: '0.76rem', fontWeight: 600, textTransform: 'uppercase' }}>
+                        Route Stops ({stops.length})
+                      </p>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '85px', overflowY: 'auto' }}>
+                        {stops.map((s, i) => (
+                          <span key={i} style={{ background: PURPLE_LIGHT, color: PURPLE, fontSize: '0.74rem', padding: '3px 9px', borderRadius: '10px', fontWeight: 600 }}>
+                            {i + 1}. {typeof s === 'object' ? s.name || JSON.stringify(s) : s}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null;
+                })()}
+              </div>
+            )}
+
+            {/* Live Bus Map (Collapsible) */}
+            <div style={{
+              background: 'var(--card-bg)', borderRadius: '20px',
+              border: '1px solid var(--border-color)', overflow: 'hidden',
+              boxShadow: '0 2px 12px rgba(0,0,0,0.07)',
+            }}>
+              <div style={{
+                padding: '0.9rem 1.25rem',
+                borderBottom: isMapExpanded ? '1px solid var(--border-color)' : 'none',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <MapPin size={18} color={PURPLE} />
+                  <span style={{ fontWeight: 700, color: 'var(--text-dark)', fontSize: '0.95rem' }}>Live Bus Location</span>
+                  <span style={{
+                    fontSize: '0.68rem',
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: '10px',
+                    background: telemetry && !telemetryStale ? '#e6fae6' : '#f3f4f6',
+                    color: telemetry && !telemetryStale ? '#16a34a' : '#6b7280',
+                  }}>
+                    {telemetry && !telemetryStale ? '● LIVE' : '○ OFFLINE'}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setIsMapExpanded(prev => !prev)}
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    padding: '4px 10px',
+                    fontSize: '0.78rem',
+                    fontWeight: 600,
+                    color: PURPLE,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    transition: 'all 0.2s',
+                  }}
+                  title={isMapExpanded ? 'Collapse Map' : 'Expand Map'}
+                >
+                  {isMapExpanded ? (
+                    <>Hide Map <ChevronUp size={14} /></>
+                  ) : (
+                    <>Show Map <ChevronDown size={14} /></>
+                  )}
+                </button>
+              </div>
+
+              {!isMapExpanded ? (
+                <div style={{
+                  padding: '1rem 1.25rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  flexWrap: 'wrap',
+                  background: 'var(--bg-color)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{
+                      width: 36, height: 36, borderRadius: '10px',
+                      background: PURPLE_LIGHT, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: PURPLE, flexShrink: 0
+                    }}>
+                      <Navigation size={18} />
+                    </div>
+                    <div>
+                      <p style={{ margin: 0, fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-dark)' }}>
+                        {telemetry && !telemetryStale
+                          ? `Moving at ${Math.round(telemetry.speed)} km/h · Heading ${getHeadingLabel(telemetry.heading)}`
+                          : lastKnown
+                            ? `Last seen location recorded`
+                            : 'GPS standby · Waiting for live bus fix'}
+                      </p>
+                      <p style={{ margin: '2px 0 0', fontSize: '0.74rem', color: 'var(--text-light)' }}>
+                        {busLocation ? `Coordinates: ${busLocation[0].toFixed(4)}, ${busLocation[1].toFixed(4)}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setIsMapExpanded(true)}
+                    style={{
+                      background: PURPLE,
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '10px',
+                      padding: '6px 14px',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      boxShadow: `0 2px 8px ${PURPLE}40`,
+                    }}
+                  >
+                    Open Live Map <ChevronDown size={14} />
+                  </button>
+                </div>
+              ) : (
+                <div style={{ position: 'relative' }}>
+                  <UnifiedMap
+                    busLocation={busLocation}
+                    routeInfo={routeInfo}
+                    telemetry={telemetry}
+                    isLive={!!telemetry && !telemetryStale}
+                    lastKnown={lastKnown}
+                    initialZoom={14}
+                    height="320px"
+                    busLabel={`Bus ${routeInfo?.busNumber || routeInfo?.bus_number || child?.routeId || ''}`}
+                    showFullscreenButton={true}
+                    showAutoFollowToggle={true}
+                    showRecenterButton={true}
+                    showTelemetryPanel={true}
+                    showRoutePolyline={true}
+                    showDestinationMarker={true}
+                  />
+                </div>
+              )}
+            </div>
+
             {/* Quick Stats */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem' }}>
               <StatCard
@@ -693,82 +970,6 @@ const ParentDashboard = () => {
                 color="#06b6d4"
               />
             </div>
-
-            {/* Live Bus Map */}
-            <div style={{
-              background: 'var(--card-bg)', borderRadius: '20px',
-              border: '1px solid var(--border-color)', overflow: 'hidden',
-              boxShadow: '0 2px 12px rgba(0,0,0,0.07)',
-            }}>
-              <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <MapPin size={18} color={PURPLE} />
-                <span style={{ fontWeight: 700, color: 'var(--text-dark)', fontSize: '0.95rem' }}>Live Bus Location</span>
-              </div>
-              <div style={{ position: 'relative' }}>
-                <UnifiedMap
-                  busLocation={busLocation}
-                  routeInfo={routeInfo}
-                  telemetry={telemetry}
-                  isLive={!!telemetry && !telemetryStale}
-                  lastKnown={lastKnown}
-                  initialZoom={14}
-                  height="320px"
-                  busLabel={`Bus ${routeInfo?.busNumber || routeInfo?.bus_number || child?.routeId || ''}`}
-                  showFullscreenButton={true}
-                  showAutoFollowToggle={true}
-                  showRecenterButton={true}
-                  showTelemetryPanel={true}
-                  showRoutePolyline={true}
-                  showDestinationMarker={true}
-                />
-              </div>
-            </div>
-
-            {/* Route & Driver Info */}
-            {routeInfo && (
-              <div style={{
-                background: 'var(--card-bg)', borderRadius: '20px',
-                border: '1px solid var(--border-color)', padding: '1.25rem',
-                boxShadow: '0 2px 12px rgba(0,0,0,0.07)',
-              }}>
-                <h3 style={{ margin: '0 0 1rem 0', fontWeight: 700, color: 'var(--text-dark)', fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Bus size={18} color={PURPLE} /> Route & Driver Info
-                </h3>
-                <div style={{ display: 'grid', gap: '0.6rem' }}>
-                  {[
-                    { label: 'Route', value: routeInfo.routeName },
-                    { label: 'Bus Number', value: routeInfo.busNumber },
-                    { label: 'Driver', value: routeInfo.driver?.name || '—' },
-                    { label: 'Driver Phone', value: routeInfo.driver?.phone
-                      ? <a href={`tel:${routeInfo.driver.phone}`} style={{ color: PURPLE, fontWeight: 700, textDecoration: 'none' }}>📞 {routeInfo.driver.phone}</a>
-                      : '—'
-                    },
-                  ].map(row => (
-                    <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.88rem' }}>
-                      <span style={{ color: 'var(--text-light)', fontWeight: 500 }}>{row.label}</span>
-                      <span style={{ color: 'var(--text-dark)', fontWeight: 600 }}>{row.value || '—'}</span>
-                    </div>
-                  ))}
-                  {/* Stops */}
-                  {routeInfo.stops && (() => {
-                    let stops = [];
-                    try { stops = typeof routeInfo.stops === 'string' ? JSON.parse(routeInfo.stops) : routeInfo.stops; } catch {}
-                    return stops.length > 0 ? (
-                      <div style={{ marginTop: '0.5rem' }}>
-                        <p style={{ margin: '0 0 0.4rem 0', color: 'var(--text-light)', fontSize: '0.82rem', fontWeight: 500 }}>Stops</p>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                          {stops.map((s, i) => (
-                            <span key={i} style={{ background: PURPLE_LIGHT, color: PURPLE, fontSize: '0.75rem', padding: '3px 10px', borderRadius: '12px', fontWeight: 600 }}>
-                              {typeof s === 'object' ? s.name || JSON.stringify(s) : s}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null;
-                  })()}
-                </div>
-              </div>
-            )}
           </div>
         )}
 
