@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
-import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
+import { ThrottlerGuard, Throttle, SkipThrottle } from '@nestjs/throttler';
 import type { Response, Request } from 'express';
 import * as jwt from 'jsonwebtoken';
 
@@ -187,6 +187,7 @@ export class AuthController {
   // Endpoint for frontend to get token for push notifications
   // HttpOnly cookie can't be read by JS, so this returns it for VAPID subscription
   @Get('auth/token')
+  @SkipThrottle()
   @HttpCode(HttpStatus.OK)
   async getToken(@Req() req: Request) {
     const token = req.cookies?.access_token;

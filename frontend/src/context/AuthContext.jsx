@@ -22,24 +22,26 @@ const urlBase64ToUint8Array = (base64String) => {
   return outputArray;
 };
 
-// Get token from the HttpOnly cookie where the browser sends it, falling
-// back to the token stored with the session — cross-site deployments
-// (Vercel app -> Render API) may block the cookie entirely, so the stored
-// token is what actually keeps those sessions alive.
+// Get token from the stored session first for instant resolution, falling
+// back to the HttpOnly cookie endpoint where needed.
 const getAuthToken = async ({ allowStored = true } = {}) => {
+  if (allowStored) {
+    try {
+      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+      if (stored?.token) return stored.token;
+    } catch {
+      // ignore
+    }
+  }
+
   try {
     const res = await axios.get(`${BACKEND_URL}/api/auth/token`, { withCredentials: true });
     if (res.data?.token) return res.data.token;
   } catch {
-    /* cookie not sent — fall through to the stored session */
+    /* cookie not sent */
   }
-  if (!allowStored) return null;
-  try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
-    return stored?.token || null;
-  } catch {
-    return null;
-  }
+
+  return null;
 };
 
 const subscribeToPushNotifications = async () => {
