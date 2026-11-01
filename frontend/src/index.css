@@ -675,3 +675,10 @@ body.dark-mode input:-webkit-autofill:active {
   -webkit-text-fill-color: var(--text-dark) !important;
   caret-color: var(--text-dark);
 }
+
+/* Parent Dashboard Mobile-Only Navigation Safeguard */
+@media (min-width: 768px) {
+  .parent-mobile-nav {
+    display: none !important;
+  }
+}

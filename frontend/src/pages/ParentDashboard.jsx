@@ -1,3 +1,6 @@
+import UserAvatar from '../components/UserAvatar';
+import HamburgerMenu from '../components/HamburgerMenu';
+import MediaViewer from '../components/MediaViewer';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   MapPin, Bus, User, LogOut, Calendar, CheckCircle2,
@@ -23,13 +26,43 @@ import { useStaleWhileRevalidate } from '../hooks/useStaleWhileRevalidate';
 import { StatCardSkeleton, ComplaintSkeleton } from '../components/ui/skeleton';
 import UnifiedMap from '../components/UnifiedMap';
 
+// --- Broadcast priority detection helper ---
+const getBroadcastMeta = (b) => {
+  const text = `${b.title || ''} ${b.message || ''}`.toLowerCase();
+  if (text.includes('urgent') || text.includes('emergency') || text.includes('alert') || text.includes('cancel')) {
+    return {
+      tag: '🚨 Urgent Alert',
+      bg: 'rgba(239, 68, 68, 0.12)',
+      border: '#ef4444',
+      badgeBg: 'rgba(239, 68, 68, 0.15)',
+      badgeColor: '#dc2626',
+    };
+  }
+  if (text.includes('route') || text.includes('bus') || text.includes('delay') || text.includes('traffic') || text.includes('diver')) {
+    return {
+      tag: '🚌 Route Update',
+      bg: 'rgba(249, 115, 22, 0.12)',
+      border: '#f97316',
+      badgeBg: 'rgba(249, 115, 22, 0.15)',
+      badgeColor: '#ea580c',
+    };
+  }
+  return {
+    tag: '📢 Notice',
+    bg: `${PURPLE}12`,
+    border: PURPLE,
+    badgeBg: PURPLE_LIGHT,
+    badgeColor: PURPLE,
+  };
+};
+
 // --- Grievance lifecycle states ---
 const GRIEVANCE_STATUS = {
-  pending:      { label: 'Pending',                   bg: '#fff1f0', color: '#cf1322', Icon: AlertTriangle },
-  in_progress:  { label: 'In Progress',               bg: '#fff7e6', color: '#d46b08', Icon: Wrench },
-  resolved:     { label: 'Awaiting Confirmation',     bg: '#e6f4ff', color: '#0958d9', Icon: Timer },
-  reopened:     { label: 'Not Resolved (Reopened)',   bg: '#fff1f0', color: '#cf1322', Icon: RotateCcw },
-  closed:       { label: 'Closed - Confirmed',        bg: '#e6fae6', color: '#28a745', Icon: CheckCircle2 },
+  pending:      { label: 'Pending',                   bg: 'rgba(239, 68, 68, 0.12)',  color: '#dc2626', Icon: AlertTriangle },
+  in_progress:  { label: 'In Progress',               bg: 'rgba(249, 115, 22, 0.12)', color: '#ea580c', Icon: Wrench },
+  resolved:     { label: 'Awaiting Confirmation',     bg: 'rgba(37, 99, 235, 0.12)',  color: '#2563eb', Icon: Timer },
+  reopened:     { label: 'Not Resolved (Reopened)',   bg: 'rgba(239, 68, 68, 0.15)',  color: '#dc2626', Icon: RotateCcw },
+  closed:       { label: 'Closed - Confirmed',        bg: 'rgba(34, 197, 94, 0.12)',  color: '#16a34a', Icon: CheckCircle2 },
 };
 
 // --- Color constants ---
@@ -38,22 +71,24 @@ const PURPLE_LIGHT = '#f3e8ff';
 const PURPLE_DARK = '#6d28d9';
 
 // --- Stat Card ---
-const StatCard = ({ icon, label, value, color, sub }) => (
+const StatCard = ({ icon, label, value, color, sub, isMobile }) => (
   <div style={{
-    background: 'var(--card-bg)', borderRadius: '16px', padding: '1.1rem 1.25rem',
+    background: 'var(--card-bg)', borderRadius: '16px',
+    padding: isMobile ? '0.85rem 0.9rem' : '1.1rem 1.25rem',
     boxShadow: '0 2px 12px rgba(0,0,0,0.07)', border: '1px solid var(--border-color)',
-    display: 'flex', alignItems: 'center', gap: '1rem', transition: 'transform 0.2s',
+    display: 'flex', alignItems: 'center', gap: isMobile ? '0.65rem' : '1rem',
+    transition: 'transform 0.2s', minWidth: 0,
   }}
     onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-2px)'}
     onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}
   >
-    <div style={{ background: color + '1a', borderRadius: '12px', padding: '0.65rem', flexShrink: 0 }}>
+    <div style={{ background: color + '1a', borderRadius: '12px', padding: isMobile ? '0.5rem' : '0.65rem', flexShrink: 0 }}>
       {icon}
     </div>
-    <div>
-      <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-light)', fontWeight: 500 }}>{label}</p>
-      <p style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-dark)' }}>{value}</p>
-      {sub && <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--text-light)' }}>{sub}</p>}
+    <div style={{ minWidth: 0, overflow: 'hidden' }}>
+      <p style={{ margin: 0, fontSize: isMobile ? '0.72rem' : '0.78rem', color: 'var(--text-light)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</p>
+      <p style={{ margin: 0, fontSize: isMobile ? '1.1rem' : '1.25rem', fontWeight: 700, color: 'var(--text-dark)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</p>
+      {sub && <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--text-light)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</p>}
     </div>
   </div>
 );
@@ -61,15 +96,16 @@ const StatCard = ({ icon, label, value, color, sub }) => (
 // --- Fee Badge ---
 const FeeBadge = ({ status }) => {
   const cfg = {
-    paid: { bg: '#e6fae6', color: '#28a745', label: '✅ Fee Paid' },
-    unpaid: { bg: '#fff1f0', color: '#cf1322', label: '❌ Fee Unpaid' },
-    partial: { bg: '#fffbe6', color: '#d46b08', label: '⚠️ Partial Fee' },
+    paid:    { bg: 'rgba(34, 197, 94, 0.14)',  color: '#16a34a', label: '✅ Fee Paid' },
+    unpaid:  { bg: 'rgba(239, 68, 68, 0.14)',  color: '#dc2626', label: '❌ Fee Unpaid' },
+    partial: { bg: 'rgba(249, 115, 22, 0.14)', color: '#ea580c', label: '⚠️ Partial Fee' },
   };
   const c = cfg[status] || cfg.unpaid;
   return (
     <span style={{
       background: c.bg, color: c.color, fontWeight: 700,
       fontSize: '0.82rem', padding: '4px 12px', borderRadius: '20px',
+      border: `1px solid ${c.color}33`,
     }}>
       {c.label}
     </span>
@@ -104,13 +140,13 @@ const AttendanceCalendar = ({ records }) => {
     <div>
       {/* Month nav */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-        <button onClick={prevMonth} style={{ background: PURPLE_LIGHT, border: 'none', borderRadius: '8px', padding: '4px 8px', cursor: 'pointer', color: PURPLE }}>
+        <button onClick={prevMonth} style={{ background: 'rgba(124, 58, 237, 0.12)', border: 'none', borderRadius: '8px', padding: '6px 10px', cursor: 'pointer', color: PURPLE }}>
           <ChevronLeft size={16} />
         </button>
         <span style={{ fontWeight: 700, color: 'var(--text-dark)', fontSize: '0.9rem' }}>
           {calMonth.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
         </span>
-        <button onClick={nextMonth} style={{ background: PURPLE_LIGHT, border: 'none', borderRadius: '8px', padding: '4px 8px', cursor: 'pointer', color: PURPLE }}>
+        <button onClick={nextMonth} style={{ background: 'rgba(124, 58, 237, 0.12)', border: 'none', borderRadius: '8px', padding: '6px 10px', cursor: 'pointer', color: PURPLE }}>
           <ChevronRight size={16} />
         </button>
       </div>
@@ -129,13 +165,40 @@ const AttendanceCalendar = ({ records }) => {
           const present = isPresent(d);
           const future = isFuture(d);
           const todayCell = isToday(d);
+          const isSunday = new Date(year, month, d).getDay() === 0;
+
+          let cellBg = 'transparent';
+          let cellColor = 'var(--text-light)';
+          let cellBorder = '1px solid var(--border-color)';
+
+          if (todayCell) {
+            cellBg = PURPLE;
+            cellColor = 'white';
+            cellBorder = `2px solid ${PURPLE_DARK}`;
+          } else if (present) {
+            cellBg = 'rgba(34, 197, 94, 0.15)';
+            cellColor = '#16a34a';
+            cellBorder = '1px solid rgba(34, 197, 94, 0.35)';
+          } else if (future) {
+            cellBg = 'transparent';
+            cellColor = 'var(--text-light)';
+          } else if (isSunday) {
+            cellBg = 'rgba(156, 163, 175, 0.12)';
+            cellColor = 'var(--text-light)';
+            cellBorder = '1px dashed var(--border-color)';
+          } else {
+            cellBg = 'rgba(239, 68, 68, 0.12)';
+            cellColor = '#ef4444';
+            cellBorder = '1px solid rgba(239, 68, 68, 0.25)';
+          }
+
           return (
             <div key={d} style={{
               textAlign: 'center', fontSize: '0.78rem', fontWeight: 600,
               padding: '5px 2px', borderRadius: '8px',
-              background: todayCell ? PURPLE : present ? '#e6fae6' : future ? 'transparent' : '#fff1f0',
-              color: todayCell ? 'white' : present ? '#28a745' : future ? 'var(--text-light)' : '#cf1322',
-              border: todayCell ? `2px solid ${PURPLE_DARK}` : '1px solid var(--border-color)',
+              background: cellBg,
+              color: cellColor,
+              border: cellBorder,
             }}>
               {d}
             </div>
@@ -144,10 +207,11 @@ const AttendanceCalendar = ({ records }) => {
       </div>
 
       {/* Legend */}
-      <div style={{ display: 'flex', gap: '1rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: '0.85rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
         {[
-          { bg: '#e6fae6', color: '#28a745', label: 'Present' },
-          { bg: '#fff1f0', color: '#cf1322', label: 'Absent' },
+          { bg: 'rgba(34, 197, 94, 0.15)', color: '#16a34a', label: 'Present' },
+          { bg: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', label: 'Absent' },
+          { bg: 'rgba(156, 163, 175, 0.15)', color: 'var(--text-light)', label: 'Weekend / Off' },
           { bg: PURPLE, color: 'white', label: 'Today' },
         ].map(l => (
           <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.72rem' }}>
@@ -169,18 +233,64 @@ const ParentDashboard = () => {
 
   const [activeTab, setActiveTab] = useState('overview');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const profileMenuRef = useRef(null);
+
+  // Close profile menu on click outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target)) {
+        setShowProfileMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
   const [isMapExpanded, setIsMapExpanded] = useState(true);
 
-  // Data states
-  const [parentData, setParentData] = useState(null);
-  const [child, setChild] = useState(null);
-  const [attendanceData, setAttendanceData] = useState(null);
-  const [routeInfo, setRouteInfo] = useState(null);
-  const [broadcasts, setBroadcasts] = useState([]);
+  // Responsive breakpoint: true if screen width < 768px (phone view)
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth < 768 : false
+  );
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Data states with instant LocalStorage caching
+  const [parentData, setParentData] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('parent_dashboard_parent') || 'null'); } catch { return null; }
+  });
+  const [child, setChild] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('parent_dashboard_child') || 'null'); } catch { return null; }
+  });
+  const [children, setChildren] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('parent_dashboard_children') || '[]'); } catch { return []; }
+  });
+  const [selectedChildIndex, setSelectedChildIndex] = useState(0);
+  const [leaveDate, setLeaveDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [leaveReason, setLeaveReason] = useState('Sick / Medical Leave');
+  const [isSubmittingLeave, setIsSubmittingLeave] = useState(false);
+  const [previewMedia, setPreviewMedia] = useState(null);
+  const [attendanceData, setAttendanceData] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('parent_dashboard_attendance') || 'null'); } catch { return null; }
+  });
+  const [routeInfo, setRouteInfo] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('parent_dashboard_route') || 'null'); } catch { return null; }
+  });
+  const [broadcasts, setBroadcasts] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('parent_dashboard_broadcasts') || '[]'); } catch { return []; }
+  });
   const [speedData, setSpeedData] = useState(null);
   const [analyticsDate, setAnalyticsDate] = useState(new Date().toISOString().split('T')[0]);
   const [childMergeInfo, setChildMergeInfo] = useState(null);
-  const [childGrievances, setChildGrievances] = useState([]);
+  const [childGrievances, setChildGrievances] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('parent_dashboard_grievances') || '[]'); } catch { return []; }
+  });
   const [grievanceBusy, setGrievanceBusy] = useState(new Set());
   const [rejectingId, setRejectingId] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -214,9 +324,21 @@ const ParentDashboard = () => {
   const [autoFollow, setAutoFollow] = useState(true);
   
 
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(() => {
+    try {
+      return !localStorage.getItem('parent_dashboard_parent');
+    } catch {
+      return true;
+    }
+  });
   const pollingRef = useRef(null);
   const staleTimerRef = useRef(null);
+
+  // Fallback safety timeout so dashboard never hangs indefinitely on slow network
+  useEffect(() => {
+    const t = setTimeout(() => setIsLoading(false), 3500);
+    return () => clearTimeout(t);
+  }, []);
 
   // A shared headers object is a new reference on every render, which makes
   // the useCallback dependency lists permanently stale. A ref keeps one
@@ -225,58 +347,91 @@ const ParentDashboard = () => {
   authHeadersRef.current = { headers: { Authorization: `Bearer ${user?.token}` } };
   const authHeaders = authHeadersRef.current;
 
-  // ---- Data fetching ----
+  // ---- Child details loader (Runs in parallel with Promise.allSettled) ----
+  const loadChildData = useCallback(async (c) => {
+    if (!c) return;
+    setChild(c);
+    try {
+      localStorage.setItem('parent_dashboard_child', JSON.stringify(c));
+    } catch {}
+
+    try {
+      const [attResult, mergeResult, routeResult] = await Promise.allSettled([
+        axios.get(`${BACKEND_URL}/api/parents/child/${c.loginId}/attendance`, authHeaders),
+        c.routeId ? axios.get(`${BACKEND_URL}/api/merge/check/${c.routeId}`, authHeaders) : Promise.resolve(null),
+        c.routeId ? axios.get(`${BACKEND_URL}/api/routes/${c.routeId}`, authHeaders) : Promise.resolve(null),
+      ]);
+
+      if (attResult.status === 'fulfilled' && attResult.value?.data) {
+        setAttendanceData(attResult.value.data);
+        try { localStorage.setItem('parent_dashboard_attendance', JSON.stringify(attResult.value.data)); } catch {}
+      }
+
+      let activeRouteId = c.routeId;
+      if (mergeResult.status === 'fulfilled' && mergeResult.value?.data?.status === 'success' && mergeResult.value.data.data?.isCancelled && mergeResult.value.data.data?.merge) {
+        const m = mergeResult.value.data.data.merge;
+        activeRouteId = m.targetRouteId;
+        setChildMergeInfo({
+          originalRouteId: c.routeId,
+          activeRouteId: m.targetRouteId,
+          targetBusNumber: m.targetBusNumber,
+          targetRouteName: m.targetRouteName,
+        });
+        try {
+          const mergedRouteRes = await axios.get(`${BACKEND_URL}/api/routes/${m.targetRouteId}`, authHeaders);
+          setRouteInfo(mergedRouteRes.data);
+          try { localStorage.setItem('parent_dashboard_route', JSON.stringify(mergedRouteRes.data)); } catch {}
+        } catch {}
+      } else {
+        setChildMergeInfo(null);
+        if (routeResult.status === 'fulfilled' && routeResult.value?.data) {
+          setRouteInfo(routeResult.value.data);
+          try { localStorage.setItem('parent_dashboard_route', JSON.stringify(routeResult.value.data)); } catch {}
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load child data', err);
+    }
+  }, [user?.token]);
+
+  // ---- Data fetching (Non-blocking: unblocks UI immediately when parent data arrives) ----
   const fetchAll = useCallback(async () => {
     try {
       const res = await axios.get(`${BACKEND_URL}/api/parents/me`, authHeaders);
-      setParentData(res.data.parent);
-      const c = res.data.children?.[0];
-      if (c) {
-        setChild(c);
+      const parent = res.data.parent;
+      const kids = res.data.children || [];
+      setParentData(parent);
+      setChildren(kids);
+      try {
+        localStorage.setItem('parent_dashboard_parent', JSON.stringify(parent));
+        localStorage.setItem('parent_dashboard_children', JSON.stringify(kids));
+      } catch {}
 
-        // Fetch attendance
-        const attRes = await axios.get(`${BACKEND_URL}/api/parents/child/${c.loginId}/attendance`, authHeaders);
-        setAttendanceData(attRes.data);
-
-        // Fetch route info & check for active merge
-        if (c.routeId) {
-          // Check if child's route is merged today
-          let activeRouteId = c.routeId;
-          try {
-            const mRes = await axios.get(`${BACKEND_URL}/api/merge/check/${c.routeId}`, authHeaders);
-            if (mRes.data?.status === 'success' && mRes.data.data?.isCancelled && mRes.data.data?.merge) {
-              const m = mRes.data.data.merge;
-              activeRouteId = m.targetRouteId;
-              setChildMergeInfo({
-                originalRouteId: c.routeId,
-                activeRouteId: m.targetRouteId,
-                targetBusNumber: m.targetBusNumber,
-                targetRouteName: m.targetRouteName,
-              });
-            } else {
-              setChildMergeInfo(null);
-            }
-          } catch (e) {
-            console.warn('Merge check failed', e);
-          }
-
-          // Fetch route info for the active bus
-          const routeRes = await axios.get(`${BACKEND_URL}/api/routes/${activeRouteId}`, authHeaders);
-          setRouteInfo(routeRes.data);
-        }
+      const currentKid = kids[selectedChildIndex] || kids[0];
+      if (currentKid) {
+        // Load child details asynchronously without keeping the whole dashboard waiting
+        loadChildData(currentKid);
       }
     } catch (err) {
       console.error('Failed to load parent data', err);
     } finally {
       setIsLoading(false);
     }
-  }, [user?.token]);
+  }, [user?.token, selectedChildIndex, loadChildData]);
+
+  const handleSelectChild = (idx) => {
+    setSelectedChildIndex(idx);
+    if (children[idx]) {
+      loadChildData(children[idx]);
+    }
+  };
 
   const fetchBroadcasts = useCallback(async () => {
     try {
       const res = await axios.get(`${BACKEND_URL}/api/notifications`, authHeaders);
       const data = Array.isArray(res.data) ? res.data : (res.data?.data || []);
       setBroadcasts(data);
+      try { localStorage.setItem('parent_dashboard_broadcasts', JSON.stringify(data)); } catch {}
     } catch (err) {
       console.error('Failed to fetch broadcasts', err);
     }
@@ -291,6 +446,7 @@ const ParentDashboard = () => {
       const res = await axios.get(`${BACKEND_URL}/api/parents/grievances`, authHeaders);
       const data = Array.isArray(res.data) ? res.data : (res.data?.data || []);
       setChildGrievances(data);
+      try { localStorage.setItem('parent_dashboard_grievances', JSON.stringify(data)); } catch {}
     } catch (err) {
       console.error('Failed to fetch child grievances', err);
     }
@@ -428,15 +584,21 @@ const ParentDashboard = () => {
   }, [activeTab, analyticsDate, child?.routeId, childMergeInfo]);
 
   // Mark leave for child
-  const handleMarkLeave = async (date) => {
-    if (!child) return;
+  const handleMarkLeave = async () => {
+    if (!child || !leaveDate) return;
+    setIsSubmittingLeave(true);
     try {
-      await axios.post(`${BACKEND_URL}/api/parents/child/${child.loginId}/leave`, { date }, authHeaders);
-      toast.success(`Leave marked for ${date}`);
-      // Refetch to ensure data is fresh
+      await axios.post(
+        `${BACKEND_URL}/api/parents/child/${child.loginId}/leave`,
+        { date: leaveDate, reason: leaveReason },
+        authHeaders
+      );
+      toast.success(`Leave marked for ${leaveDate} (${leaveReason})`);
       await fetchAll();
     } catch (err) {
       toast.error('We could not mark the leave. Please try again.');
+    } finally {
+      setIsSubmittingLeave(false);
     }
   };
 
@@ -456,8 +618,8 @@ const ParentDashboard = () => {
     return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
   };
 
-  // ---- Loading ----
-  if (isLoading) {
+  // ---- Loading (Only blocks if there is zero cached data to show) ----
+  if (isLoading && !parentData && !child) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '1rem' }}>
         <div style={{ width: 48, height: 48, border: `4px solid ${PURPLE_LIGHT}`, borderTop: `4px solid ${PURPLE}`, borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
@@ -470,66 +632,138 @@ const ParentDashboard = () => {
   return (
     <div style={{ minHeight: '100vh', backgroundColor: 'var(--bg-color)', fontFamily: 'Inter, sans-serif' }}>
 
-      {/* ========= HEADER ========= */}
-      <header style={{
-        background: `linear-gradient(135deg, ${PURPLE_DARK} 0%, ${PURPLE} 100%)`,
-        color: 'white', padding: '0 1.25rem',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        height: '54px', position: 'sticky', top: 0, zIndex: 100,
-        boxShadow: '0 3px 14px rgba(139,92,246,0.35)',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-          <div style={{ height: '34px', padding: '3px 8px', borderRadius: '10px', backgroundColor: 'rgba(255,255,255,0.95)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 4px rgba(0,0,0,0.12)' }}>
-            <img src="/logo.png" alt="Invertis University" style={{ height: '100%', width: 'auto', maxHeight: '26px', objectFit: 'contain' }} />
+      {/* ========= HEADER (Consistent with Home/Admin/TI panels) ========= */}
+      <header
+        className="px-3.5 py-2 md:px-6 md:py-2.5 flex justify-between items-center gap-2 z-50 sticky top-0"
+        style={{
+          backgroundColor: 'var(--card-bg)',
+          borderBottom: '1px solid var(--border-color)',
+          boxShadow: 'var(--shadow)',
+        }}
+      >
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="h-8.5 md:h-10 px-2 py-0.5 rounded-lg bg-white dark:bg-slate-800 shrink-0 flex items-center justify-center border border-slate-200 dark:border-slate-700 shadow-xs">
+            <img src="/logo.png" alt="Invertis University" className="h-full w-auto max-h-7 md:max-h-8 object-contain filter drop-shadow-xs" />
           </div>
-          <div>
-            <h1 style={{ margin: 0, fontSize: '0.98rem', fontWeight: 800, letterSpacing: '-0.3px' }}>Parent Dashboard</h1>
-            <p style={{ margin: 0, fontSize: '0.68rem', opacity: 0.9 }}>Invertis Bus Saarthi · Guardian View</p>
+          <div className="min-w-0">
+            <h1 className="text-base md:text-lg font-bold text-slate-800 dark:text-slate-100 leading-tight m-0 truncate">
+              Parent <span style={{ color: PURPLE }}>Portal</span>
+            </h1>
+            <p className="text-[11px] md:text-xs font-medium text-slate-500 dark:text-slate-400 m-0 truncate">
+              Welcome, {user?.name || parentData?.name || 'Guardian'}
+            </p>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+
+        <div className="flex items-center gap-2 md:gap-3 shrink-0">
+          {/* PROFILE DROPDOWN (Desktop only) */}
+          <div className="relative hidden md:block" ref={profileMenuRef}>
+            <button
+              onClick={() => setShowProfileMenu(!showProfileMenu)}
+              className="bg-transparent p-[2px] rounded-full cursor-pointer transition-all duration-300 hover:scale-105 active:scale-95 flex items-center justify-center border-none shadow-sm hover:shadow-md"
+              style={{ background: `linear-gradient(135deg, ${PURPLE}, #a855f7, #ec4899)` }}
+              title="Account Menu"
+            >
+              <UserAvatar
+                src={user?.profile_pic}
+                name={user?.name || parentData?.name || 'Guardian'}
+                size={36}
+                className="border-2 border-transparent"
+              />
+            </button>
+
+            {showProfileMenu && (
+              <div
+                className="absolute top-full right-0 mt-3 w-72 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/60 dark:border-slate-700/60 rounded-2xl shadow-2xl z-50 p-2 animate-in slide-in-from-top-4 fade-in duration-300 flex flex-col gap-1"
+                style={{ backgroundColor: 'var(--card-bg)' }}
+              >
+                {/* User Info Header */}
+                <div className="flex items-center gap-3 p-3 border-b border-slate-100 dark:border-slate-800 mb-2">
+                  <UserAvatar
+                    src={user?.profile_pic}
+                    name={user?.name || parentData?.name || 'Guardian'}
+                    size={46}
+                    className="ring-2 ring-white dark:ring-slate-800 shadow-sm"
+                  />
+                  <div className="flex flex-col min-w-0">
+                    <span className="font-bold text-slate-800 dark:text-slate-100 truncate text-base">
+                      {user?.name || parentData?.name || 'Parent / Guardian'}
+                    </span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400 truncate font-medium">
+                      {user?.email || user?.phone || 'Guardian Account'}
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => { setShowProfileMenu(false); navigate('/settings'); }}
+                  className="w-full text-left px-4 py-2.5 rounded-xl text-slate-700 dark:text-slate-200 font-medium hover:bg-slate-50 dark:hover:bg-slate-800/80 border-none bg-transparent cursor-pointer flex items-center gap-3 transition-colors text-sm"
+                >
+                  <Settings size={18} style={{ color: PURPLE }} />
+                  Settings & Preferences
+                </button>
+
+                <div className="border-t border-slate-100 dark:border-slate-800 mt-1 pt-1">
+                  <button
+                    onClick={() => { logout(); navigate('/login'); }}
+                    className="w-full text-left px-4 py-2.5 rounded-xl text-red-600 dark:text-red-400 font-bold hover:bg-red-50 dark:hover:bg-red-950/30 border-none bg-transparent cursor-pointer flex items-center gap-3 transition-colors text-sm"
+                  >
+                    <LogOut size={18} />
+                    Sign Out
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* MOBILE HAMBURGER MENU BUTTON (Phone only) */}
           <button
-            onClick={() => navigate('/settings')}
-            style={{
-              background: 'rgba(255,255,255,0.18)',
-              border: 'none',
-              borderRadius: '10px',
-              padding: '6px 12px',
-              cursor: 'pointer',
-              color: 'white',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              transition: 'all 0.2s',
-            }}
-            title="Settings"
+            className="bg-transparent border border-slate-200 dark:border-slate-700 cursor-pointer p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors flex items-center justify-center md:hidden"
+            onClick={() => setIsMenuOpen(true)}
+            title="Open Menu"
           >
-            <Settings size={15} /> <span>Settings</span>
-          </button>
-          <button
-            onClick={() => { logout(); navigate('/login'); }}
-            style={{
-              background: 'rgba(255,255,255,0.18)',
-              border: 'none',
-              borderRadius: '10px',
-              padding: '6px 12px',
-              cursor: 'pointer',
-              color: 'white',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              transition: 'all 0.2s',
-            }}
-            title="Sign Out"
-          >
-            <LogOut size={15} /> <span>Logout</span>
+            <Menu size={22} className="text-slate-700 dark:text-slate-300" />
           </button>
         </div>
       </header>
+
+            {/* ========= MULTI-CHILD SWITCHER ========= */}
+      {children.length > 1 && (
+        <div style={{
+          background: 'var(--card-bg)', borderBottom: '1px solid var(--border-color)',
+          padding: '0.6rem 1.25rem', display: 'flex', alignItems: 'center', gap: '8px',
+          overflowX: 'auto', scrollbarWidth: 'none',
+        }}>
+          <span style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--text-light)', whiteSpace: 'nowrap', textTransform: 'uppercase' }}>
+            Students:
+          </span>
+          <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', scrollbarWidth: 'none' }}>
+            {children.map((ch, idx) => (
+              <button
+                key={ch.loginId || idx}
+                onClick={() => handleSelectChild(idx)}
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: '20px',
+                  border: idx === selectedChildIndex ? `2px solid ${PURPLE}` : '1px solid var(--border-color)',
+                  background: idx === selectedChildIndex ? 'rgba(124, 58, 237, 0.16)' : 'var(--bg-color)',
+                  color: idx === selectedChildIndex ? PURPLE : 'var(--text-dark)',
+                  fontWeight: idx === selectedChildIndex ? 700 : 500,
+                  fontSize: '0.8rem',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  transition: 'all 0.15s',
+                }}
+              >
+                <User size={13} /> {ch.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ========= CHILD INFO BANNER ========= */}
       {isLoading && !child ? (
@@ -538,31 +772,43 @@ const ParentDashboard = () => {
           padding: '0.85rem 1.25rem',
           display: 'flex', alignItems: 'center', gap: '1rem',
         }}>
-          <div className="animate-pulse" style={{ width: 48, height: 48, borderRadius: '50%', backgroundColor: '#e9ecef' }} />
+          <div className="animate-pulse" style={{ width: 48, height: 48, borderRadius: '50%', backgroundColor: 'var(--border-color)' }} />
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-            <div className="animate-pulse" style={{ width: '140px', height: '16px', borderRadius: '4px', backgroundColor: '#e9ecef' }} />
-            <div className="animate-pulse" style={{ width: '90px', height: '12px', borderRadius: '4px', backgroundColor: '#e9ecef' }} />
+            <div className="animate-pulse" style={{ width: '140px', height: '16px', borderRadius: '4px', backgroundColor: 'var(--border-color)' }} />
+            <div className="animate-pulse" style={{ width: '90px', height: '12px', borderRadius: '4px', backgroundColor: 'var(--border-color)' }} />
           </div>
-          <div className="animate-pulse" style={{ width: '80px', height: '28px', borderRadius: '20px', backgroundColor: '#e9ecef' }} />
+          <div className="animate-pulse" style={{ width: '80px', height: '28px', borderRadius: '20px', backgroundColor: 'var(--border-color)' }} />
         </div>
       ) : child && (
         <div style={{
           background: 'var(--card-bg)', borderBottom: '1px solid var(--border-color)',
           padding: '0.85rem 1.25rem',
-          display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap',
+          display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap',
         }}>
           <div style={{
             width: 48, height: 48, borderRadius: '50%',
-            background: `linear-gradient(135deg, ${PURPLE_LIGHT}, ${PURPLE}33)`,
+            background: `linear-gradient(135deg, rgba(124, 58, 237, 0.15), rgba(124, 58, 237, 0.25))`,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            border: `2px solid ${PURPLE}40`, flexShrink: 0,
+            border: `2px solid ${PURPLE}40`, flexShrink: 0, overflow: 'hidden'
           }}>
-            {child.profilePic
-              ? <img src={child.profilePic} alt={child.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-              : <User size={24} color={PURPLE} />
-            }
+            {child.profilePic ? (
+              <img
+                src={child.profilePic}
+                alt={child.name}
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  if (e.currentTarget.nextSibling) {
+                    e.currentTarget.nextSibling.style.display = 'flex';
+                  }
+                }}
+                style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+              />
+            ) : null}
+            <span style={{ display: child.profilePic ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <User size={24} color={PURPLE} />
+            </span>
           </div>
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: '1 1 180px', minWidth: '140px' }}>
             <p style={{ margin: 0, fontWeight: 700, color: 'var(--text-dark)', fontSize: '1rem' }}>{child.name}</p>
             <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-light)' }}>
               {child.gradeClass && `${child.gradeClass} · `}
@@ -575,11 +821,12 @@ const ParentDashboard = () => {
               )}
             </p>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
             <FeeBadge status={child.feeStatus} />
             <span style={{
-              background: child.boardedToday ? '#e6fae6' : '#fff1f0',
-              color: child.boardedToday ? '#28a745' : '#cf1322',
+              background: child.boardedToday ? 'rgba(34, 197, 94, 0.14)' : 'rgba(239, 68, 68, 0.14)',
+              color: child.boardedToday ? '#16a34a' : '#dc2626',
+              border: child.boardedToday ? '1px solid rgba(34, 197, 94, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
               fontWeight: 700, fontSize: '0.82rem', padding: '4px 12px', borderRadius: '20px',
             }}>
               {child.boardedToday ? `✅ Boarded ${formatTime(child.boardedAt)}` : '❌ Not Boarded Yet'}
@@ -588,45 +835,65 @@ const ParentDashboard = () => {
         </div>
       )}
 
-      {/* ========= TOP TABS (Desktop Only) ========= */}
-      <div style={{
-        background: 'var(--card-bg)', borderBottom: '1px solid var(--border-color)',
-        display: 'flex', overflowX: 'auto', scrollbarWidth: 'none',
-      }}>
-        {[
-          { id: 'overview', icon: <Bus size={16} />, label: 'Overview' },
-          { id: 'attendance', icon: <Calendar size={16} />, label: 'Attendance' },
-          { id: 'complaints', icon: <MessageSquareWarning size={16} />, label: 'Complaints' },
-          { id: 'announcements', icon: <Megaphone size={16} />, label: 'Notices' },
-          { id: 'analytics', icon: <Activity size={16} />, label: 'Analytics' },
-          { id: 'settings', icon: <Settings size={16} />, label: 'Settings', isNav: true },
-        ].map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => {
-              if (tab.isNav) {
-                navigate('/settings');
-              } else {
-                setActiveTab(tab.id);
-              }
-            }}
-            style={{
-              flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: '6px',
-              padding: '0.85rem 1.25rem', border: 'none', cursor: 'pointer',
-              background: 'transparent', fontWeight: activeTab === tab.id ? 700 : 500,
-              fontSize: '0.85rem', whiteSpace: 'nowrap',
-              color: activeTab === tab.id ? PURPLE : 'var(--text-light)',
-              borderBottom: activeTab === tab.id ? `3px solid ${PURPLE}` : '3px solid transparent',
-              transition: 'all 0.2s',
-            }}
-          >
-            {tab.icon} {tab.label}
-          </button>
-        ))}
-      </div>
+      {/* ========= TOP TABS (Desktop Only - Not rendered on phone) ========= */}
+      {!isMobile && (
+        <div
+          style={{
+            background: 'var(--card-bg)',
+            borderBottom: '1px solid var(--border-color)',
+            display: 'flex',
+            overflowX: 'auto',
+            scrollbarWidth: 'none',
+          }}
+        >
+          {[
+            { id: 'overview', icon: <Bus size={16} />, label: 'Overview' },
+            { id: 'attendance', icon: <Calendar size={16} />, label: 'Attendance' },
+            { id: 'complaints', icon: <MessageSquareWarning size={16} />, label: 'Complaints' },
+            { id: 'announcements', icon: <Megaphone size={16} />, label: 'Notices' },
+            { id: 'analytics', icon: <Activity size={16} />, label: 'Analytics' },
+            { id: 'settings', icon: <Settings size={16} />, label: 'Settings', isNav: true },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => {
+                if (tab.isNav) {
+                  navigate('/settings');
+                } else {
+                  setActiveTab(tab.id);
+                }
+              }}
+              style={{
+                flex: '0 0 auto',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '0.85rem 1.25rem',
+                border: 'none',
+                cursor: 'pointer',
+                background: 'transparent',
+                fontWeight: activeTab === tab.id ? 700 : 500,
+                fontSize: '0.85rem',
+                whiteSpace: 'nowrap',
+                color: activeTab === tab.id ? PURPLE : 'var(--text-light)',
+                borderBottom: activeTab === tab.id ? `3px solid ${PURPLE}` : '3px solid transparent',
+                transition: 'all 0.2s',
+              }}
+            >
+              {tab.icon} {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* ========= CONTENT ========= */}
-      <div style={{ padding: '1.25rem', maxWidth: '700px', margin: '0 auto' }}>
+      <div
+        style={{
+          padding: isMobile ? '1rem 1rem 100px 1rem' : '1.25rem 1.25rem 2.5rem 1.25rem',
+          maxWidth: '750px',
+          margin: '0 auto',
+        }}
+      >
 
         {/* ===== OVERVIEW TAB ===== */}
         {activeTab === 'overview' && (
@@ -655,45 +922,101 @@ const ParentDashboard = () => {
             {isLoading && !child ? (
               <div className="glass p-6 rounded-2xl flex flex-col gap-4">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  <div className="animate-pulse" style={{ width: 56, height: 56, borderRadius: '50%', backgroundColor: '#e9ecef' }} />
+                  <div className="animate-pulse" style={{ width: 56, height: 56, borderRadius: '50%', backgroundColor: 'var(--border-color)' }} />
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                    <div className="animate-pulse" style={{ width: '180px', height: '18px', borderRadius: '4px', backgroundColor: '#e9ecef' }} />
-                    <div className="animate-pulse" style={{ width: '120px', height: '12px', borderRadius: '4px', backgroundColor: '#e9ecef' }} />
+                    <div className="animate-pulse" style={{ width: '180px', height: '18px', borderRadius: '4px', backgroundColor: 'var(--border-color)' }} />
+                    <div className="animate-pulse" style={{ width: '120px', height: '12px', borderRadius: '4px', backgroundColor: 'var(--border-color)' }} />
                   </div>
                 </div>
               </div>
-            ) : (
-              <div style={{
-                background: child?.boardedToday
-                  ? 'linear-gradient(135deg, #e6fae6 0%, #d4edda 100%)'
-                  : 'linear-gradient(135deg, #fff1f0 0%, #ffe4e1 100%)',
-                borderRadius: '20px', padding: '1.5rem',
-                border: `2px solid ${child?.boardedToday ? '#28a74540' : '#cf132240'}`,
-                boxShadow: '0 4px 20px rgba(0,0,0,0.06)',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            ) : (() => {
+              const isSunday = new Date().getDay() === 0;
+              if (child?.boardedToday) {
+                return (
                   <div style={{
-                    width: 56, height: 56, borderRadius: '50%',
-                    background: child?.boardedToday ? '#28a745' : '#cf1322',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    boxShadow: `0 4px 12px ${child?.boardedToday ? '#28a74540' : '#cf132240'}`,
+                    background: 'linear-gradient(135deg, rgba(34,197,94,0.12) 0%, rgba(34,197,94,0.22) 100%)',
+                    borderRadius: '20px', padding: '1.25rem 1.5rem',
+                    border: '2px solid rgba(34,197,94,0.4)',
+                    boxShadow: '0 4px 20px rgba(0,0,0,0.06)',
                   }}>
-                    {child?.boardedToday ? <CheckCircle2 size={30} color="white" /> : <XCircle size={30} color="white" />}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                      <div style={{
+                        width: 52, height: 52, borderRadius: '50%',
+                        background: '#16a34a',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        boxShadow: '0 4px 12px rgba(22,163,74,0.4)', flexShrink: 0,
+                      }}>
+                        <CheckCircle2 size={28} color="white" />
+                      </div>
+                      <div>
+                        <p style={{ margin: 0, fontWeight: 800, fontSize: '1.15rem', color: 'var(--text-dark)' }}>
+                          Child Boarded the Bus
+                        </p>
+                        <p style={{ margin: '2px 0 0', fontSize: '0.82rem', color: '#16a34a', fontWeight: 600 }}>
+                          Face recognized at {formatTime(child.boardedAt)} today
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <p style={{ margin: 0, fontWeight: 800, fontSize: '1.15rem', color: child?.boardedToday ? '#155724' : '#721c24' }}>
-                      {child?.boardedToday ? 'Child Boarded the Bus' : 'Not Boarded Yet'}
-                    </p>
-                    <p style={{ margin: 0, fontSize: '0.82rem', color: child?.boardedToday ? '#28a745' : '#cf1322', marginTop: '2px' }}>
-                      {child?.boardedToday
-                        ? `Face recognized at ${formatTime(child.boardedAt)} today`
-                        : 'Not marked present on the bus yet today'
-                      }
-                    </p>
+                );
+              }
+              if (isSunday) {
+                return (
+                  <div style={{
+                    background: 'linear-gradient(135deg, rgba(124,58,237,0.08) 0%, rgba(59,130,246,0.08) 100%)',
+                    borderRadius: '20px', padding: '1.25rem 1.5rem',
+                    border: '2px solid rgba(124,58,237,0.25)',
+                    boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                      <div style={{
+                        width: 52, height: 52, borderRadius: '50%',
+                        background: PURPLE,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        boxShadow: `0 4px 12px ${PURPLE}40`, flexShrink: 0,
+                      }}>
+                        <Calendar size={26} color="white" />
+                      </div>
+                      <div>
+                        <p style={{ margin: 0, fontWeight: 800, fontSize: '1.08rem', color: 'var(--text-dark)' }}>
+                          Weekend — No Scheduled Bus Today
+                        </p>
+                        <p style={{ margin: '2px 0 0', fontSize: '0.82rem', color: 'var(--text-light)' }}>
+                          It's Sunday! Regular campus transit service resumes Monday morning.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+              return (
+                <div style={{
+                  background: 'linear-gradient(135deg, rgba(239,68,68,0.1) 0%, rgba(239,68,68,0.18) 100%)',
+                  borderRadius: '20px', padding: '1.25rem 1.5rem',
+                  border: '2px solid rgba(239,68,68,0.35)',
+                  boxShadow: '0 4px 20px rgba(0,0,0,0.06)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <div style={{
+                      width: 52, height: 52, borderRadius: '50%',
+                      background: '#ef4444',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      boxShadow: '0 4px 12px rgba(239,68,68,0.35)', flexShrink: 0,
+                    }}>
+                      <XCircle size={28} color="white" />
+                    </div>
+                    <div>
+                      <p style={{ margin: 0, fontWeight: 800, fontSize: '1.15rem', color: 'var(--text-dark)' }}>
+                        Not Boarded Yet
+                      </p>
+                      <p style={{ margin: '2px 0 0', fontSize: '0.82rem', color: '#ef4444', fontWeight: 600 }}>
+                        Not marked present on the bus yet today
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })() }
 
             {/* Route & Driver Info - UP FRONT for quick access */}
             {(routeInfo || child?.routeId) && (
@@ -766,51 +1089,85 @@ const ParentDashboard = () => {
                     </div>
                   </div>
 
-                  {routeInfo?.driver?.phone ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    {routeInfo?.driver?.phone ? (
+                      <a
+                        href={`tel:${routeInfo.driver.phone}`}
+                        style={{
+                          background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                          color: 'white',
+                          textDecoration: 'none',
+                          padding: '8px 14px',
+                          borderRadius: '12px',
+                          fontWeight: 700,
+                          fontSize: '0.8rem',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          boxShadow: '0 3px 10px rgba(22,163,74,0.25)',
+                          transition: 'transform 0.15s',
+                        }}
+                      >
+                        <Phone size={13} /> Call Driver
+                      </a>
+                    ) : null}
+
                     <a
-                      href={`tel:${routeInfo.driver.phone}`}
+                      href="tel:+915812460442"
                       style={{
-                        background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                        background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
                         color: 'white',
                         textDecoration: 'none',
-                        padding: '8px 16px',
+                        padding: '8px 14px',
                         borderRadius: '12px',
                         fontWeight: 700,
-                        fontSize: '0.82rem',
+                        fontSize: '0.8rem',
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: '6px',
-                        boxShadow: '0 3px 10px rgba(22,163,74,0.3)',
-                        transition: 'transform 0.15s, box-shadow 0.15s',
-                        flexShrink: 0,
+                        boxShadow: '0 3px 10px rgba(37,99,235,0.25)',
+                        transition: 'transform 0.15s',
                       }}
-                      onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-1px)'}
-                      onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}
+                      title="Transport In-charge Helpdesk"
                     >
-                      <Phone size={14} /> Call Driver
+                      <Phone size={13} /> Transport Desk
                     </a>
-                  ) : (
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-light)', fontStyle: 'italic' }}>
-                      Driver phone not registered
-                    </span>
-                  )}
+                  </div>
                 </div>
 
                 {/* Stops */}
                 {routeInfo?.stops && (() => {
                   let stops = [];
                   try { stops = typeof routeInfo.stops === 'string' ? JSON.parse(routeInfo.stops) : routeInfo.stops; } catch {}
-                  return stops.length > 0 ? (
+                  return Array.isArray(stops) && stops.length > 0 ? (
                     <div style={{ marginTop: '0.2rem' }}>
                       <p style={{ margin: '0 0 0.4rem 0', color: 'var(--text-light)', fontSize: '0.76rem', fontWeight: 600, textTransform: 'uppercase' }}>
                         Route Stops ({stops.length})
                       </p>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '85px', overflowY: 'auto' }}>
-                        {stops.map((s, i) => (
-                          <span key={i} style={{ background: PURPLE_LIGHT, color: PURPLE, fontSize: '0.74rem', padding: '3px 9px', borderRadius: '10px', fontWeight: 600 }}>
-                            {i + 1}. {typeof s === 'object' ? s.name || JSON.stringify(s) : s}
-                          </span>
-                        ))}
+                      <div
+                        className="hide-scrollbar"
+                        style={{
+                          display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '85px',
+                          overflowY: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none'
+                        }}
+                      >
+                        {stops.map((s, i) => {
+                          const stopTitle = typeof s === 'object' && s !== null
+                            ? (s.name || s.stopName || s.stop_name || s.title || `Stop ${i + 1}`)
+                            : String(s);
+                          return (
+                            <span
+                              key={i}
+                              style={{
+                                background: 'rgba(124, 58, 237, 0.12)',
+                                color: PURPLE, fontSize: '0.74rem', padding: '3px 9px',
+                                borderRadius: '10px', fontWeight: 600
+                              }}
+                            >
+                              {i + 1}. {stopTitle}
+                            </span>
+                          );
+                        })}
                       </div>
                     </div>
                   ) : null;
@@ -943,31 +1300,35 @@ const ParentDashboard = () => {
             </div>
 
             {/* Quick Stats */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: isMobile ? '0.6rem' : '0.75rem' }}>
               <StatCard
                 icon={<Calendar size={20} color={PURPLE} />}
                 label="This Month"
                 value={`${attendanceData?.attendancePercent ?? '—'}%`}
                 sub={`${attendanceData?.monthlyAttendance ?? 0}/${attendanceData?.workingDays ?? 0} days`}
                 color={PURPLE}
+                isMobile={isMobile}
               />
               <StatCard
-                icon={<IndianRupee size={20} color={child?.feeStatus === 'paid' ? '#28a745' : '#cf1322'} />}
+                icon={<IndianRupee size={20} color={child?.feeStatus === 'paid' ? '#16a34a' : '#ef4444'} />}
                 label="Fee Status"
                 value={child?.feeStatus ? child.feeStatus.charAt(0).toUpperCase() + child.feeStatus.slice(1) : '—'}
-                color={child?.feeStatus === 'paid' ? '#28a745' : '#cf1322'}
+                color={child?.feeStatus === 'paid' ? '#16a34a' : '#ef4444'}
+                isMobile={isMobile}
               />
               <StatCard
                 icon={<Gauge size={20} color="#f97316" />}
                 label="Bus Speed"
                 value={telemetry && !telemetryStale ? `${Math.round(telemetry.speed)} km/h` : 'No Signal'}
                 color="#f97316"
+                isMobile={isMobile}
               />
               <StatCard
                 icon={<Compass size={20} color="#06b6d4" />}
                 label="Direction"
                 value={telemetry && !telemetryStale ? getHeadingLabel(telemetry.heading) : '—'}
                 color="#06b6d4"
+                isMobile={isMobile}
               />
             </div>
           </div>
@@ -978,19 +1339,20 @@ const ParentDashboard = () => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
 
             {/* Summary cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: isMobile ? '0.5rem' : '0.75rem' }}>
               {[
-                { label: 'Present', value: attendanceData?.monthlyAttendance ?? 0, color: '#28a745', icon: '✅' },
-                { label: 'Absent', value: (attendanceData?.workingDays ?? 0) - (attendanceData?.monthlyAttendance ?? 0), color: '#cf1322', icon: '❌' },
+                { label: 'Present', value: attendanceData?.monthlyAttendance ?? 0, color: '#16a34a', icon: '✅' },
+                { label: 'Absent', value: (attendanceData?.workingDays ?? 0) - (attendanceData?.monthlyAttendance ?? 0), color: '#ef4444', icon: '❌' },
                 { label: 'Attendance %', value: `${attendanceData?.attendancePercent ?? 0}%`, color: PURPLE, icon: '📊' },
               ].map(s => (
                 <div key={s.label} style={{
-                  background: 'var(--card-bg)', borderRadius: '14px', padding: '1rem',
+                  background: 'var(--card-bg)', borderRadius: '14px',
+                  padding: isMobile ? '0.75rem 0.35rem' : '1rem',
                   border: '1px solid var(--border-color)', textAlign: 'center',
                 }}>
-                  <div style={{ fontSize: '1.5rem' }}>{s.icon}</div>
-                  <p style={{ margin: '4px 0 0', fontWeight: 800, fontSize: '1.4rem', color: s.color }}>{s.value}</p>
-                  <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--text-light)', fontWeight: 500 }}>{s.label}</p>
+                  <div style={{ fontSize: isMobile ? '1.25rem' : '1.5rem' }}>{s.icon}</div>
+                  <p style={{ margin: '3px 0 0', fontWeight: 800, fontSize: isMobile ? '1.15rem' : '1.4rem', color: s.color }}>{s.value}</p>
+                  <p style={{ margin: 0, fontSize: isMobile ? '0.68rem' : '0.72rem', color: 'var(--text-light)', fontWeight: 600, whiteSpace: 'nowrap' }}>{s.label}</p>
                 </div>
               ))}
             </div>
@@ -1011,35 +1373,68 @@ const ParentDashboard = () => {
               background: 'var(--card-bg)', borderRadius: '20px', padding: '1.25rem',
               border: '1px solid var(--border-color)',
             }}>
-              <h3 style={{ margin: '0 0 0.75rem 0', fontWeight: 700, color: 'var(--text-dark)', fontSize: '0.95rem' }}>
-                📝 Mark Leave for Child
+              <h3 style={{ margin: '0 0 0.4rem 0', fontWeight: 700, color: 'var(--text-dark)', fontSize: '0.95rem' }}>
+                📝 Mark Leave for Student
               </h3>
-              <p style={{ margin: '0 0 0.75rem', fontSize: '0.82rem', color: 'var(--text-light)' }}>
-                Notify the transport team about your child's planned absence
+              <p style={{ margin: '0 0 0.85rem', fontSize: '0.82rem', color: 'var(--text-light)' }}>
+                Notify the transport department about your child's planned leave so the bus does not wait at the stop.
               </p>
-              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                <input
-                  type="date"
-                  min={new Date().toISOString().split('T')[0]}
-                  defaultValue={new Date().toISOString().split('T')[0]}
-                  id="leave-date-input"
-                  style={{
-                    padding: '0.6rem 0.9rem', borderRadius: '10px',
-                    border: '1.5px solid var(--border-color)', background: 'var(--bg-color)',
-                    color: 'var(--text-dark)', fontSize: '0.9rem', cursor: 'pointer',
-                  }}
-                />
-                <button
-                  onClick={() => handleMarkLeave(document.getElementById('leave-date-input')?.value)}
-                  style={{
-                    background: PURPLE, color: 'white', border: 'none',
-                    padding: '0.6rem 1.25rem', borderRadius: '10px',
-                    fontWeight: 700, cursor: 'pointer', fontSize: '0.9rem',
-                    boxShadow: `0 4px 12px ${PURPLE}40`,
-                  }}
-                >
-                  Mark Leave
-                </button>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1.2fr auto', gap: '0.75rem', alignItems: 'end' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-light)', marginBottom: '4px' }}>
+                    Leave Date
+                  </label>
+                  <input
+                    type="date"
+                    min={new Date().toISOString().split('T')[0]}
+                    value={leaveDate}
+                    onChange={(e) => setLeaveDate(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '0.6rem 0.85rem', borderRadius: '10px',
+                      border: '1.5px solid var(--border-color)', background: 'var(--bg-color)',
+                      color: 'var(--text-dark)', fontSize: '0.88rem', cursor: 'pointer',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-light)', marginBottom: '4px' }}>
+                    Reason
+                  </label>
+                  <select
+                    value={leaveReason}
+                    onChange={(e) => setLeaveReason(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '0.6rem 0.85rem', borderRadius: '10px',
+                      border: '1.5px solid var(--border-color)', background: 'var(--bg-color)',
+                      color: 'var(--text-dark)', fontSize: '0.88rem', cursor: 'pointer',
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    <option value="Sick / Medical Leave">Sick / Medical Leave</option>
+                    <option value="Family Function / Event">Family Function / Event</option>
+                    <option value="Out of Station">Out of Station</option>
+                    <option value="Personal / Other Reason">Personal / Other Reason</option>
+                  </select>
+                </div>
+                <div>
+                  <button
+                    onClick={handleMarkLeave}
+                    disabled={isSubmittingLeave}
+                    style={{
+                      width: isMobile ? '100%' : 'auto',
+                      background: PURPLE, color: 'white', border: 'none',
+                      padding: '0.62rem 1.35rem', borderRadius: '10px',
+                      fontWeight: 700, cursor: isSubmittingLeave ? 'default' : 'pointer', fontSize: '0.88rem',
+                      boxShadow: `0 4px 12px ${PURPLE}40`,
+                      opacity: isSubmittingLeave ? 0.7 : 1,
+                    }}
+                  >
+                    {isSubmittingLeave ? 'Marking...' : 'Mark Leave'}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1095,31 +1490,42 @@ const ParentDashboard = () => {
                 <p style={{ margin: '0.75rem 0 0', color: 'var(--text-light)', fontWeight: 500 }}>No announcements yet</p>
               </div>
             )}
-            {broadcasts.map((b, i) => (
-              <div key={b.id || i} style={{
-                background: 'var(--card-bg)', borderRadius: '16px', padding: '1.1rem 1.25rem',
-                border: `1px solid var(--border-color)`,
-                borderLeft: `4px solid ${PURPLE}`,
-                boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
-                  <div style={{ background: PURPLE_LIGHT, borderRadius: '10px', padding: '6px', flexShrink: 0 }}>
-                    <Megaphone size={16} color={PURPLE} />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    {b.title && (
-                      <p style={{ margin: '0 0 4px', fontWeight: 700, color: 'var(--text-dark)', fontSize: '0.92rem' }}>
-                        {b.title}
+            {broadcasts.map((b, i) => {
+              const meta = getBroadcastMeta(b);
+              return (
+                <div key={b.id || i} style={{
+                  background: 'var(--card-bg)', borderRadius: '16px', padding: '1.1rem 1.25rem',
+                  border: `1px solid var(--border-color)`,
+                  borderLeft: `4px solid ${meta.border}`,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+                    <div style={{ background: meta.bg, borderRadius: '10px', padding: '8px', flexShrink: 0, color: meta.border }}>
+                      <Megaphone size={16} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px', marginBottom: '4px' }}>
+                        {b.title && (
+                          <p style={{ margin: 0, fontWeight: 700, color: 'var(--text-dark)', fontSize: '0.92rem' }}>
+                            {b.title}
+                          </p>
+                        )}
+                        <span style={{
+                          background: meta.badgeBg, color: meta.badgeColor,
+                          fontSize: '0.68rem', fontWeight: 700, padding: '2px 8px', borderRadius: '10px'
+                        }}>
+                          {meta.tag}
+                        </span>
+                      </div>
+                      <p style={{ margin: 0, color: 'var(--text-light)', fontSize: '0.85rem', lineHeight: 1.5 }}>{b.message}</p>
+                      <p style={{ margin: '6px 0 0', fontSize: '0.72rem', color: 'var(--text-light)' }}>
+                        {b.timestamp && !isNaN(new Date(b.timestamp).getTime()) ? new Date(b.timestamp).toLocaleString('en-IN') : ''}
                       </p>
-                    )}
-                    <p style={{ margin: 0, color: 'var(--text-light)', fontSize: '0.85rem', lineHeight: 1.5 }}>{b.message}</p>
-                    <p style={{ margin: '6px 0 0', fontSize: '0.72rem', color: 'var(--text-light)' }}>
-                      {b.timestamp ? new Date(b.timestamp).toLocaleString('en-IN') : ''}
-                    </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -1195,9 +1601,11 @@ const ParentDashboard = () => {
                   {/* Media Attachment */}
                   {g.type === 'photo' && g.mediaUrl && (
                     <div
-                      style={{ borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: '#f8f9fa', display: 'flex', justifyContent: 'center', cursor: 'zoom-in' }}
+                      onClick={() => setPreviewMedia({ type: 'photo', url: g.mediaUrl, caption: g.text })}
+                      style={{ borderRadius: '12px', overflow: 'hidden', marginTop: '0.5rem', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-color)', display: 'flex', justifyContent: 'center', cursor: 'pointer' }}
+                      title="Click to view full image"
                     >
-                      <img src={g.mediaUrl} alt="Complaint Attachment" style={{ width: '100%', height: 'auto', display: 'block', maxHeight: '400px', objectFit: 'contain' }} />
+                      <img src={g.mediaUrl} alt="Complaint Attachment" style={{ width: '100%', height: 'auto', display: 'block', maxHeight: '350px', objectFit: 'contain' }} />
                     </div>
                   )}
                   {g.type === 'video' && g.mediaUrl && (
@@ -1275,8 +1683,8 @@ const ParentDashboard = () => {
                   {rejectingId === g.id && (
                     <div style={{
                       marginTop: '0.7rem', display: 'flex', flexDirection: 'column', gap: '0.6rem',
-                      padding: '0.9rem', background: 'rgba(207,19,34,0.05)',
-                      borderRadius: '10px', border: '1px solid rgba(207,19,34,0.2)',
+                      padding: '0.9rem', background: 'rgba(239, 68, 68, 0.08)',
+                      borderRadius: '10px', border: '1px solid rgba(239, 68, 68, 0.25)',
                     }}>
                       <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-dark)' }}>
                         What is still not fixed?
@@ -1311,7 +1719,7 @@ const ParentDashboard = () => {
                           disabled={busy}
                           style={{
                             padding: '0.45rem 1rem', borderRadius: '8px', border: 'none',
-                            background: '#cf1322', color: 'white', cursor: busy ? 'default' : 'pointer',
+                            background: '#dc2626', color: 'white', cursor: busy ? 'default' : 'pointer',
                             fontWeight: 600, fontSize: '0.82rem',
                           }}
                         >
@@ -1322,8 +1730,8 @@ const ParentDashboard = () => {
                   )}
 
                   <p style={{ margin: '0.6rem 0 0', fontSize: '0.72rem', color: 'var(--text-light)' }}>
-                    Raised {g.createdAt ? new Date(g.createdAt).toLocaleString('en-IN') : ''}
-                    {g.resolvedAt && ` · Marked fixed ${new Date(g.resolvedAt).toLocaleString('en-IN')}`}
+                    Raised {g.createdAt && !isNaN(new Date(g.createdAt).getTime()) ? new Date(g.createdAt).toLocaleString('en-IN') : ''}
+                    {g.resolvedAt && !isNaN(new Date(g.resolvedAt).getTime()) && ` · Marked fixed ${new Date(g.resolvedAt).toLocaleString('en-IN')}`}
                   </p>
                 </div>
               );
@@ -1383,6 +1791,8 @@ const ParentDashboard = () => {
                       dataKey="timestamp"
                       tickFormatter={(t) => new Date(t).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })}
                       tick={{ fontSize: 10, fill: 'var(--text-light)' }}
+                      interval="preserveStartEnd"
+                      minTickGap={25}
                     />
                     <YAxis tick={{ fontSize: 10, fill: 'var(--text-light)' }} />
                     <Tooltip
@@ -1438,7 +1848,118 @@ const ParentDashboard = () => {
         )}
       </div>
 
-      {/* EXPANDED MAP MODAL */}
+      {/* ========= MOBILE BOTTOM NAVIGATION BAR (Rendered ONLY on phone view) ========= */}
+      {isMobile && (
+        <nav
+          className="parent-mobile-nav"
+          style={{
+            position: 'fixed',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            zIndex: 1000,
+            background: 'var(--card-bg)',
+            borderTop: '1px solid var(--border-color)',
+            boxShadow: '0 -4px 20px rgba(0, 0, 0, 0.08)',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(5, 1fr)',
+            paddingTop: '6px',
+            paddingBottom: 'max(env(safe-area-inset-bottom, 8px), 8px)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+          }}
+        >
+          {[
+            { id: 'overview', icon: <Bus size={19} />, label: 'Overview' },
+            { id: 'attendance', icon: <Calendar size={19} />, label: 'Attendance' },
+            {
+              id: 'complaints',
+              icon: <MessageSquareWarning size={19} />,
+              label: 'Complaints',
+              badge: childGrievances?.filter(g => g.status !== 'closed').length || null,
+            },
+            {
+              id: 'announcements',
+              icon: <Megaphone size={19} />,
+              label: 'Notices',
+              badge: broadcasts?.length || null,
+            },
+            { id: 'analytics', icon: <Activity size={19} />, label: 'Analytics' },
+          ].map(item => {
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '4px 0',
+                  cursor: 'pointer',
+                  position: 'relative',
+                  color: isActive ? PURPLE : 'var(--text-light)',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <div style={{
+                    padding: '4px 14px',
+                    borderRadius: '16px',
+                    background: isActive ? `${PURPLE}1a` : 'transparent',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'background 0.2s',
+                    color: isActive ? PURPLE : 'var(--text-light)',
+                  }}>
+                    {item.icon}
+                  </div>
+                  {item.badge ? (
+                    <span style={{
+                      position: 'absolute',
+                      top: '-2px',
+                      right: '6px',
+                      background: '#ef4444',
+                      color: 'white',
+                      fontSize: '0.62rem',
+                      fontWeight: 800,
+                      minWidth: '16px',
+                      height: '16px',
+                      borderRadius: '8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '0 4px',
+                      border: '1.5px solid var(--card-bg)',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                    }}>
+                      {item.badge > 9 ? '9+' : item.badge}
+                    </span>
+                  ) : null}
+                </div>
+                <span style={{
+                  fontSize: '0.68rem',
+                  fontWeight: isActive ? 700 : 500,
+                  marginTop: '2px',
+                  letterSpacing: '-0.1px',
+                  whiteSpace: 'nowrap',
+                }}>
+                  {item.label}
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+      )}
+      {/* Media Viewer Lightbox Modal */}
+      <MediaViewer media={previewMedia} onClose={() => setPreviewMedia(null)} />
+
+      {/* Hamburger Drawer Menu (Consistent with Home/Admin/TI panels) */}
+      <HamburgerMenu isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} />
           </div>
   );
 };
