@@ -60,26 +60,28 @@ const HamburgerMenu = ({ isOpen, onClose }) => {
         </div>
 
         <div data-lenis-prevent="true" style={{ padding: '2rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', flex: 1, overflowY: 'auto' }}>
-          <button 
-            onClick={() => { onClose(); navigate('/community'); }}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '1rem',
-              padding: '1.25rem', backgroundColor: 'var(--secondary-orange)',
-              color: 'var(--white)', borderRadius: '12px', border: 'none',
-              fontSize: '1.2rem', fontWeight: '600', cursor: 'pointer',
-              boxShadow: '0 4px 14px 0 rgba(255, 102, 0, 0.3)',
-              marginBottom: '1rem', transition: 'all 0.2s'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'scale(1.02)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'scale(1)';
-            }}
-          >
-            <Users size={24} />
-            {t('busCommunity')}
-          </button>
+          {user?.role !== 'parent' && user?.role !== 'admin' && user?.role !== 'transport_incharge' && (
+            <button 
+              onClick={() => { onClose(); navigate('/community'); }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '1rem',
+                padding: '1.25rem', backgroundColor: 'var(--secondary-orange)',
+                color: 'var(--white)', borderRadius: '12px', border: 'none',
+                fontSize: '1.2rem', fontWeight: '600', cursor: 'pointer',
+                boxShadow: '0 4px 14px 0 rgba(255, 102, 0, 0.3)',
+                marginBottom: '1rem', transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'scale(1.02)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
+            >
+              <Users size={24} />
+              {t('busCommunity')}
+            </button>
+          )}
 
           {[
             { icon: Home, label: t('home'), path: homePath },
