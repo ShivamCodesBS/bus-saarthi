@@ -59,6 +59,13 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
   String _currentComfort = 'Smooth';
   final List<double> _accelBuffer = [];
 
+  // Speed & Heading Filtering (Stillness detection, Deadband, EMA)
+  double _currentSpeed = 0.0;
+  double? _smoothedSpeed;
+  double? _lastValidMovingHeading;
+  DateTime? _lastPositionTime;
+  static const double _speedDeadbandKmh = 2.5;
+
   // Low-latency GPS & Broadcast
   Position? _currentGpsPosition;
   Position? _pendingBroadcastPosition;
@@ -113,15 +120,14 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
       _compassSub = FlutterCompass.events?.listen((event) {
         if (event.heading != null && mounted) {
           final normalized = TelemetryData.normalizeHeading(event.heading!);
-          if (_currentCompassHeading == null ||
-              (_currentCompassHeading! - normalized).abs() > 0.4) {
-            setState(() {
-              _currentCompassHeading = normalized;
-            });
-            // If trip is running and we have location, broadcast heading update
-            if (_isTripActive && _pendingBroadcastPosition != null) {
-              final telemetry = Provider.of<TelemetryProvider>(context, listen: false);
-              _emitPosition(telemetry);
+          if (_currentCompassHeading == null) {
+            _currentCompassHeading = normalized;
+            setState(() {});
+          } else {
+            double diff = (normalized - _currentCompassHeading! + 180) % 360 - 180;
+            if (diff.abs() > 2.0) {
+              _currentCompassHeading = (_currentCompassHeading! + 0.25 * diff + 360) % 360;
+              setState(() {});
             }
           }
         }
@@ -369,32 +375,118 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
     );
   }
 
+  /// Stillness check: when phone is placed on a table or motionless,
+  /// standard deviation of user acceleration is extremely low (< 0.28 m/s²).
+  bool _isMotionless() {
+    if (_accelBuffer.isEmpty) return false;
+    final mean = _accelBuffer.reduce((a, b) => a + b) / _accelBuffer.length;
+    final variance = _accelBuffer
+            .map((v) => pow(v - mean, 2))
+            .reduce((a, b) => a + b) /
+        _accelBuffer.length;
+    final stdDev = sqrt(variance);
+    final maxAccel = _accelBuffer.reduce(max);
+    return stdDev < 0.28 && maxAccel < 0.65;
+  }
+
+  /// Speed filter with deadband, EMA, and spike rejection.
+  double _smoothSpeed(double rawKmh) {
+    if (rawKmh < _speedDeadbandKmh || _isMotionless()) {
+      _smoothedSpeed = 0.0;
+      return 0.0;
+    }
+    if (_smoothedSpeed == null || _smoothedSpeed == 0.0) {
+      final capped = rawKmh > 20.0 ? 15.0 : rawKmh;
+      _smoothedSpeed = capped;
+      return capped;
+    }
+    final prev = _smoothedSpeed!;
+    var input = rawKmh;
+    // Disallow sudden jumps > 20 km/h in a fraction of a second
+    if ((input - prev) > 20.0) {
+      input = prev + 5.0;
+    }
+    final next = prev + 0.45 * (input - prev);
+    if (next < _speedDeadbandKmh) {
+      _smoothedSpeed = 0.0;
+      return 0.0;
+    }
+    _smoothedSpeed = next;
+    return next;
+  }
+
+  double _calculateBearing(double lat1, double lon1, double lat2, double lon2) {
+    final dLon = (lon2 - lon1) * (pi / 180.0);
+    final y = sin(dLon) * cos(lat2 * (pi / 180.0));
+    final x = cos(lat1 * (pi / 180.0)) * sin(lat2 * (pi / 180.0)) -
+        sin(lat1 * (pi / 180.0)) * cos(lat2 * (pi / 180.0)) * cos(dLon);
+    final brng = atan2(y, x) * (180.0 / pi);
+    return (brng + 360.0) % 360.0;
+  }
+
   void _handlePositionUpdate(Position position, TelemetryProvider telemetry) {
     if (!mounted) return;
 
-    _currentGpsPosition = position;
-    _pendingBroadcastPosition = position;
+    final now = DateTime.now();
+    double delta = 0.0;
+    double calcSpeedKmh = 0.0;
 
-    // Calculate distance traveled
-    if (_lastRecordedPosition != null) {
-      final delta = Geolocator.distanceBetween(
+    if (_lastRecordedPosition != null && _lastPositionTime != null) {
+      delta = Geolocator.distanceBetween(
         _lastRecordedPosition!.latitude,
         _lastRecordedPosition!.longitude,
         position.latitude,
         position.longitude,
       );
-      if (delta > 0.5 && delta < 500.0) { // filter noise
-        _distanceTraveledMeters += delta;
+      final dt = now.difference(_lastPositionTime!).inMilliseconds / 1000.0;
+      if (dt > 0.1) {
+        calcSpeedKmh = (delta / dt) * 3.6;
       }
     }
+
+    final bool motionless = _isMotionless();
+    final bool poorAccuracy = position.accuracy > 30.0;
+
+    // Cross-check raw speed against physical displacement to reject table jitter & Doppler spikes
+    double rawSpeed = position.speed * 3.6;
+    if (motionless || (delta < 1.5 && calcSpeedKmh < 2.5) || (poorAccuracy && delta < 5.0)) {
+      rawSpeed = 0.0;
+    } else if (rawSpeed > calcSpeedKmh + 20.0 && calcSpeedKmh > 0) {
+      rawSpeed = calcSpeedKmh + 5.0;
+    }
+
+    _currentSpeed = _smoothSpeed(rawSpeed);
+
+    // Only accumulate distance when actually moving (prevents indoor GPS drift accumulation)
+    if (_currentSpeed > _speedDeadbandKmh && delta > 2.0 && position.accuracy < 30.0) {
+      _distanceTraveledMeters += delta;
+    }
+
+    // Determine heading: when moving (speed >= 3.0), GPS bearing represents the vehicle direction along the road
+    if (_currentSpeed >= 3.0) {
+      if (position.heading > 0) {
+        _lastValidMovingHeading = TelemetryData.normalizeHeading(position.heading);
+      } else if (_lastRecordedPosition != null && delta > 3.0) {
+        _lastValidMovingHeading = _calculateBearing(
+          _lastRecordedPosition!.latitude,
+          _lastRecordedPosition!.longitude,
+          position.latitude,
+          position.longitude,
+        );
+      }
+    }
+
+    _currentGpsPosition = position;
+    _pendingBroadcastPosition = position;
     _lastRecordedPosition = position;
+    _lastPositionTime = now;
 
     _calculateNextStop();
 
-    // Broadcast with ultra-low latency trailing throttle (200ms)
+    // Broadcast with 500ms cadence to prevent socket bufferbloat on cellular network
     if (_broadcastThrottleTimer == null || !_broadcastThrottleTimer!.isActive) {
       _emitPosition(telemetry);
-      _broadcastThrottleTimer = Timer(const Duration(milliseconds: 200), () {
+      _broadcastThrottleTimer = Timer(const Duration(milliseconds: 500), () {
         if (_pendingBroadcastPosition != null) {
           _emitPosition(telemetry);
         }
@@ -407,15 +499,19 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
   void _emitPosition(TelemetryProvider telemetry) {
     if (_pendingBroadcastPosition == null) return;
     final pos = _pendingBroadcastPosition!;
-    final speedKmh = pos.speed * 3.6;
-    final heading = _currentCompassHeading ??
-        (pos.heading > 0 ? TelemetryData.normalizeHeading(pos.heading) : null);
+
+    // Heading priority:
+    // 1. When moving (speed >= 3.0), use vehicle traveling bearing
+    // 2. When stationary, retain last known moving bearing, or use smoothed compass
+    final double? heading = (_currentSpeed >= 3.0 && _lastValidMovingHeading != null)
+        ? _lastValidMovingHeading
+        : (_lastValidMovingHeading ?? _currentCompassHeading ?? (pos.heading > 0 ? TelemetryData.normalizeHeading(pos.heading) : null));
 
     telemetry.emitLocation(
       latitude: pos.latitude,
       longitude: pos.longitude,
-      speedKmh: speedKmh > 0 ? speedKmh : 0,
-      heading: heading,
+      speedKmh: _currentSpeed,
+      heading: heading != null ? TelemetryData.normalizeHeading(heading) : null,
       comfort: _currentComfort,
       routeId: _routeId,
     );
@@ -776,15 +872,14 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
             final isLive = _isTripActive || (telemetry.isConnected && telemetry.hasValidTelemetry);
             final currentTelemetry = telemetry.latestTelemetry;
 
-            // Use real, zero-latency local sensor readings for the driver's own display
-            final localSpeed = _currentGpsPosition != null
-                ? (_currentGpsPosition!.speed * 3.6).clamp(0.0, 140.0)
-                : (currentTelemetry?.speed ?? 0.0);
+            // Use filtered, zero-latency local sensor readings for the driver's own display
+            final localSpeed = _currentSpeed;
 
-            final localHeading = _currentCompassHeading ??
-                (_currentGpsPosition != null && _currentGpsPosition!.heading > 0
+            final localHeading = (_currentSpeed >= 3.0 && _lastValidMovingHeading != null)
+                ? _lastValidMovingHeading
+                : (_lastValidMovingHeading ?? _currentCompassHeading ?? (_currentGpsPosition != null && _currentGpsPosition!.heading > 0
                     ? TelemetryData.normalizeHeading(_currentGpsPosition!.heading)
-                    : currentTelemetry?.heading);
+                    : currentTelemetry?.heading));
 
             // Construct seamless live telemetry object for map
             final displayTelemetry = _currentGpsPosition != null
@@ -1397,10 +1492,22 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> with Tick
   String _getCardinal(double? deg) {
     if (deg == null) return '';
     final h = TelemetryData.normalizeHeading(deg);
-    if (h >= 315 || h < 45) return 'North';
-    if (h >= 45 && h < 135) return 'East';
-    if (h >= 135 && h < 225) return 'South';
-    return 'West';
+    if (h >= 348.75 || h < 11.25) return 'N (North)';
+    if (h >= 11.25 && h < 33.75) return 'NNE';
+    if (h >= 33.75 && h < 56.25) return 'NE (North-East)';
+    if (h >= 56.25 && h < 78.75) return 'ENE (East-North-East)';
+    if (h >= 78.75 && h < 101.25) return 'E (East)';
+    if (h >= 101.25 && h < 123.75) return 'ESE';
+    if (h >= 123.75 && h < 146.25) return 'SE (South-East)';
+    if (h >= 146.25 && h < 168.75) return 'SSE';
+    if (h >= 168.75 && h < 191.25) return 'S (South)';
+    if (h >= 191.25 && h < 213.75) return 'SSW';
+    if (h >= 213.75 && h < 236.25) return 'SW (South-West)';
+    if (h >= 236.25 && h < 258.75) return 'WSW';
+    if (h >= 258.75 && h < 281.25) return 'W (West)';
+    if (h >= 281.25 && h < 303.75) return 'WNW';
+    if (h >= 303.75 && h < 326.25) return 'NW (North-West)';
+    return 'NNW';
   }
 
   void _showStopDetailSheet(int index, Map<String, dynamic> stop) {

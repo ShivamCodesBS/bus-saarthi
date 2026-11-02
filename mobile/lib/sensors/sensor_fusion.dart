@@ -38,8 +38,8 @@ class SensorFusion {
   // the true value, which made the student UI jump between 0.1 and 55+ km/h.
   double? _smoothedSpeed;
   static const double _speedAlpha = 0.45; // EMA factor (lower = smoother)
-  static const double _speedSpikeKmh = 30; // reject >30 km/h jumps per second while moving
-  static const double _speedDeadbandKmh = 1.2; // readings below this near zero snap to 0
+  static const double _speedSpikeKmh = 20; // reject >20 km/h jumps per second
+  static const double _speedDeadbandKmh = 2.5; // readings below this near zero snap to 0
 
   // Ride-comfort hysteresis: a new label must repeat twice before it sticks,
   // otherwise potholes flap the badge between Smooth/Moderate/Rough.
@@ -169,19 +169,36 @@ class SensorFusion {
     return _comfortCurrent;
   }
 
-  /// EMA-smooth the raw GPS speed with spike rejection and a deadband, so a
-  /// dropped GPS fix cannot make the UI read 0 km/h mid-ride.
+  bool _isMotionless() {
+    if (_accelBuffer.isEmpty) return false;
+    final mean = _accelBuffer.reduce((a, b) => a + b) / _accelBuffer.length;
+    final variance = _accelBuffer.map((v) => pow(v - mean, 2)).reduce((a, b) => a + b) / _accelBuffer.length;
+    final stdDev = sqrt(variance);
+    final maxAccel = _accelBuffer.reduce(max);
+    return stdDev < 0.28 && maxAccel < 0.65;
+  }
+
+  /// EMA-smooth the raw GPS speed with stillness detection, spike rejection and deadband
   double _smoothSpeed(double rawKmh) {
-    if (_smoothedSpeed == null) {
-      _smoothedSpeed = rawKmh;
-      return rawKmh;
+    if (rawKmh < _speedDeadbandKmh || _isMotionless()) {
+      _smoothedSpeed = 0.0;
+      return 0.0;
+    }
+    if (_smoothedSpeed == null || _smoothedSpeed == 0.0) {
+      final capped = rawKmh > 20.0 ? 15.0 : rawKmh;
+      _smoothedSpeed = capped;
+      return capped;
     }
     final prev = _smoothedSpeed!;
     var input = rawKmh;
-    final spike = (input - prev).abs() > _speedSpikeKmh && prev > 10;
-    if (spike) input = prev; // hold the last sane value through the glitch
+    if ((input - prev) > _speedSpikeKmh) {
+      input = prev + 5.0;
+    }
     var next = prev + _speedAlpha * (input - prev);
-    if (next < _speedDeadbandKmh && input < _speedDeadbandKmh) next = 0;
+    if (next < _speedDeadbandKmh) {
+      _smoothedSpeed = 0.0;
+      return 0.0;
+    }
     _smoothedSpeed = next;
     return next;
   }
