@@ -53,10 +53,15 @@ const Home = () => {
     if (heading == null || isNaN(heading)) return '—';
     let h = Number(heading) % 360;
     if (h < 0) h += 360;
-    const dir = (h >= 315 || h < 45) ? 'North' :
-      (h >= 45 && h < 135) ? 'East' :
-      (h >= 135 && h < 225) ? 'South' : 'West';
-    return t(dir.toLowerCase());
+    const degStr = `${Math.round(h)}°`;
+    const key = (h >= 337.5 || h < 22.5) ? 'north' :
+      (h >= 22.5 && h < 67.5) ? 'northeast' :
+      (h >= 67.5 && h < 112.5) ? 'east' :
+      (h >= 112.5 && h < 157.5) ? 'southeast' :
+      (h >= 157.5 && h < 202.5) ? 'south' :
+      (h >= 202.5 && h < 247.5) ? 'southwest' :
+      (h >= 247.5 && h < 292.5) ? 'west' : 'northwest';
+    return `${degStr} ${t(key)}`;
   };
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [telemetry, setTelemetry] = useState(null);
@@ -336,8 +341,9 @@ const Home = () => {
           setMapCenter([data.location.lat, data.location.lng]);
         }
       }
+      const rawSpeed = Number(data.speed) || 0;
       setTelemetry({
-        speed: data.speed || 0,
+        speed: rawSpeed < 2.0 ? 0 : rawSpeed,
         heading: data.heading || 0,
         comfort: data.comfort || 'Smooth',
         lastUpdated: new Date().toISOString()

@@ -546,8 +546,9 @@ const ParentDashboard = () => {
       if (data.location?.lat && data.location?.lng) {
         setBusLocation([data.location.lat, data.location.lng]);
       }
+      const rawSpeed = Number(data.speed) || 0;
       setTelemetry({
-        speed: data.speed || 0,
+        speed: rawSpeed < 2.0 ? 0 : rawSpeed,
         heading: data.heading || 0,
         comfort: data.comfort || 'Smooth',
         lastUpdated: new Date().toISOString(),
@@ -606,10 +607,15 @@ const ParentDashboard = () => {
     if (deg == null || isNaN(deg)) return '—';
     let h = Number(deg) % 360;
     if (h < 0) h += 360;
-    if (h >= 315 || h < 45) return 'N ↑';
-    if (h >= 45 && h < 135) return 'E →';
-    if (h >= 135 && h < 225) return 'S ↓';
-    return 'W ←';
+    const degStr = `${Math.round(h)}°`;
+    if (h >= 337.5 || h < 22.5) return `${degStr} N ↑`;
+    if (h >= 22.5 && h < 67.5) return `${degStr} NE ↗`;
+    if (h >= 67.5 && h < 112.5) return `${degStr} E →`;
+    if (h >= 112.5 && h < 157.5) return `${degStr} SE ↘`;
+    if (h >= 157.5 && h < 202.5) return `${degStr} S ↓`;
+    if (h >= 202.5 && h < 247.5) return `${degStr} SW ↙`;
+    if (h >= 247.5 && h < 292.5) return `${degStr} W ←`;
+    return `${degStr} NW ↖`;
   };
 
   const formatTime = (str) => {
