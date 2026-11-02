@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/grievance_model.dart';
 import '../models/route_model.dart';
@@ -41,6 +43,15 @@ class ParentChild {
       boardedAt: boardedAt,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+    'loginId': loginId,
+    'name': name,
+    'routeId': routeId,
+    'feeStatus': feeStatus,
+    'boardedToday': boardedToday,
+    'boardedAt': boardedAt?.toIso8601String(),
+  };
 }
 
 /// Merge banner state for the child's route.
@@ -56,6 +67,20 @@ class ChildMergeInfo {
     this.targetBusNumber,
     this.targetRouteName,
   });
+
+  Map<String, dynamic> toJson() => {
+    'originalRouteId': originalRouteId,
+    'activeRouteId': activeRouteId,
+    'targetBusNumber': targetBusNumber,
+    'targetRouteName': targetRouteName,
+  };
+
+  factory ChildMergeInfo.fromJson(Map<String, dynamic> json) => ChildMergeInfo(
+    originalRouteId: (json['originalRouteId'] ?? '').toString(),
+    activeRouteId: (json['activeRouteId'] ?? '').toString(),
+    targetBusNumber: json['targetBusNumber']?.toString(),
+    targetRouteName: json['targetRouteName']?.toString(),
+  );
 }
 
 /// Telemetry snapshot for the parent's tracking tab.
@@ -73,7 +98,7 @@ class ParentTelemetry {
   });
 }
 
-/// State machine behind the parent dashboard — port of ParentDashboard.jsx.
+/// State machine behind the parent dashboard — matching Web ParentDashboard.jsx.
 class ParentProvider extends ChangeNotifier {
   final UserModel user;
   BuildContext? _toastContext;
@@ -82,7 +107,9 @@ class ParentProvider extends ChangeNotifier {
   int _selectedChildIndex = 0;
 
   ParentChild? get child =>
-      children.isNotEmpty ? children[_selectedChildIndex] : null;
+      children.isNotEmpty && _selectedChildIndex < children.length
+      ? children[_selectedChildIndex]
+      : null;
   int get selectedChildIndex => _selectedChildIndex;
   int get childCount => children.length;
 
@@ -103,6 +130,7 @@ class ParentProvider extends ChangeNotifier {
   bool autoFollow = true;
 
   bool isLoading = true;
+  bool isRefreshing = false;
   final Set<String> _grievanceBusy = {};
 
   final StudentSocketService _socket = StudentSocketService();
@@ -118,6 +146,8 @@ class ParentProvider extends ChangeNotifier {
 
   String get activeRouteId => mergeInfo?.activeRouteId ?? child?.routeId ?? '';
 
+  String get _cacheKey => 'parent_dashboard_cache_${user.loginId}';
+
   /// Switch to a different child
   void selectChild(int index) {
     if (index >= 0 && index < children.length && index != _selectedChildIndex) {
@@ -127,7 +157,7 @@ class ParentProvider extends ChangeNotifier {
       _fetchAll();
       _fetchChildGrievances();
       _connectTelemetry();
-      // Re-fetch speed analytics for current date if on analytics tab
+      // Re-fetch speed analytics for current date
       final now = DateTime.now();
       final date =
           '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
@@ -151,10 +181,96 @@ class ParentProvider extends ChangeNotifier {
   }
 
   Future<void> load() async {
-    await _fetchAll();
-    _fetchBroadcasts();
-    _fetchChildGrievances();
+    // 1. SWR Cache load: Unblock UI in 0ms if previous session data exists
+    await _loadFromCache();
+
+    // 2. Fetch fresh data in background
+    await Future.wait([
+      _fetchAll(),
+      _fetchBroadcasts(),
+      _fetchChildGrievances(),
+    ]);
+
     _connectTelemetry();
+  }
+
+  Future<void> refresh() async {
+    isRefreshing = true;
+    _notify();
+    await Future.wait([
+      _fetchAll(),
+      _fetchBroadcasts(),
+      _fetchChildGrievances(),
+    ]);
+    isRefreshing = false;
+    _notify();
+  }
+
+  Future<void> _loadFromCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_cacheKey);
+      if (raw == null || raw.isEmpty) return;
+
+      final data = jsonDecode(raw);
+      if (data is! Map) return;
+
+      if (data['children'] is List) {
+        children = (data['children'] as List)
+            .whereType<Map>()
+            .map((e) => ParentChild.fromJson(Map<String, dynamic>.from(e)))
+            .toList();
+      }
+
+      if (data['attendance'] is Map) {
+        final att = Map<String, dynamic>.from(data['attendance'] as Map);
+        attendancePercent = int.tryParse('${att['attendancePercent'] ?? 0}');
+        monthlyAttendance = int.tryParse('${att['monthlyAttendance'] ?? 0}');
+        workingDays = int.tryParse('${att['workingDays'] ?? 0}');
+        if (att['days'] is List) {
+          attendanceDays = (att['days'] as List)
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+        }
+      }
+
+      if (data['routeInfo'] is Map) {
+        routeInfo = RouteInfo.fromJson(
+          Map<String, dynamic>.from(data['routeInfo'] as Map),
+        );
+      }
+
+      if (data['broadcasts'] is List) {
+        broadcasts = (data['broadcasts'] as List)
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      }
+
+      if (children.isNotEmpty) {
+        isLoading = false;
+        _notify();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveToCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cacheData = {
+        'children': children.map((c) => c.toJson()).toList(),
+        'attendance': {
+          'attendancePercent': attendancePercent,
+          'monthlyAttendance': monthlyAttendance,
+          'workingDays': workingDays,
+          'days': attendanceDays,
+        },
+        'routeInfo': routeInfo?.toJson(),
+        'broadcasts': broadcasts,
+      };
+      await prefs.setString(_cacheKey, jsonEncode(cacheData));
+    } catch (_) {}
   }
 
   Future<void> _fetchAll() async {
@@ -176,6 +292,7 @@ class ParentProvider extends ChangeNotifier {
         if (_selectedChildIndex >= children.length) _selectedChildIndex = 0;
         await _fetchChildData(children[_selectedChildIndex], generation);
       }
+      _saveToCache();
     } catch (_) {
     } finally {
       if (generation == _childSelectionGeneration) {
@@ -337,7 +454,7 @@ class ParentProvider extends ChangeNotifier {
     _socket.connect(route, user.loginId);
   }
 
-  // ── Grievance actions (parent-side confirm/reopen) ────────────────────
+  // ── Grievance actions (parent-side confirm/reopen/create) ────────────
   bool isGrievanceBusy(String id) => _grievanceBusy.contains(id);
 
   Future<void> confirmGrievance(String id) async {
@@ -409,6 +526,37 @@ class ParentProvider extends ChangeNotifier {
     }
   }
 
+  Future<bool> createGrievance({required String text, String? category}) async {
+    if (text.trim().isEmpty) return false;
+    try {
+      await ApiClient.dio.post(
+        '/api/grievance',
+        data: {
+          'text': text.trim(),
+          'type': 'text',
+          'category': category ?? 'General',
+          if (activeRouteId.isNotEmpty) 'route': activeRouteId,
+          'isAnonymous': false,
+        },
+        options: Options(headers: _authHeaders),
+      );
+      ApiClient.toast(
+        _toastContext!,
+        'Complaint submitted successfully.',
+        kind: ToastKind.success,
+      );
+      await _fetchChildGrievances();
+      return true;
+    } catch (e) {
+      ApiClient.toast(
+        _toastContext!,
+        ApiClient.friendlyError(e, 'Could not submit complaint.'),
+        kind: ToastKind.error,
+      );
+      return false;
+    }
+  }
+
   // ── Speed analytics ───────────────────────────────────────────────────
   Future<void> fetchSpeedAnalytics(String date) async {
     final generation = _childSelectionGeneration;
@@ -419,29 +567,34 @@ class ParentProvider extends ChangeNotifier {
         '/api/telemetry/history/$routeId?date=$date',
         options: Options(headers: _authHeaders),
       );
-      if (!_isCurrentChildRequest(generation) || activeRouteId != routeId)
+      if (!_isCurrentChildRequest(generation) || activeRouteId != routeId) {
         return;
+      }
       speedData = res.data is Map ? Map<String, dynamic>.from(res.data) : null;
     } catch (_) {
-      if (!_isCurrentChildRequest(generation) || activeRouteId != routeId)
+      if (!_isCurrentChildRequest(generation) || activeRouteId != routeId) {
         return;
+      }
       speedData = null;
     }
     _notify();
   }
 
   // ── Leave marking ─────────────────────────────────────────────────────
-  Future<void> markLeave(String date) async {
+  Future<void> markLeave(
+    String date, {
+    String reason = 'Sick / Medical Leave',
+  }) async {
     if (child == null) return;
     try {
       await ApiClient.dio.post(
         '/api/parents/child/${child!.loginId}/leave',
-        data: {'date': date},
+        data: {'date': date, 'reason': reason},
         options: Options(headers: _authHeaders),
       );
       ApiClient.toast(
         _toastContext!,
-        'Leave marked for $date',
+        'Leave marked for $date ($reason)',
         kind: ToastKind.success,
       );
     } catch (_) {

@@ -62,6 +62,16 @@ class RouteInfo {
       .map((stop) => stop?.toString().trim() ?? '')
       .where((stop) => stop.isNotEmpty)
       .toList();
+
+  Map<String, dynamic> toJson() => {
+    'routeId': routeId,
+    'routeName': routeName,
+    'busNumber': busNumber,
+    'stops': stops,
+    'city': city,
+    'destination': destination,
+    'driver': driver?.toJson(),
+  };
 }
 
 class DriverInfo {
@@ -74,4 +84,6 @@ class DriverInfo {
     name: (json['name'] ?? json['driver_name'])?.toString(),
     phone: (json['phone'] ?? json['phone_number'])?.toString(),
   );
+
+  Map<String, dynamic> toJson() => {'name': name, 'phone': phone};
 }

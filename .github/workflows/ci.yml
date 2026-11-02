@@ -82,7 +82,7 @@ jobs:
       - name: Build frontend
         run: npm run build
         env:
-          VITE_API_URL: https://api.bussaarthi.com
+          VITE_API_URL: https://invertis-bus-saarthi.onrender.com
 
       - name: Upload frontend artifacts
         uses: actions/upload-artifact@v4
@@ -122,7 +122,7 @@ jobs:
       - name: Build admin frontend
         run: npm run build
         env:
-          VITE_API_URL: https://api.bussaarthi.com
+          VITE_API_URL: https://invertis-bus-saarthi.onrender.com
 
       - name: Upload admin artifacts
         uses: actions/upload-artifact@v4
@@ -162,8 +162,8 @@ jobs:
       - name: Build APK
         run: |
           flutter build apk --release \
-            --dart-define=API_URL=https://api.bussaarthi.com \
-            --dart-define=SOCKET_URL=https://api.bussaarthi.com
+            --dart-define=API_URL=https://invertis-bus-saarthi.onrender.com \
+            --dart-define=SOCKET_URL=https://invertis-bus-saarthi.onrender.com
         working-directory: ./bus_saarthi_app
 
       - name: Upload APK
@@ -204,8 +204,8 @@ jobs:
       - name: Build APK (Driver mode)
         run: |
           flutter build apk --release \
-            --dart-define=API_URL=https://api.bussaarthi.com \
-            --dart-define=SOCKET_URL=https://api.bussaarthi.com \
+            --dart-define=API_URL=https://invertis-bus-saarthi.onrender.com \
+            --dart-define=SOCKET_URL=https://invertis-bus-saarthi.onrender.com \
             --dart-define=APP_MODE=driver
         working-directory: ./mobile
 
@@ -219,8 +219,8 @@ jobs:
       - name: Build APK (BusDevice mode)
         run: |
           flutter build apk --release \
-            --dart-define=API_URL=https://api.bussaarthi.com \
-            --dart-define=SOCKET_URL=https://api.bussaarthi.com \
+            --dart-define=API_URL=https://invertis-bus-saarthi.onrender.com \
+            --dart-define=SOCKET_URL=https://invertis-bus-saarthi.onrender.com \
             --dart-define=APP_MODE=busDevice \
             --dart-define=HARDWARE_TOKEN=${{ secrets.HARDWARE_TOKEN }} \
             --dart-define=ROUTE_ID=4

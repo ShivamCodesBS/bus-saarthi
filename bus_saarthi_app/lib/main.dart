@@ -57,6 +57,7 @@ class BusSaarthiApp extends StatelessWidget {
           );
 
           return MaterialApp(
+            navigatorKey: rootNavigatorKey,
             title: 'Bus Saarthi',
             debugShowCheckedModeBanner: false,
             theme: AppTheme.light(),

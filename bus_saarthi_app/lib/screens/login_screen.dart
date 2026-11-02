@@ -166,15 +166,15 @@ class _LoginScreenState extends State<LoginScreen> {
       if (err != null && err.contains('This account is registered as')) {
         if (lang.lang == 'hi') {
           if (_passengerKind == 'staff') {
-            err = 'यह विद्यार्थी खाता है। कृपया ड्रॉपडाउन से "विद्यार्थी" चुनें।';
+            err =
+                'यह विद्यार्थी खाता है। कृपया ड्रॉपडाउन से "विद्यार्थी" चुनें।';
           } else {
-            err = 'यह स्टाफ़/शिक्षक खाता है। कृपया ड्रॉपडाउन से "स्टाफ़ / शिक्षक" चुनें।';
+            err =
+                'यह स्टाफ़/शिक्षक खाता है। कृपया ड्रॉपडाउन से "स्टाफ़ / शिक्षक" चुनें।';
           }
         }
       }
-      setState(
-        () => _errorMessage = err ?? lang.t('invalidCredentials'),
-      );
+      setState(() => _errorMessage = err ?? lang.t('invalidCredentials'));
     }
   }
 
@@ -247,7 +247,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 Center(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+                      final bottomInset = MediaQuery.of(
+                        context,
+                      ).viewInsets.bottom;
                       return SingleChildScrollView(
                         padding: EdgeInsets.only(
                           top: 85,
@@ -257,7 +259,8 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         child: ConstrainedBox(
                           constraints: BoxConstraints(
-                            minHeight: constraints.maxHeight - 85 - 20 - bottomInset,
+                            minHeight:
+                                constraints.maxHeight - 85 - 20 - bottomInset,
                           ),
                           child: Center(
                             child: _LoginCard(
@@ -378,9 +381,13 @@ class _TopBar extends StatelessWidget {
                 borderRadius: BorderRadius.circular(20),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(20),
-                  onTap: () => lang.setLanguage(lang.lang == 'en' ? 'hi' : 'en'),
+                  onTap: () =>
+                      lang.setLanguage(lang.lang == 'en' ? 'hi' : 'en'),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 7,
+                    ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -457,7 +464,9 @@ class _LoginCard extends StatelessWidget {
           ? (lang.lang == 'hi' ? 'कर्मचारी आईडी' : 'Employee ID')
           : lang.t('passengerId');
     }
-    return lang.lang == 'hi' ? 'फ़ोन नंबर / पेरेंट आईडी' : 'Phone Number / Parent ID';
+    return lang.lang == 'hi'
+        ? 'फ़ोन नंबर / पेरेंट आईडी'
+        : 'Phone Number / Parent ID';
   }
 
   String get _idHint {
@@ -466,7 +475,9 @@ class _LoginCard extends StatelessWidget {
           ? 'e.g. T001'
           : lang.t('enterPassengerId');
     }
-    return lang.lang == 'hi' ? 'फ़ोन नंबर या आईडी दर्ज करें' : 'Enter Phone Number or ID';
+    return lang.lang == 'hi'
+        ? 'फ़ोन नंबर या आईडी दर्ज करें'
+        : 'Enter Phone Number or ID';
   }
 
   @override
@@ -485,7 +496,9 @@ class _LoginCard extends StatelessWidget {
             vertical: 24,
           ),
           decoration: BoxDecoration(
-            color: const Color(0x2213233D), // Translucent frosted glass matching web
+            color: const Color(
+              0x2213233D,
+            ), // Translucent frosted glass matching web
             borderRadius: BorderRadius.circular(20),
             border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
             boxShadow: [
@@ -509,12 +522,17 @@ class _LoginCard extends StatelessWidget {
                       filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
                       child: Container(
                         height: 58,
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 8,
+                        ),
                         margin: const EdgeInsets.only(bottom: 10),
                         decoration: BoxDecoration(
                           color: Colors.white.withValues(alpha: 0.30),
                           borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.white.withValues(alpha: 0.45)),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.45),
+                          ),
                           boxShadow: [
                             BoxShadow(
                               color: Colors.black.withValues(alpha: 0.15),
@@ -583,7 +601,9 @@ class _LoginCard extends StatelessWidget {
                 hint: _idHint,
                 icon: loginType == 'parent'
                     ? LucideIcons.phone
-                    : (passengerKind == 'staff' ? LucideIcons.briefcase : LucideIcons.user),
+                    : (passengerKind == 'staff'
+                          ? LucideIcons.briefcase
+                          : LucideIcons.user),
                 obscure: false,
               ),
               const SizedBox(height: 14),
@@ -610,7 +630,10 @@ class _LoginCard extends StatelessWidget {
               // ── Error Message Banner ──
               if (errorMessage != null && errorMessage!.isNotEmpty) ...[
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 11,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0x33CF1322),
                     borderRadius: BorderRadius.circular(10),
@@ -658,7 +681,9 @@ class _LoginCard extends StatelessWidget {
                           Text(
                             locked
                                 ? lang.t('locked')
-                                : (isLoading ? lang.t('signingIn') : lang.t('signIn')),
+                                : (isLoading
+                                      ? lang.t('signingIn')
+                                      : lang.t('signIn')),
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 16.5,
@@ -731,7 +756,10 @@ class _GlassField extends StatelessWidget {
         hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.50)),
         filled: true,
         fillColor: Colors.white.withValues(alpha: 0.08),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 13,
+        ),
         prefixIcon: Padding(
           padding: const EdgeInsets.only(left: 14, right: 10),
           child: Icon(
@@ -748,7 +776,10 @@ class _GlassField extends StatelessWidget {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.55), width: 1.5),
+          borderSide: BorderSide(
+            color: Colors.white.withValues(alpha: 0.55),
+            width: 1.5,
+          ),
         ),
       ),
     );
@@ -778,8 +809,9 @@ class _TwoRoleTabs extends StatelessWidget {
         ? (lang.lang == 'hi' ? 'स्टाफ़' : 'Staff')
         : (lang.lang == 'hi' ? 'विद्यार्थी' : 'Student');
 
-    final IconData passengerIcon =
-        isPassenger && passengerKind == 'staff' ? LucideIcons.briefcase : LucideIcons.graduationCap;
+    final IconData passengerIcon = isPassenger && passengerKind == 'staff'
+        ? LucideIcons.briefcase
+        : LucideIcons.graduationCap;
 
     return Container(
       padding: const EdgeInsets.all(4),
@@ -828,7 +860,9 @@ class _TwoRoleTabs extends StatelessWidget {
                         color: isPassenger
                             ? Colors.white
                             : Colors.white.withValues(alpha: 0.8),
-                        fontWeight: isPassenger ? FontWeight.w700 : FontWeight.w600,
+                        fontWeight: isPassenger
+                            ? FontWeight.w700
+                            : FontWeight.w600,
                         fontSize: 14,
                         letterSpacing: -0.2,
                       ),
@@ -870,7 +904,11 @@ class _TwoRoleTabs extends StatelessWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(LucideIcons.users, size: 16, color: Colors.white),
+                    const Icon(
+                      LucideIcons.users,
+                      size: 16,
+                      color: Colors.white,
+                    ),
                     const SizedBox(width: 7),
                     Text(
                       lang.lang == 'hi' ? 'पेरेंट' : 'Parent',
@@ -878,7 +916,9 @@ class _TwoRoleTabs extends StatelessWidget {
                         color: !isPassenger
                             ? Colors.white
                             : Colors.white.withValues(alpha: 0.8),
-                        fontWeight: !isPassenger ? FontWeight.w700 : FontWeight.w600,
+                        fontWeight: !isPassenger
+                            ? FontWeight.w700
+                            : FontWeight.w600,
                         fontSize: 14,
                         letterSpacing: -0.2,
                       ),
@@ -998,7 +1038,9 @@ class _PassengerKindSelect extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: const Color(0xD10C1E36), // rgba(12,30,54,0.82)
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.22),
+                  ),
                   boxShadow: const [
                     BoxShadow(
                       color: Color(0x66000000),
@@ -1014,7 +1056,10 @@ class _PassengerKindSelect extends StatelessWidget {
                       onTap: () => onPick(opt.id),
                       child: Container(
                         width: double.infinity,
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 11,
+                        ),
                         decoration: BoxDecoration(
                           color: active
                               ? Colors.white.withValues(alpha: 0.18)
@@ -1054,7 +1099,9 @@ class _PassengerKindSelect extends StatelessWidget {
                                   Text(
                                     opt.hint,
                                     style: TextStyle(
-                                      color: Colors.white.withValues(alpha: 0.70),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.70,
+                                      ),
                                       fontSize: 11,
                                     ),
                                   ),

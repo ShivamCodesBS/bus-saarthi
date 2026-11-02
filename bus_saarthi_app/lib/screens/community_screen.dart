@@ -15,6 +15,7 @@ import '../providers/language_provider.dart';
 import '../services/api_client.dart';
 import '../widgets/media_viewer.dart';
 import 'home_screen.dart';
+import 'login_screen.dart';
 
 /// 1:1 port of the web Community page (grievance portal): blue navbar with
 /// search/sort strip, filter pills, the feed of complaint cards, the
@@ -26,7 +27,7 @@ class CommunityScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final user = context.watch<AuthProvider>().user;
     if (user == null) {
-      return const Scaffold(body: SizedBox.shrink());
+      return const LoginScreen();
     }
     return ChangeNotifierProvider(
       create: (_) {
@@ -70,7 +71,7 @@ class _CommunityViewState extends State<_CommunityView> {
     final community = context.watch<CommunityProvider>();
     final user = context.watch<AuthProvider>().user;
     if (user == null) {
-      return const Scaffold(body: SizedBox.shrink());
+      return const LoginScreen();
     }
     final canCreateComplaint = !const {
       'admin',
@@ -310,7 +311,9 @@ class _Navbar extends StatelessWidget {
                                     isDense: true,
                                     filled: false,
                                     fillColor: Colors.transparent,
-                                    contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      vertical: 6,
+                                    ),
                                     border: InputBorder.none,
                                     enabledBorder: InputBorder.none,
                                     focusedBorder: InputBorder.none,
@@ -834,11 +837,12 @@ class _GrievanceCard extends StatelessWidget {
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
                               color: isMine
-                                  ? AppColors.primaryBlue
-                                      .withValues(alpha: isDark ? 0.22 : 0.10)
+                                  ? AppColors.primaryBlue.withValues(
+                                      alpha: isDark ? 0.22 : 0.10,
+                                    )
                                   : (isDark
-                                      ? AppColors.darkSecondary
-                                      : const Color(0xFFF1F5F9)),
+                                        ? AppColors.darkSecondary
+                                        : const Color(0xFFF1F5F9)),
                               shape: BoxShape.circle,
                             ),
                             child: Icon(
@@ -867,8 +871,11 @@ class _GrievanceCard extends StatelessWidget {
                                 const SizedBox(height: 2),
                                 Row(
                                   children: [
-                                    Icon(LucideIcons.bus,
-                                        size: 12, color: textLight),
+                                    Icon(
+                                      LucideIcons.bus,
+                                      size: 12,
+                                      color: textLight,
+                                    ),
                                     const SizedBox(width: 4),
                                     Flexible(
                                       child: Text(
@@ -897,18 +904,20 @@ class _GrievanceCard extends StatelessWidget {
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   _TicketBadge(
-                                      id: grievance.id, isDark: isDark),
+                                    id: grievance.id,
+                                    isDark: isDark,
+                                  ),
                                   if (grievance.category != null &&
                                       grievance.category!.isNotEmpty) ...[
                                     const SizedBox(width: 4),
                                     _CategoryBadge(
-                                        category: grievance.category!),
+                                      category: grievance.category!,
+                                    ),
                                   ],
                                   if (grievance.reopenCount > 0 &&
                                       grievance.status != 'closed') ...[
                                     const SizedBox(width: 4),
-                                    _ReopenBadge(
-                                        count: grievance.reopenCount),
+                                    _ReopenBadge(count: grievance.reopenCount),
                                   ],
                                 ],
                               ),
@@ -923,7 +932,10 @@ class _GrievanceCard extends StatelessWidget {
                       Text(
                         grievance.text,
                         style: TextStyle(
-                            fontSize: 14, height: 1.5, color: textDark),
+                          fontSize: 14,
+                          height: 1.5,
+                          color: textDark,
+                        ),
                       ),
 
                       // Media
@@ -948,8 +960,9 @@ class _GrievanceCard extends StatelessWidget {
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(14),
                               child: Container(
-                                constraints:
-                                    const BoxConstraints(maxHeight: 280),
+                                constraints: const BoxConstraints(
+                                  maxHeight: 280,
+                                ),
                                 width: double.infinity,
                                 color: isDark
                                     ? AppColors.darkBg
@@ -1006,12 +1019,15 @@ class _GrievanceCard extends StatelessWidget {
                         Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: AppColors.primaryBlue
-                                .withValues(alpha: 0.06),
+                            color: AppColors.primaryBlue.withValues(
+                              alpha: 0.06,
+                            ),
                             borderRadius: BorderRadius.circular(8),
                             border: Border(
                               left: BorderSide(
-                                  color: AppColors.primaryBlue, width: 3),
+                                color: AppColors.primaryBlue,
+                                width: 3,
+                              ),
                             ),
                           ),
                           child: Column(
@@ -1051,15 +1067,15 @@ class _GrievanceCard extends StatelessWidget {
                               color: grievance.hasUpvotedLocally
                                   ? AppColors.primaryBlue
                                   : (isDark
-                                      ? const Color(0xFF1E293B)
-                                      : const Color(0xFFF1F5F9)),
+                                        ? const Color(0xFF1E293B)
+                                        : const Color(0xFFF1F5F9)),
                               borderRadius: BorderRadius.circular(30),
                               border: Border.all(
                                 color: grievance.hasUpvotedLocally
                                     ? AppColors.primaryBlue
                                     : (isDark
-                                        ? const Color(0xFF334155)
-                                        : const Color(0xFFE2E8F0)),
+                                          ? const Color(0xFF334155)
+                                          : const Color(0xFFE2E8F0)),
                               ),
                             ),
                             child: Material(
@@ -1096,8 +1112,10 @@ class _GrievanceCard extends StatelessWidget {
                                             color: grievance.hasUpvotedLocally
                                                 ? Colors.white
                                                 : (isDark
-                                                    ? Colors.white
-                                                    : const Color(0xFF1E293B)),
+                                                      ? Colors.white
+                                                      : const Color(
+                                                          0xFF1E293B,
+                                                        )),
                                           ),
                                         ),
                                       ],
@@ -1164,9 +1182,7 @@ class _GrievanceCard extends StatelessWidget {
                   bottom: 0,
                   left: 0,
                   width: 5.5,
-                  child: Container(
-                    color: _leftBorderColor,
-                  ),
+                  child: Container(color: _leftBorderColor),
                 ),
               ],
             ),
@@ -1608,7 +1624,8 @@ class _MyComplaintsView extends StatelessWidget {
                     borderRadius: BorderRadius.circular(24),
                     child: InkWell(
                       borderRadius: BorderRadius.circular(24),
-                      onTap: () => _showCreateComplaintSheet(context, community),
+                      onTap: () =>
+                          _showCreateComplaintSheet(context, community),
                       child: Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 12,
@@ -1781,9 +1798,7 @@ class _MyComplaintsView extends StatelessWidget {
                       bottom: 0,
                       left: 0,
                       width: 5.5,
-                      child: Container(
-                        color: AppColors.primaryBlue,
-                      ),
+                      child: Container(color: AppColors.primaryBlue),
                     ),
                   ],
                 ),

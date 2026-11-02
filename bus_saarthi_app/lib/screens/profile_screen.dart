@@ -244,7 +244,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final lang = context.watch<LanguageProvider>();
     final user = context.watch<AuthProvider>().user;
     if (user == null) {
-      return const Scaffold(body: SizedBox.shrink());
+      return const LoginScreen();
     }
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textDark = isDark ? AppColors.darkText : AppColors.lightText;
@@ -305,13 +305,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         borderRadius: BorderRadius.circular(20),
                         onTap: () async {
                           await context.read<AuthProvider>().logout();
-                          if (!context.mounted) return;
-                          Navigator.of(context).pushAndRemoveUntil(
-                            MaterialPageRoute(
-                              builder: (_) => const LoginScreen(),
-                            ),
-                            (route) => false,
-                          );
                         },
                         child: const Padding(
                           padding: EdgeInsets.symmetric(

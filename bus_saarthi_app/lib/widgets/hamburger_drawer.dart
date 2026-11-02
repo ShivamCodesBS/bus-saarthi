@@ -27,14 +27,18 @@ class HamburgerDrawer extends StatelessWidget {
   Widget build(BuildContext context) {
     final lang = context.watch<LanguageProvider>();
     final bool isDark = Theme.of(context).brightness == Brightness.dark;
-    final Color borderColor = isDark ? AppColors.darkBorder : AppColors.lightBorder;
+    final Color borderColor = isDark
+        ? AppColors.darkBorder
+        : AppColors.lightBorder;
     final Color textDark = isDark ? AppColors.darkText : AppColors.lightText;
     final Color bgColor = isDark ? AppColors.darkCard : AppColors.lightCard;
     final Color bgSoft = isDark ? AppColors.darkBg : AppColors.lightBg;
 
     void navigate(Widget screen) {
       onClose();
-      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => screen));
+      Navigator.of(
+        context,
+      ).pushReplacement(MaterialPageRoute(builder: (_) => screen));
     }
 
     return SafeArea(
@@ -53,24 +57,37 @@ class HamburgerDrawer extends StatelessWidget {
             children: [
               // Header
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                decoration: BoxDecoration(border: Border(bottom: BorderSide(color: borderColor))),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 16,
+                ),
+                decoration: BoxDecoration(
+                  border: Border(bottom: BorderSide(color: borderColor)),
+                ),
                 child: Row(
                   children: [
-                    Image.asset('assets/images/logo.png', height: 30, errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+                    Image.asset(
+                      'assets/images/logo.png',
+                      height: 30,
+                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text.rich(
                         TextSpan(
                           text: 'BUS ',
                           style: const TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 15,
-                              color: AppColors.primaryBlue),
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                            color: AppColors.primaryBlue,
+                          ),
                           children: const [
                             TextSpan(
-                                text: 'SAARTHI',
-                                style: TextStyle(color: AppColors.secondaryOrange)),
+                              text: 'SAARTHI',
+                              style: TextStyle(
+                                color: AppColors.secondaryOrange,
+                              ),
+                            ),
                           ],
                         ),
                         overflow: TextOverflow.ellipsis,
@@ -104,7 +121,9 @@ class HamburgerDrawer extends StatelessWidget {
                               borderRadius: BorderRadius.circular(12),
                               boxShadow: [
                                 BoxShadow(
-                                  color: AppColors.secondaryOrange.withValues(alpha: 0.30),
+                                  color: AppColors.secondaryOrange.withValues(
+                                    alpha: 0.30,
+                                  ),
                                   blurRadius: 14,
                                   offset: const Offset(0, 4),
                                 ),
@@ -112,12 +131,19 @@ class HamburgerDrawer extends StatelessWidget {
                             ),
                             child: Row(
                               children: [
-                                const Icon(LucideIcons.users, size: 22, color: Colors.white),
+                                const Icon(
+                                  LucideIcons.users,
+                                  size: 22,
+                                  color: Colors.white,
+                                ),
                                 const SizedBox(width: 14),
                                 Text(
                                   lang.t('busCommunity'),
                                   style: const TextStyle(
-                                      color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600),
+                                    color: Colors.white,
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
                               ],
                             ),
@@ -162,7 +188,9 @@ class HamburgerDrawer extends StatelessWidget {
               // Logout
               Container(
                 padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(border: Border(top: BorderSide(color: borderColor))),
+                decoration: BoxDecoration(
+                  border: Border(top: BorderSide(color: borderColor)),
+                ),
                 child: Material(
                   color: const Color(0x1ACF1322),
                   borderRadius: BorderRadius.circular(10),
@@ -171,22 +199,24 @@ class HamburgerDrawer extends StatelessWidget {
                     onTap: () async {
                       onClose();
                       await context.read<AuthProvider>().logout();
-                      if (!context.mounted) return;
-                      Navigator.of(context).pushAndRemoveUntil(
-                        MaterialPageRoute(builder: (_) => const LoginScreen()),
-                        (route) => false,
-                      );
                     },
                     child: Padding(
                       padding: const EdgeInsets.all(14),
                       child: Row(
                         children: [
-                          const Icon(LucideIcons.logOut, size: 21, color: Color(0xFFCF1322)),
+                          const Icon(
+                            LucideIcons.logOut,
+                            size: 21,
+                            color: Color(0xFFCF1322),
+                          ),
                           const SizedBox(width: 14),
                           Text(
                             lang.t('logout'),
                             style: const TextStyle(
-                                color: Color(0xFFCF1322), fontSize: 15.5, fontWeight: FontWeight.w600),
+                              color: Color(0xFFCF1322),
+                              fontSize: 15.5,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ],
                       ),
