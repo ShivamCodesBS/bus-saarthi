@@ -1605,7 +1605,7 @@ const TransportInchargeDashboard = () => {
             </div>
 
             {/* Face reset requests raised from user Settings pages */}
-            <FaceResetRequests user={user} onChanged={refetchUsers} />
+            <FaceResetRequests user={user} users={usersList} onChanged={refetchUsers} />
 
             <div className="flex flex-wrap gap-3 mb-6">
               <button onClick={() => setUserFilter('passenger')} style={{ padding: '0.5rem 1.5rem', backgroundColor: userFilter === 'passenger' ? 'var(--primary-blue)' : '#f0f0f0', color: userFilter === 'passenger' ? 'white' : 'var(--text-dark)', borderRadius: '8px', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Passengers</button>
