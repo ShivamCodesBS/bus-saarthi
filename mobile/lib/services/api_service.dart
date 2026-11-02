@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../core/constants.dart';
+import 'auth_service.dart';
 import '../models/attendance_payload.dart';
 
 /// API service for communicating with the Bus Saarthi backend.
@@ -8,6 +9,8 @@ import '../models/attendance_payload.dart';
 /// Face recognition is handled on-device by ArcFace.
 /// This service syncs attendance records, user metadata, and enrollment to the backend.
 class ApiService {
+  Future<String?> _getToken() async => await AuthService().readToken();
+
   final Dio _dio = Dio(BaseOptions(
     baseUrl: AppConstants.restApiUrl,
     connectTimeout: const Duration(seconds: 20),
@@ -22,8 +25,7 @@ class ApiService {
   /// Post a locally-matched attendance record to the backend for persistence.
   Future<bool> postAttendance(AttendancePayload payload) async {
     try {
-      final storage = const FlutterSecureStorage();
-      final token = await storage.read(key: 'jwt_token');
+      final token = await _getToken();
 
       final body = {
         'route_id': payload.data.routeId,
@@ -60,8 +62,7 @@ class ApiService {
   /// No image is sent — just the student's login ID.
   Future<bool> markFaceEnrolled(String studentId) async {
     try {
-      final storage = const FlutterSecureStorage();
-      final token = await storage.read(key: 'jwt_token');
+      final token = await _getToken();
 
       final response = await _dio.post(
         '/api/faces/$studentId/enroll',
@@ -88,8 +89,7 @@ class ApiService {
   /// for the driver's student lookups.
   Future<Map<String, dynamic>?> fetchUser(String loginId) async {
     try {
-      final storage = const FlutterSecureStorage();
-      final token = await storage.read(key: 'jwt_token');
+      final token = await _getToken();
 
       final response = await _dio.get(
         '/api/attendance/user/$loginId',
@@ -120,8 +120,7 @@ class ApiService {
 
   Future<Map<String, dynamic>?> fetchAdminStats() async {
     try {
-      final storage = const FlutterSecureStorage();
-      final token = await storage.read(key: 'jwt_token');
+      final token = await _getToken();
 
       final response = await _dio.get(
         '/api/stats/admin',
@@ -141,8 +140,7 @@ class ApiService {
   /// Fetch route details including stops for map polyline
   Future<Map<String, dynamic>?> fetchRoute(String routeId) async {
     try {
-      final storage = const FlutterSecureStorage();
-      final token = await storage.read(key: 'jwt_token');
+      final token = await _getToken();
 
       final response = await _dio.get(
         '/api/routes/$routeId',
@@ -168,8 +166,7 @@ class ApiService {
   /// Fetch all active routes with assigned buses
   Future<List<Map<String, dynamic>>> fetchRoutes() async {
     try {
-      final storage = const FlutterSecureStorage();
-      final token = await storage.read(key: 'jwt_token');
+      final token = await _getToken();
 
       final response = await _dio.get(
         '/api/routes',
@@ -196,8 +193,7 @@ class ApiService {
   /// Trigger emergency SOS alert
   Future<bool> triggerSos() async {
     try {
-      final storage = const FlutterSecureStorage();
-      final token = await storage.read(key: 'jwt_token');
+      final token = await _getToken();
 
       final response = await _dio.post(
         '/api/sos/trigger',
@@ -215,8 +211,7 @@ class ApiService {
   /// Cancel active SOS alert
   Future<bool> cancelSos() async {
     try {
-      final storage = const FlutterSecureStorage();
-      final token = await storage.read(key: 'jwt_token');
+      final token = await _getToken();
 
       final response = await _dio.post(
         '/api/sos/cancel',

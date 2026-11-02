@@ -11,16 +11,30 @@ import { useStaleWhileRevalidate } from '../hooks/useStaleWhileRevalidate';
  * Shown in the admin and transport-incharge Users tabs so the request
  * arrives with the requester's details and can be approved in one click.
  */
-const FaceResetRequests = ({ user, onChanged }) => {
+const FaceResetRequests = ({ user, users = [], onChanged }) => {
   const [busyId, setBusyId] = useState(null);
 
   const { data, isLoading, refetch } = useStaleWhileRevalidate('/api/users/face-reset-requests', {
     cacheKey: 'staff:face-reset-requests',
-    staleTime: 30000,
+    staleTime: 10000,
     token: user?.token,
   });
 
-  const requests = Array.isArray(data) ? data : [];
+  const fallbackRequests = Array.isArray(users)
+    ? users
+        .filter((u) => u.faceResetRequestedAt || u.face_reset_requested_at)
+        .map((u) => ({
+          login_id: u.login_id || u.loginId,
+          name: u.name,
+          role: u.role,
+          phone: u.phone,
+          route_name: u.route_name || u.routeName,
+          bus_number: u.bus_number || u.busNumber,
+          requested_at: u.faceResetRequestedAt || u.face_reset_requested_at,
+        }))
+    : [];
+
+  const requests = Array.isArray(data) && data.length > 0 ? data : fallbackRequests;
 
   const handleApprove = useCallback(async (loginId) => {
     setBusyId(loginId);

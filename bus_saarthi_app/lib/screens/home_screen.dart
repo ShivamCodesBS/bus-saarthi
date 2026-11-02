@@ -22,6 +22,7 @@ import '../widgets/hamburger_drawer.dart';
 import '../widgets/wake_alarm_modal.dart';
 import '../widgets/wake_alarm_options_modal.dart';
 import 'full_map_screen.dart';
+import 'login_screen.dart';
 
 /// 1:1 port of the web Home page: glass header with the notification
 /// dropdown, merge/cancel banner, SOS + wake-alarm action bar, route
@@ -36,7 +37,7 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final user = context.watch<AuthProvider>().user;
     if (user == null) {
-      return const Scaffold(body: SizedBox.shrink());
+      return const LoginScreen();
     }
     return ChangeNotifierProvider(
       create: (_) => TrackingProvider(user),
@@ -143,8 +144,6 @@ class _HomeViewState extends State<_HomeView> {
     }
   }
 
-
-
   @override
   Widget build(BuildContext context) {
     final lang = context.watch<LanguageProvider>();
@@ -152,7 +151,7 @@ class _HomeViewState extends State<_HomeView> {
     final tracking = context.watch<TrackingProvider>();
     final user = auth.user;
     if (user == null) {
-      return const Scaffold(body: SizedBox.shrink());
+      return const LoginScreen();
     }
     final bool isDark = Theme.of(context).brightness == Brightness.dark;
 
@@ -191,118 +190,121 @@ class _HomeViewState extends State<_HomeView> {
                         ),
                       ),
                       SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 90),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        // Merge & cancellation banner
-                        if (tracking.mergeInfo != null)
-                          _MergeBanner(info: tracking.mergeInfo!, lang: lang),
-
-                        const SizedBox(height: 12),
-
-                        // Action bar (SOS + Wake alarm)
-                        Row(
+                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 90),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Expanded(
-                              child: _SosButton(
+                            // Merge & cancellation banner
+                            if (tracking.mergeInfo != null)
+                              _MergeBanner(
+                                info: tracking.mergeInfo!,
                                 lang: lang,
-                                phase: tracking.sosPhase,
-                                countdown: tracking.sosCountdown,
-                                onTap: () => _handleSos(tracking),
                               ),
+
+                            const SizedBox(height: 12),
+
+                            // Action bar (SOS + Wake alarm)
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _SosButton(
+                                    lang: lang,
+                                    phase: tracking.sosPhase,
+                                    countdown: tracking.sosCountdown,
+                                    onTap: () => _handleSos(tracking),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: _AlarmButton(
+                                    lang: lang,
+                                    alarmSet: tracking.alarmSet,
+                                    loading: tracking.alarmLoading,
+                                    onTap: () => _handleWakeAlarm(tracking),
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: _AlarmButton(
+
+                            const SizedBox(height: 24),
+
+                            // Route details card
+                            _RouteDetailsCard(
+                              lang: lang,
+                              user: user,
+                              tracking: tracking,
+                              isDark: isDark,
+                            ),
+
+                            const SizedBox(height: 24),
+
+                            // Live telemetry card
+                            _TelemetryCard(
+                              lang: lang,
+                              tracking: tracking,
+                              isDark: isDark,
+                            ),
+
+                            const SizedBox(height: 16),
+
+                            if (!_showMap)
+                              _OpenMapButton(
                                 lang: lang,
-                                alarmSet: tracking.alarmSet,
-                                loading: tracking.alarmLoading,
-                                onTap: () => _handleWakeAlarm(tracking),
+                                onTap: () => setState(() => _showMap = true),
+                              ),
+
+                            if (_showMap) ...[
+                              const SizedBox(height: 16),
+                              _MapCard(
+                                lang: lang,
+                                tracking: tracking,
+                                isDark: isDark,
+                                onExpand: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      fullscreenDialog: true,
+                                      builder: (_) =>
+                                          FullMapScreen(tracking: tracking),
+                                    ),
+                                  );
+                                },
+                                onClose: () => setState(() => _showMap = false),
+                              ),
+                            ],
+
+                            const SizedBox(height: 24),
+
+                            // Upcoming stops timeline
+                            _StopsTimeline(
+                              lang: lang,
+                              tracking: tracking,
+                              isDark: isDark,
+                            ),
+
+                            const SizedBox(height: 24),
+
+                            // Footer
+                            Center(
+                              child: Text(
+                                '© ${DateTime.now().year} Invertis Innovation and Incubation.',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark
+                                      ? AppColors.darkTextMuted.withValues(
+                                          alpha: 0.8,
+                                        )
+                                      : AppColors.lightTextMuted,
+                                ),
                               ),
                             ),
                           ],
                         ),
-
-                        const SizedBox(height: 24),
-
-                        // Route details card
-                        _RouteDetailsCard(
-                          lang: lang,
-                          user: user,
-                          tracking: tracking,
-                          isDark: isDark,
-                        ),
-
-                        const SizedBox(height: 24),
-
-                        // Live telemetry card
-                        _TelemetryCard(
-                          lang: lang,
-                          tracking: tracking,
-                          isDark: isDark,
-                        ),
-
-                        const SizedBox(height: 16),
-
-                        if (!_showMap)
-                          _OpenMapButton(
-                            lang: lang,
-                            onTap: () => setState(() => _showMap = true),
-                          ),
-
-                        if (_showMap) ...[
-                          const SizedBox(height: 16),
-                          _MapCard(
-                            lang: lang,
-                            tracking: tracking,
-                            isDark: isDark,
-                            onExpand: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  fullscreenDialog: true,
-                                  builder: (_) =>
-                                      FullMapScreen(tracking: tracking),
-                                ),
-                              );
-                            },
-                            onClose: () => setState(() => _showMap = false),
-                          ),
-                        ],
-
-                        const SizedBox(height: 24),
-
-                        // Upcoming stops timeline
-                        _StopsTimeline(
-                          lang: lang,
-                          tracking: tracking,
-                          isDark: isDark,
-                        ),
-
-                        const SizedBox(height: 24),
-
-                        // Footer
-                        Center(
-                          child: Text(
-                            '© ${DateTime.now().year} Invertis Innovation and Incubation.',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: isDark
-                                  ? AppColors.darkTextMuted.withValues(
-                                      alpha: 0.8,
-                                    )
-                                  : AppColors.lightTextMuted,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
-          ),
             ],
           ),
 

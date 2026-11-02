@@ -1,6 +1,8 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 
+import '../app.dart';
 import '../models/user_model.dart';
+import '../screens/login_screen.dart';
 import '../services/auth_service.dart';
 import '../services/fcm_service.dart';
 
@@ -28,7 +30,6 @@ class AuthProvider extends ChangeNotifier {
     _initialized = true;
     notifyListeners();
     if (_user?.token != null) {
-      // Register the FCM token against the restored session.
       await FcmService.init(_user!.token);
       _fcmInitFailed = FcmService.initFailed;
       _fcmError = FcmService.lastError;
@@ -36,7 +37,6 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Retry FCM initialization (e.g., after user adds google-services.json)
   Future<void> retryFcmInit() async {
     if (_user?.token != null) {
       await FcmService.retryInit(_user!.token);
@@ -48,7 +48,11 @@ class AuthProvider extends ChangeNotifier {
 
   /// Returns null on success, or a human-readable error string.
   /// [blockedUntil] is surfaced through the LoginResult by the caller.
-  Future<LoginResult> login(String loginId, String password, String? role) async {
+  Future<LoginResult> login(
+    String loginId,
+    String password,
+    String? role,
+  ) async {
     final result = await _authService.login(loginId, password, role);
     if (result.success) {
       _user = result.user;
@@ -74,5 +78,10 @@ class AuthProvider extends ChangeNotifier {
     _fcmError = null;
     await _authService.logout();
     notifyListeners();
+    // Dismiss all active dialogs/sheets and reset route stack directly to LoginScreen
+    rootNavigatorKey.currentState?.pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
   }
 }

@@ -155,7 +155,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final theme = context.watch<ThemeProvider>();
     final user = auth.user;
     if (user == null) {
-      return const Scaffold(body: SizedBox.shrink());
+      return const LoginScreen();
     }
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textDark = isDark ? AppColors.darkText : AppColors.lightText;
@@ -319,10 +319,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     onTap: () => setState(() => showPasswordModal = true),
                   ),
-                  _SettingRow(
-                    isDark: isDark,
-                    icon: Icon(
-                      LucideIcons.camera,
+                  if (user.role != 'parent')
+                    _SettingRow(
+                      isDark: isDark,
+                      icon: Icon(
+                        LucideIcons.camera,
                       size: 20,
                       color: faceResetRequested
                           ? const Color(0xFF28A745)
@@ -493,13 +494,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       borderRadius: BorderRadius.circular(12),
                       onTap: () async {
                         await auth.logout();
-                        if (!context.mounted) return;
-                        Navigator.of(context).pushAndRemoveUntil(
-                          MaterialPageRoute(
-                            builder: (_) => const LoginScreen(),
-                          ),
-                          (route) => false,
-                        );
                       },
                       child: Padding(
                         padding: const EdgeInsets.all(14),

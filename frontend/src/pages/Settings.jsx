@@ -251,15 +251,18 @@ const Settings = () => {
               sublabel={t('updateLoginPassword')}
               rightEl={<ChevronRight size={18} color="var(--text-light)" />}
               onClick={() => setShowPasswordModal(true)}
+              last={user?.role === 'parent'}
             />
-            <SettingRow
-              icon={<Camera size={20} color={faceResetRequested ? '#28a745' : 'var(--primary-blue)'} />}
-              label={faceResetRequested ? t('faceRescanRequested') : t('requestFaceDataReset')}
-              sublabel={faceResetRequested ? t('adminWillContact') : t('ifFaceRecognitionFailing')}
-              rightEl={faceResetRequested ? <CheckCircle2 size={20} color="#28a745" /> : <ChevronRight size={18} color="var(--text-light)" />}
-              onClick={!faceResetRequested ? handleFaceReset : undefined}
-              last
-            />
+            {user?.role !== 'parent' && (
+              <SettingRow
+                icon={<Camera size={20} color={faceResetRequested ? '#28a745' : 'var(--primary-blue)'} />}
+                label={faceResetRequested ? t('faceRescanRequested') : t('requestFaceDataReset')}
+                sublabel={faceResetRequested ? t('adminWillContact') : t('ifFaceRecognitionFailing')}
+                rightEl={faceResetRequested ? <CheckCircle2 size={20} color="#28a745" /> : <ChevronRight size={18} color="var(--text-light)" />}
+                onClick={!faceResetRequested ? handleFaceReset : undefined}
+                last
+              />
+            )}
           </div>
         </div>
 
