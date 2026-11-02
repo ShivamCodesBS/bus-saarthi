@@ -1467,14 +1467,23 @@ class _TelemetryCard extends StatelessWidget {
     if (heading == null || heading.isNaN) return ' -- ';
     double h = heading % 360;
     if (h < 0) h += 360;
-    final key = (h >= 315 || h < 45)
+    final degStr = '${h.toStringAsFixed(0)}°';
+    final key = (h >= 337.5 || h < 22.5)
         ? 'north'
-        : (h >= 45 && h < 135)
+        : (h >= 22.5 && h < 67.5)
+        ? 'northeast'
+        : (h >= 67.5 && h < 112.5)
         ? 'east'
-        : (h >= 135 && h < 225)
+        : (h >= 112.5 && h < 157.5)
+        ? 'southeast'
+        : (h >= 157.5 && h < 202.5)
         ? 'south'
-        : 'west';
-    return lang.t(key);
+        : (h >= 202.5 && h < 247.5)
+        ? 'southwest'
+        : (h >= 247.5 && h < 292.5)
+        ? 'west'
+        : 'northwest';
+    return '$degStr ${lang.t(key)}';
   }
 
   String _comfort(String? c) {

@@ -3402,10 +3402,15 @@ String _getHeadingLabel(double? deg) {
   if (deg == null) return '-';
   double h = deg % 360;
   if (h < 0) h += 360;
-  if (h >= 315 || h < 45) return 'N ↑';
-  if (h >= 45 && h < 135) return 'E →';
-  if (h >= 135 && h < 225) return 'S ↓';
-  return 'W ←';
+  final degStr = '${h.toStringAsFixed(0)}°';
+  if (h >= 337.5 || h < 22.5) return '$degStr N ↑';
+  if (h >= 22.5 && h < 67.5) return '$degStr NE ↗';
+  if (h >= 67.5 && h < 112.5) return '$degStr E →';
+  if (h >= 112.5 && h < 157.5) return '$degStr SE ↘';
+  if (h >= 157.5 && h < 202.5) return '$degStr S ↓';
+  if (h >= 202.5 && h < 247.5) return '$degStr SW ↙';
+  if (h >= 247.5 && h < 292.5) return '$degStr W ←';
+  return '$degStr NW ↖';
 }
 
 class _BroadcastMeta {

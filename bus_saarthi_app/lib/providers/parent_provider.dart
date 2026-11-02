@@ -437,8 +437,9 @@ class ParentProvider extends ChangeNotifier {
           double.tryParse('${location['lng']}') ?? busLocation[1],
         ];
       }
+      final rawSpeed = double.tryParse('${data['speed'] ?? 0}') ?? 0;
       telemetry = ParentTelemetry(
-        speed: double.tryParse('${data['speed'] ?? 0}') ?? 0,
+        speed: rawSpeed < 2.0 ? 0.0 : rawSpeed,
         heading: double.tryParse('${data['heading'] ?? 0}') ?? 0,
         comfort: (data['comfort'] ?? 'Smooth').toString(),
         lastUpdated: DateTime.now(),
