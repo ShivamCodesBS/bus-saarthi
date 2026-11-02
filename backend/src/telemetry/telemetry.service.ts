@@ -49,10 +49,31 @@ export class TelemetryService {
    * change.
    */
   private readingFilters = new Map<string, RouteReadingFilter>();
-  private static readonly SPEED_SPIKE_KMH = 30;
-  private static readonly SPEED_DEADBAND_KMH = 1.2;
+  private cancelledCache = new Map<string, { cancelled: boolean; checkedAt: number }>();
+  private static readonly SPEED_SPIKE_KMH = 25;
+  private static readonly SPEED_DEADBAND_KMH = 2.5;
   private static readonly READING_STALE_MS = 10_000;
   private static readonly COMFORT_HOLD = 3;
+
+  private async isRouteCancelled(routeId: string): Promise<boolean> {
+    const key = String(routeId);
+    const cached = this.cancelledCache.get(key);
+    const now = Date.now();
+    if (cached && now - cached.checkedAt < 30_000) {
+      return cached.cancelled;
+    }
+    const todayStart = getISTMidnightUTC();
+    const isCancelled = await this.prisma.mergeEvent.findFirst({
+      where: {
+        cancelledRouteId: key,
+        status: 'active',
+        createdAt: { gte: todayStart },
+      },
+    });
+    const cancelled = !!isCancelled;
+    this.cancelledCache.set(key, { cancelled, checkedAt: now });
+    return cancelled;
+  }
 
   smoothReading(routeId: string, speedKmh: number, comfort?: string) {
     const key = String(routeId);
@@ -67,24 +88,31 @@ export class TelemetryService {
     const now = Date.now();
     let input = Number(speedKmh) || 0;
 
-    // Long gap (device restart / batch backlog): re-anchor instead of
-    // spike-rejecting, otherwise a parked bus would stay "stuck" at its
-    // old EMA forever.
+    // Apply stationary deadband: speeds under 2.5 km/h are walking / GPS table drift
+    if (input < TelemetryService.SPEED_DEADBAND_KMH) {
+      input = 0;
+    }
+
     if (
       f.speedEma === null ||
       now - f.lastTs > TelemetryService.READING_STALE_MS
     ) {
       f.speedEma = input;
     } else {
-      const spike =
-        Math.abs(input - f.speedEma) > TelemetryService.SPEED_SPIKE_KMH &&
-        f.speedEma > 10;
-      if (spike) input = f.speedEma; // hold through the glitch
-      f.speedEma = f.speedEma + 0.4 * (input - f.speedEma);
-      if (
-        f.speedEma < TelemetryService.SPEED_DEADBAND_KMH &&
-        input < TelemetryService.SPEED_DEADBAND_KMH
-      ) {
+      // Spike rejection: disallow sudden jumps greater than SPEED_SPIKE_KMH
+      const diff = Math.abs(input - f.speedEma);
+      if (diff > TelemetryService.SPEED_SPIKE_KMH) {
+        input = input > f.speedEma ? f.speedEma + 5 : f.speedEma - 5;
+      }
+
+      if (input === 0) {
+        // Fast snap to 0 when vehicle stops (prevents lingering delay)
+        f.speedEma = f.speedEma < 8 ? 0 : f.speedEma * 0.4;
+      } else {
+        f.speedEma = f.speedEma + 0.45 * (input - f.speedEma);
+      }
+
+      if (f.speedEma < TelemetryService.SPEED_DEADBAND_KMH) {
         f.speedEma = 0;
       }
     }
@@ -217,15 +245,7 @@ export class TelemetryService {
    * the no-Redis fallback above.
    */
   async processBatch(routeId: string, data: any[]) {
-    const todayStart = getISTMidnightUTC();
-    const isCancelled = await this.prisma.mergeEvent.findFirst({
-      where: {
-        cancelledRouteId: String(routeId),
-        status: 'active',
-        createdAt: { gte: todayStart },
-      },
-    });
-
+    const isCancelled = await this.isRouteCancelled(routeId);
     if (isCancelled) {
       return {
         status: 'success',
@@ -243,22 +263,8 @@ export class TelemetryService {
       ),
     }));
 
-    const entities = filtered.map(({ item, f }) => ({
-      routeId: String(routeId),
-      latitude: item.lat,
-      longitude: item.lng,
-      gpsSpeedKnots: item.gps_speed_knots,
-      mpuSpeedKmh: f.speed,
-      headingDeg: item.heading_deg,
-      timestamp: new Date(item.timestamp),
-    }));
-
-    if (entities.length > 0) {
-      await this.prisma.telemetry.createMany({ data: entities });
-    }
-
-    // Broadcast the SMOOTHED last reading to the Gateway — this is the
-    // single live emit for both the socket and HTTP ingestion paths.
+    // 1. Broadcast the SMOOTHED reading to the Gateway IMMEDIATELY
+    // Zero database latency for live tracking screens!
     if (filtered.length > 0) {
       const { item, f } = filtered[filtered.length - 1];
       this.eventEmitter.emit('telemetry.live', {
@@ -270,6 +276,23 @@ export class TelemetryService {
         heading_deg: item.heading_deg,
         comfort: f.comfort,
         timestamp: item.timestamp,
+      });
+    }
+
+    // 2. Persist to DB asynchronously so live socket broadcast is never delayed
+    const entities = filtered.map(({ item, f }) => ({
+      routeId: String(routeId),
+      latitude: item.lat,
+      longitude: item.lng,
+      gpsSpeedKnots: item.gps_speed_knots,
+      mpuSpeedKmh: f.speed,
+      headingDeg: item.heading_deg,
+      timestamp: new Date(item.timestamp),
+    }));
+
+    if (entities.length > 0) {
+      this.prisma.telemetry.createMany({ data: entities }).catch((err) => {
+        this.logger.warn(`[Telemetry] Failed to persist batch: ${err.message}`);
       });
     }
 
