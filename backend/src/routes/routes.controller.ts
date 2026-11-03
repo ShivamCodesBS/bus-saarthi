@@ -6,6 +6,7 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { RoutesService } from './routes.service';
@@ -20,8 +21,26 @@ export class RoutesController {
   constructor(private readonly routesService: RoutesService) {}
 
   @Get()
-  findAll() {
-    return this.routesService.findAll();
+  findAll(@Query('type') routeType?: string) {
+    return this.routesService.findAll(routeType);
+  }
+
+  @Get('by-stop')
+  getRoutesByStop(@Query('stop') stopName: string) {
+    if (!stopName) {
+      return { status: 'error', message: 'stop query parameter is required' };
+    }
+    return this.routesService.getRoutesByStop(stopName);
+  }
+
+  @Get('stops')
+  getAllStops() {
+    return this.routesService.getAllStops();
+  }
+
+  @Get('stops/categorized')
+  getStopsByCategory(@Query('route_id') routeId?: string) {
+    return this.routesService.getStopsByCategory(routeId);
   }
 
   @Get(':routeId')

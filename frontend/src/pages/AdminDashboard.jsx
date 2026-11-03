@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Users, MapPin, LogOut, Settings, Bell, AlertOctagon, CheckCircle2, MessageSquare, Trash2, UserPlus, Navigation, Plus, X, User, Menu, Eye, Download, Upload, Activity, GitMerge, Undo2, Sparkles, ArrowLeft, AlertTriangle, ArrowRight, History, Layers, Wrench, Timer, RotateCcw } from 'lucide-react';
+import { Users, MapPin, LogOut, Settings, Bell, AlertOctagon, CheckCircle2, MessageSquare, Trash2, UserPlus, Navigation, Plus, X, User, Menu, Eye, Download, Upload, Activity, GitMerge, Undo2, Sparkles, ArrowLeft, AlertTriangle, ArrowRight, History, Layers, Wrench, Timer, RotateCcw, Compass } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { io } from 'socket.io-client';
@@ -139,7 +139,15 @@ const AdminDashboard = () => {
   const [showRouteModal, setShowRouteModal] = useState(false);
   const [editingRoute, setEditingRoute] = useState(null);
   const [viewingRouteDetails, setViewingRouteDetails] = useState(null);
-  const [routeFormData, setRouteFormData] = useState({ route_id: '', route_name: '', bus_number: '', driver_id: '', stops: '', city: 'Bareilly', vehicleModel: '', registrationNumber: '', seatingCapacity: '', insuranceExpiry: '' });
+  const [routeFormData, setRouteFormData] = useState({ route_id: '', route_name: '', bus_number: '', driver_id: '', stops: [], city: 'Bareilly', vehicleModel: '', registrationNumber: '', seatingCapacity: '', insuranceExpiry: '', route_type: 'local' });
+  const [showRouteStopsBuilder, setShowRouteStopsBuilder] = useState(false);
+  const [routeTypeFilter, setRouteTypeFilter] = useState('all');
+
+  // Filter routes by type
+  const filteredRoutes = useMemo(() => {
+    if (routeTypeFilter === 'all') return routesList;
+    return routesList.filter(r => (r.routeType || r.route_type) === routeTypeFilter);
+  }, [routesList, routeTypeFilter]);
 
   // Fleet Tracking State
   const [selectedRoute, setSelectedRoute] = useState('1');
@@ -988,23 +996,41 @@ const AdminDashboard = () => {
 
   const openAddRoute = () => {
     setEditingRoute(null);
-    setRouteFormData({ route_id: '', route_name: '', bus_number: '', driver_id: '', stops: '', city: 'Bareilly', vehicleModel: '', registrationNumber: '', seatingCapacity: '', insuranceExpiry: '' });
+    setRouteFormData({ route_id: '', route_name: '', bus_number: '', driver_id: '', stops: [], city: 'Bareilly', vehicleModel: '', registrationNumber: '', seatingCapacity: '', insuranceExpiry: '', route_type: 'local' });
     setShowRouteModal(true);
   };
 
   const openEditRoute = (r) => {
     setEditingRoute(r);
+    // Parse stops from stored format
+    let stopsArray = [];
+    if (r.stops_data && Array.isArray(r.stops_data)) {
+      stopsArray = r.stops_data;
+    } else if (r.stops) {
+      try {
+        const parsed = JSON.parse(r.stops);
+        if (Array.isArray(parsed)) {
+          stopsArray = parsed;
+        } else {
+          // Legacy comma-separated format
+          stopsArray = r.stops.split(',').map((s, i) => ({ name: s.trim(), type: 'main', order: i }));
+        }
+      } catch {
+        stopsArray = r.stops.split(',').map((s, i) => ({ name: s.trim(), type: 'main', order: i }));
+      }
+    }
     setRouteFormData({
       route_id: r.routeId || r.route_id || '',
       route_name: r.routeName || r.route_name || '',
       bus_number: r.busNumber || r.bus_number || '',
       driver_id: r.driverId || r.driver_id || '',
-      stops: r.stops || '',
+      stops: stopsArray,
       city: r.city || 'Bareilly',
       vehicleModel: r.vehicleModel || '',
       registrationNumber: r.registrationNumber || '',
       seatingCapacity: r.seatingCapacity || '',
-      insuranceExpiry: r.insuranceExpiry ? new Date(r.insuranceExpiry).toISOString().split('T')[0] : ''
+      insuranceExpiry: r.insuranceExpiry ? new Date(r.insuranceExpiry).toISOString().split('T')[0] : '',
+      route_type: r.routeType || r.route_type || 'local'
     });
     setShowRouteModal(true);
   };
@@ -1519,9 +1545,9 @@ const AdminDashboard = () => {
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
               <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100 m-0">Fleet & Route Management</h2>
               <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-                <input 
-                  type="text" 
-                  placeholder="Search route name, bus, driver..." 
+                <input
+                  type="text"
+                  placeholder="Search route name, bus, driver..."
                   value={routeSearchQuery}
                   onChange={(e) => setRouteSearchQuery(e.target.value)}
                   className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 outline-none w-full sm:w-64"
@@ -1532,60 +1558,272 @@ const AdminDashboard = () => {
               </div>
             </div>
 
+            {/* Route Type Tabs */}
+            <div className="flex gap-2 mb-6 flex-wrap">
+              {[
+                { key: 'all', label: 'All Routes', icon: <Navigation size={16} /> },
+                { key: 'local', label: 'Local (City)', icon: <MapPin size={16} /> },
+                { key: 'outstation', label: 'Outstation', icon: <Compass size={16} /> },
+              ].map((tab) => {
+                const count = tab.key === 'all'
+                  ? routesList.length
+                  : routesList.filter((r) => (r.routeType || r.route_type) === tab.key).length;
+                return (
+                  <button
+                    key={tab.key}
+                    onClick={() => setRouteTypeFilter(tab.key)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      padding: '0.6rem 1.2rem',
+                      borderRadius: '10px',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontWeight: '600',
+                      fontSize: '0.9rem',
+                      transition: 'all 0.2s',
+                      backgroundColor: routeTypeFilter === tab.key ? (tab.key === 'outstation' ? '#dc2626' : 'var(--primary-blue)') : 'var(--bg-color)',
+                      color: routeTypeFilter === tab.key ? 'white' : 'var(--text-dark)',
+                    }}
+                  >
+                    {tab.icon}
+                    {tab.label}
+                    <span style={{
+                      backgroundColor: routeTypeFilter === tab.key ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.1)',
+                      padding: '0.15rem 0.5rem',
+                      borderRadius: '10px',
+                      fontSize: '0.75rem',
+                    }}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Search Filter */}
+            <div className="mb-4">
+              <input
+                type="text"
+                placeholder="Search route name, bus, driver, stop..."
+                value={routeSearchQuery}
+                onChange={(e) => setRouteSearchQuery(e.target.value)}
+                className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 outline-none"
+              />
+            </div>
+
             {combinedLoading ? (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem' }}>
                 {[1, 2, 3].map((i) => (
                   <RouteSkeleton key={i} />
                 ))}
               </div>
-            ) : routesList.length === 0 ? <p>No routes configured yet. Add your first bus route!</p> : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem' }}>
-                {routesList.filter(r => {
+            ) : filteredRoutes.length === 0 ? (
+              <div className="text-center py-12" style={{ color: 'var(--text-light)' }}>
+                <Navigation size={48} className="mx-auto mb-4 opacity-50" />
+                <p className="text-lg font-medium">No {routeTypeFilter === 'all' ? '' : routeTypeFilter} routes found</p>
+                <p className="text-sm mt-1">Add your first route to get started</p>
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem' }}>
+                {filteredRoutes.filter(r => {
                   if (!routeSearchQuery) return true;
                   const query = routeSearchQuery.toLowerCase();
                   const driverName = usersList.find(u => (u.loginId || u.login_id) === (r.driverId || r.driver_id))?.name || 'Unassigned';
+                  const stopsData = r.stops_data || (typeof r.stops === 'string' ? JSON.parse(r.stops || '[]') : []);
+                  const stopNames = stopsData.map(s => s.name).join(', ');
                   return (
                     (r.routeId || r.route_id || '').toLowerCase().includes(query) ||
                     (r.routeName || r.route_name || '').toLowerCase().includes(query) ||
                     (r.busNumber || r.bus_number || '').toLowerCase().includes(query) ||
-                    driverName.toLowerCase().includes(query)
+                    driverName.toLowerCase().includes(query) ||
+                    stopNames.toLowerCase().includes(query)
                   );
-                }).map((r, i) => {
+                }).map((r) => {
                   const driverName = usersList.find(u => (u.loginId || u.login_id) === (r.driverId || r.driver_id))?.name || 'Unassigned';
+                  const routeType = r.routeType || r.route_type || 'local';
+                  const isOutstation = routeType === 'outstation';
+                  const stopsData = r.stops_data || (typeof r.stops === 'string' ? JSON.parse(r.stops || '[]') : []);
+
+                  // Group stops by category
+                  const stopsByCategory = stopsData.reduce((acc, stop) => {
+                    const type = stop.type || 'main';
+                    if (!acc[type]) acc[type] = [];
+                    acc[type].push(stop);
+                    return acc;
+                  }, {});
+
                   return (
-                    <div key={i} style={{ backgroundColor: 'var(--card-bg)', borderRadius: '16px', padding: '1.5rem', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '1rem', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div>
-                          <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'white', backgroundColor: 'var(--secondary-orange)', padding: '0.2rem 0.5rem', borderRadius: '6px' }}>Route {r.routeId || r.route_id}</span>
-                          <h3 style={{ margin: '0.5rem 0 0 0', fontSize: '1.1rem', color: 'var(--text-dark)' }}>{r.routeName || r.route_name}</h3>
+                    <div
+                      key={r.routeId || r.route_id}
+                      style={{
+                        backgroundColor: 'var(--card-bg)',
+                        borderRadius: '16px',
+                        border: `2px solid ${isOutstation ? '#dc2626' : 'var(--border-color)'}`,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '1rem',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      {/* Header with route type indicator */}
+                      <div style={{
+                        padding: '1rem 1.25rem',
+                        backgroundColor: isOutstation ? '#fef2f2' : '#f8fafc',
+                        borderBottom: `1px solid ${isOutstation ? '#fecaca' : 'var(--border-color)'}`,
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <div style={{
+                            width: '40px',
+                            height: '40px',
+                            borderRadius: '10px',
+                            backgroundColor: isOutstation ? '#dc2626' : 'var(--primary-blue)',
+                            color: 'white',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}>
+                            <Navigation size={20} />
+                          </div>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '700', color: 'var(--text-dark)' }}>
+                                {r.routeName || r.route_name}
+                              </h3>
+                              {isOutstation && (
+                                <span style={{
+                                  fontSize: '0.65rem',
+                                  fontWeight: '700',
+                                  backgroundColor: '#dc2626',
+                                  color: 'white',
+                                  padding: '0.15rem 0.5rem',
+                                  borderRadius: '6px',
+                                  textTransform: 'uppercase',
+                                }}>
+                                  Outstation
+                                </span>
+                              )}
+                            </div>
+                            <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.8rem', color: 'var(--text-light)' }}>
+                              Route ID: {r.routeId || r.route_id}
+                            </p>
+                          </div>
                         </div>
                         <div style={{ display: 'flex', gap: '0.5rem' }}>
-                          <button onClick={() => setViewingRouteDetails(r)} style={{ background: 'none', border: 'none', color: 'var(--text-light)', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8rem' }}><Eye size={18} /></button>
-                          <button onClick={() => openEditRoute(r)} style={{ background: 'none', border: 'none', color: 'var(--primary-blue)', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8rem' }}>Edit</button>
-                          <button onClick={() => handleDeleteRoute(r.routeId || r.route_id)} style={{ background: 'none', border: 'none', color: '#cf1322', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8rem' }}>Delete</button>
-                          <button onClick={() => navigate(`/admin/routes/${r.routeId || r.route_id}/analytics`)} style={{ background: 'none', border: 'none', color: '#d97706', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '2px' }} title="Speed & Violations Analytics"><Activity size={18} /> Analytics</button>
+                          <button
+                            onClick={() => setViewingRouteDetails(r)}
+                            style={{ background: 'none', border: 'none', color: 'var(--text-light)', cursor: 'pointer', padding: '0.5rem', borderRadius: '8px', transition: 'all 0.2s' }}
+                            className="hover:bg-slate-100 dark:hover:bg-slate-700"
+                            title="View Details"
+                          >
+                            <Eye size={18} />
+                          </button>
+                          <button
+                            onClick={() => openEditRoute(r)}
+                            style={{ background: 'none', border: 'none', color: 'var(--primary-blue)', cursor: 'pointer', padding: '0.5rem', borderRadius: '8px', transition: 'all 0.2s' }}
+                            className="hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                            title="Edit Route"
+                          >
+                            <span style={{ fontSize: '0.8rem', fontWeight: '600' }}>Edit</span>
+                          </button>
+                          <button
+                            onClick={() => handleDeleteRoute(r.routeId || r.route_id)}
+                            style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', padding: '0.5rem', borderRadius: '8px', transition: 'all 0.2s' }}
+                            className="hover:bg-red-50 dark:hover:bg-red-900/20"
+                            title="Delete Route"
+                          >
+                            <Trash2 size={18} />
+                          </button>
                         </div>
                       </div>
 
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', backgroundColor: 'var(--bg-color)', padding: '1rem', borderRadius: '12px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                          <span style={{ color: 'var(--text-light)' }}>Bus Number:</span>
-                          <span style={{ fontWeight: 'bold', color: 'var(--text-dark)' }}>{r.busNumber || r.bus_number}</span>
+                      {/* Route Info */}
+                      <div style={{ padding: '0 1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.75rem', backgroundColor: 'var(--bg-color)', borderRadius: '10px' }}>
+                          <div>
+                            <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-light)', fontWeight: '600' }}>Bus Number</p>
+                            <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.95rem', fontWeight: '700', color: 'var(--text-dark)' }}>{r.busNumber || r.bus_number}</p>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-light)', fontWeight: '600' }}>Assigned Driver</p>
+                            <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.95rem', fontWeight: '700', color: 'var(--primary-blue)' }}>{driverName}</p>
+                          </div>
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                          <span style={{ color: 'var(--text-light)' }}>Assigned Driver:</span>
-                          <span style={{ fontWeight: 'bold', color: 'var(--primary-blue)' }}>{driverName}</span>
-                        </div>
+
+                        {/* Categorized Stops */}
+                        {stopsData.length > 0 && (
+                          <div>
+                            <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.75rem', color: 'var(--text-light)', fontWeight: '600' }}>Stops ({stopsData.length})</p>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                              {Object.entries(stopsByCategory).map(([category, stops]) => (
+                                <div key={category} style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                                  <span style={{
+                                    fontSize: '0.7rem',
+                                    fontWeight: '700',
+                                    color: 'var(--text-light)',
+                                    textTransform: 'uppercase',
+                                    width: '70px',
+                                  }}>
+                                    {category}
+                                  </span>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', flex: 1 }}>
+                                    {stops.map((stop, idx) => (
+                                      <span
+                                        key={idx}
+                                        style={{
+                                          fontSize: '0.75rem',
+                                          padding: '0.25rem 0.5rem',
+                                          borderRadius: '6px',
+                                          backgroundColor: category === 'pickup' ? '#dbeafe' : category === 'dropoff' ? '#fce7f3' : '#f3f4f6',
+                                          color: category === 'pickup' ? '#1e40af' : category === 'dropoff' ? '#9d174d' : '#374151',
+                                          fontWeight: '500',
+                                        }}
+                                        title={stop.time ? `Time: ${stop.time}` : ''}
+                                      >
+                                        {stop.name}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
 
-                      <div>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-light)', fontWeight: '600' }}>Waypoints:</span>
-                        <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem', color: 'var(--text-dark)', lineHeight: 1.5 }}>
-                          {r.stops || 'No stops defined'}
-                        </p>
+                      {/* Footer */}
+                      <div style={{ padding: '0.75rem 1.25rem', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-light)' }}>
+                          {r.city || 'Bareilly'}
+                        </span>
+                        <button
+                          onClick={() => navigate(`/admin/routes/${r.routeId || r.route_id}/analytics`)}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.3rem',
+                            background: 'none',
+                            border: 'none',
+                            color: '#d97706',
+                            cursor: 'pointer',
+                            fontSize: '0.8rem',
+                            fontWeight: '600',
+                            padding: '0.4rem 0.75rem',
+                            borderRadius: '6px',
+                            transition: 'all 0.2s',
+                          }}
+                          className="hover:bg-amber-50 dark:hover:bg-amber-900/20"
+                        >
+                          <Activity size={16} /> Analytics
+                        </button>
                       </div>
                     </div>
-                  )
+                  );
                 })}
               </div>
             )}
@@ -3063,63 +3301,177 @@ const AdminDashboard = () => {
       {/* Add/Edit Route Modal */}
       {showRouteModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
-          <div className="animate-slide-up glass p-glass" data-lenis-prevent="true" style={{ width: '100%', maxWidth: '500px', maxHeight: '90vh', overflowY: 'auto', borderRadius: '20px', backgroundColor: 'var(--card-bg)' }}>
-            <h2 style={{ marginBottom: '1.5rem', color: 'var(--text-dark)' }}>{editingRoute ? 'Edit Route' : 'Add New Route'}</h2>
-            <form onSubmit={handleSaveRoute} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div className="flex flex-col sm:flex-row gap-4">
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Route ID</label>
-                  <input required disabled={!!editingRoute} placeholder="e.g. 1" type="text" value={routeFormData.route_id} onChange={e => setRouteFormData({ ...routeFormData, route_id: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: editingRoute ? '#f0f0f0' : 'white' }} />
+          <div className="animate-slide-up glass p-glass" data-lenis-prevent="true" style={{ width: '100%', maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto', borderRadius: '20px', backgroundColor: 'var(--card-bg)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+              <h2 style={{ margin: 0, color: 'var(--text-dark)' }}>{editingRoute ? 'Edit Route' : 'Add New Route'}</h2>
+              <button onClick={() => setShowRouteStopsBuilder(!showRouteStopsBuilder)} style={{ background: 'none', border: 'none', color: 'var(--primary-blue)', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '600' }}>
+                {showRouteStopsBuilder ? 'Basic Form' : 'Advanced Stops Builder'}
+              </button>
+            </div>
+
+            {showRouteStopsBuilder ? (
+              <form onSubmit={handleSaveRoute} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Route ID</label>
+                    <input required disabled={!!editingRoute} placeholder="e.g. 1" type="text" value={routeFormData.route_id} onChange={e => setRouteFormData({ ...routeFormData, route_id: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: editingRoute ? '#f0f0f0' : 'white' }} />
+                  </div>
+                  <div style={{ flex: 2 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Route Name</label>
+                    <input required placeholder="e.g. City Station to Campus" type="text" value={routeFormData.route_name} onChange={e => setRouteFormData({ ...routeFormData, route_name: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
+                  </div>
                 </div>
-                <div style={{ flex: 2 }}>
-                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Route Name</label>
-                  <input required placeholder="e.g. City Station to Campus" type="text" value={routeFormData.route_name} onChange={e => setRouteFormData({ ...routeFormData, route_name: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
+
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Route Type</label>
+                    <select value={routeFormData.route_type} onChange={e => setRouteFormData({ ...routeFormData, route_type: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: 'var(--card-bg)' }}>
+                      <option value="local">Local (City)</option>
+                      <option value="outstation">Outstation</option>
+                    </select>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Bus Number</label>
+                    <input required placeholder="e.g. UP 14 AB 1234" type="text" value={routeFormData.bus_number} onChange={e => setRouteFormData({ ...routeFormData, bus_number: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Assign Driver</label>
+                    <select value={routeFormData.driver_id} onChange={e => setRouteFormData({ ...routeFormData, driver_id: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: 'var(--card-bg)' }}>
+                      <option value="">Select a Driver</option>
+                      {usersList.filter(u => u.role === 'driver').map(d => (
+                        <option key={d.loginId || d.login_id} value={d.loginId || d.login_id}>{d.name} ({d.loginId || d.login_id})</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-              </div>
-              <div className="flex flex-col sm:flex-row gap-4">
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Bus Number</label>
-                  <input required placeholder="e.g. UP 14 AB 1234" type="text" value={routeFormData.bus_number} onChange={e => setRouteFormData({ ...routeFormData, bus_number: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Assign Driver</label>
-                  <select value={routeFormData.driver_id} onChange={e => setRouteFormData({ ...routeFormData, driver_id: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: 'var(--card-bg)' }}>
-                    <option value="">Select a Driver</option>
-                    {usersList.filter(u => u.role === 'driver').map(d => (
-                      <option key={d.loginId || d.login_id} value={d.loginId || d.login_id}>{d.name} ({d.loginId || d.login_id})</option>
+
+                <div style={{ marginTop: '1rem', padding: '1rem', backgroundColor: 'var(--bg-color)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                  <label style={{ display: 'block', marginBottom: '0.75rem', fontWeight: '600' }}>Categorized Stops Builder</label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    {[
+                      { type: 'pickup', label: 'Pickup Stops (Morning)', color: '#3b82f6', icon: <MapPin size={14} /> },
+                      { type: 'dropoff', label: 'Dropoff Stops (Evening)', color: '#ec4899', icon: <MapPin size={14} /> },
+                      { type: 'main', label: 'Main Stops (Both)', color: '#22c55e', icon: <MapPin size={14} /> },
+                      { type: 'intermediate', label: 'Intermediate Stops', color: '#f59e0b', icon: <MapPin size={14} /> },
+                      { type: 'terminal', label: 'Terminal/End Points', color: '#6366f1', icon: <MapPin size={14} /> },
+                    ].map((cat) => (
+                      <div key={cat.type} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <span style={{ fontSize: '0.8rem', fontWeight: '600', color: cat.color, textTransform: 'uppercase' }}>{cat.icon}</span>
+                          <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-dark)' }}>{cat.label}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                          {routeFormData.stops.filter(s => s.type === cat.type).map((stop, idx) => (
+                            <span key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', padding: '0.3rem 0.6rem', backgroundColor: cat.type === 'pickup' ? '#dbeafe' : cat.type === 'dropoff' ? '#fce7f3' : cat.type === 'main' ? '#dcfce7' : cat.type === 'intermediate' ? '#fef3c7' : '#ede9fe', borderRadius: '6px', color: cat.color, fontSize: '0.8rem', fontWeight: '500' }}>
+                              {stop.name}
+                              <button type="button" onClick={() => {
+                                setRouteFormData({ ...routeFormData, stops: routeFormData.stops.filter((_, i) => i !== routeFormData.stops.findIndex((s, j) => s.type === cat.type && j === idx)) });
+                              }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0', color: 'inherit' }}>×</button>
+                            </span>
+                          ))}
+                          <button type="button" onClick={() => {
+                            const newStop = prompt(`Add ${cat.label}:`);
+                            if (newStop?.trim()) {
+                              setRouteFormData({ ...routeFormData, stops: [...routeFormData.stops, { name: newStop.trim(), type: cat.type, order: routeFormData.stops.filter(s => s.type === cat.type).length }] });
+                            }
+                          }} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', padding: '0.4rem 0.8rem', backgroundColor: 'transparent', border: `2px dashed ${cat.color}`, borderRadius: '6px', color: cat.color, cursor: 'pointer', fontSize: '0.8rem', fontWeight: '500' }}>
+                            + Add
+                          </button>
+                        </div>
+                      </div>
                     ))}
-                  </select>
+                  </div>
                 </div>
-              </div>
-              <div className="flex flex-col sm:flex-row gap-4">
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Vehicle Model</label>
-                  <input placeholder="e.g. Tata Marcopolo" type="text" value={routeFormData.vehicleModel} onChange={e => setRouteFormData({ ...routeFormData, vehicleModel: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
+
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Vehicle Model</label>
+                    <input placeholder="e.g. Tata Marcopolo" type="text" value={routeFormData.vehicleModel} onChange={e => setRouteFormData({ ...routeFormData, vehicleModel: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Registration Number</label>
+                    <input placeholder="e.g. UP14AB1234" type="text" value={routeFormData.registrationNumber} onChange={e => setRouteFormData({ ...routeFormData, registrationNumber: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
+                  </div>
                 </div>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Registration Number</label>
-                  <input placeholder="e.g. UP14AB1234" type="text" value={routeFormData.registrationNumber} onChange={e => setRouteFormData({ ...routeFormData, registrationNumber: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Seating Capacity</label>
+                    <input placeholder="e.g. 40" type="number" min="0" value={routeFormData.seatingCapacity} onChange={e => setRouteFormData({ ...routeFormData, seatingCapacity: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Insurance Expiry</label>
+                    <input type="date" value={routeFormData.insuranceExpiry} onChange={e => setRouteFormData({ ...routeFormData, insuranceExpiry: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
+                  </div>
                 </div>
-              </div>
-              <div className="flex flex-col sm:flex-row gap-4">
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Seating Capacity</label>
-                  <input placeholder="e.g. 40" type="number" min="0" value={routeFormData.seatingCapacity} onChange={e => setRouteFormData({ ...routeFormData, seatingCapacity: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
+                <div className="flex flex-col sm:flex-row gap-4 mt-4">
+                  <button type="button" onClick={() => setShowRouteModal(false)} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', background: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Cancel</button>
+                  <button type="submit" style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: 'none', background: 'var(--primary-blue)', color: 'white', cursor: 'pointer', fontWeight: 'bold' }}>{editingRoute ? 'Update Route' : 'Save Route'}</button>
                 </div>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Insurance Expiry</label>
-                  <input type="date" value={routeFormData.insuranceExpiry} onChange={e => setRouteFormData({ ...routeFormData, insuranceExpiry: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
+              </form>
+            ) : (
+              <form onSubmit={handleSaveRoute} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Route ID</label>
+                    <input required disabled={!!editingRoute} placeholder="e.g. 1" type="text" value={routeFormData.route_id} onChange={e => setRouteFormData({ ...routeFormData, route_id: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: editingRoute ? '#f0f0f0' : 'white' }} />
+                  </div>
+                  <div style={{ flex: 2 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Route Name</label>
+                    <input required placeholder="e.g. City Station to Campus" type="text" value={routeFormData.route_name} onChange={e => setRouteFormData({ ...routeFormData, route_name: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
+                  </div>
                 </div>
-              </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Stops / Waypoints (Comma separated)</label>
-                <textarea required placeholder="Civil Lines, DD Puram, University" value={routeFormData.stops} onChange={e => setRouteFormData({ ...routeFormData, stops: e.target.value })} rows="3" style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', resize: 'none' }} />
-              </div>
-              <div className="flex flex-col sm:flex-row gap-4 mt-4">
-                <button type="button" onClick={() => setShowRouteModal(false)} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', background: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Cancel</button>
-                <button type="submit" style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: 'none', background: 'var(--primary-blue)', color: 'white', cursor: 'pointer', fontWeight: 'bold' }}>{editingRoute ? 'Update Route' : 'Save Route'}</button>
-              </div>
-            </form>
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Route Type</label>
+                    <select value={routeFormData.route_type} onChange={e => setRouteFormData({ ...routeFormData, route_type: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: 'var(--card-bg)' }}>
+                      <option value="local">Local (City)</option>
+                      <option value="outstation">Outstation</option>
+                    </select>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Bus Number</label>
+                    <input required placeholder="e.g. UP 14 AB 1234" type="text" value={routeFormData.bus_number} onChange={e => setRouteFormData({ ...routeFormData, bus_number: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Assign Driver</label>
+                    <select value={routeFormData.driver_id} onChange={e => setRouteFormData({ ...routeFormData, driver_id: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: 'var(--card-bg)' }}>
+                      <option value="">Select a Driver</option>
+                      {usersList.filter(u => u.role === 'driver').map(d => (
+                        <option key={d.loginId || d.login_id} value={d.loginId || d.login_id}>{d.name} ({d.loginId || d.login_id})</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Vehicle Model</label>
+                    <input placeholder="e.g. Tata Marcopolo" type="text" value={routeFormData.vehicleModel} onChange={e => setRouteFormData({ ...routeFormData, vehicleModel: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Registration Number</label>
+                    <input placeholder="e.g. UP14AB1234" type="text" value={routeFormData.registrationNumber} onChange={e => setRouteFormData({ ...routeFormData, registrationNumber: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
+                  </div>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Seating Capacity</label>
+                    <input placeholder="e.g. 40" type="number" min="0" value={routeFormData.seatingCapacity} onChange={e => setRouteFormData({ ...routeFormData, seatingCapacity: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Insurance Expiry</label>
+                    <input type="date" value={routeFormData.insuranceExpiry} onChange={e => setRouteFormData({ ...routeFormData, insuranceExpiry: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
+                  </div>
+                </div>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Stops / Waypoints (Comma separated)</label>
+                  <textarea required placeholder="Civil Lines, DD Puram, University" value={routeFormData.stops.map(s => s.name).join(', ')} onChange={e => setRouteFormData({ ...routeFormData, stops: e.target.value.split(',').map((s, i) => ({ name: s.trim(), type: 'main', order: i })) })} rows="3" style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', resize: 'none' }} />
+                </div>
+                <div className="flex flex-col sm:flex-row gap-4 mt-4">
+                  <button type="button" onClick={() => setShowRouteModal(false)} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', background: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Cancel</button>
+                  <button type="submit" style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: 'none', background: 'var(--primary-blue)', color: 'white', cursor: 'pointer', fontWeight: 'bold' }}>{editingRoute ? 'Update Route' : 'Save Route'}</button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

@@ -119,13 +119,19 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center relative p-4" style={{ backgroundColor: 'transparent', overflow: 'hidden' }}>
-      {/* Background Video */}
+    <div className="min-h-screen flex items-center justify-center relative p-4" style={{ 
+      backgroundColor: '#0c1e36', // Fallback solid color (Invertis dark blue)
+      overflow: 'hidden' 
+    }}>
+      {/* Background Video with fallback */}
       <video
         autoPlay
         loop
         muted
         playsInline
+        onError={(e) => {
+          e.target.style.display = 'none';
+        }}
         style={{
           position: 'absolute',
           top: 0,

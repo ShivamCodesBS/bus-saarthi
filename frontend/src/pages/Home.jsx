@@ -110,6 +110,11 @@ const Home = () => {
   });
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
+  // Buses at student's assigned stop
+  const [busesAtStop, setBusesAtStop] = useState([]);
+  const [loadingBusesAtStop, setLoadingBusesAtStop] = useState(false);
+  const [selectedStopBus, setSelectedStopBus] = useState(null);
+
   // Global Broadcast State
   const [notices, setNotices] = useState([]);
   const [activeBroadcast, setActiveBroadcast] = useState(null);
@@ -292,6 +297,27 @@ const Home = () => {
     }
   };
   syncWakeAlarm();
+
+    // Fetch buses at student's assigned stop
+    const fetchBusesAtStop = async () => {
+      const stopName = user?.stopName;
+      if (!stopName) return;
+      setLoadingBusesAtStop(true);
+      try {
+        const res = await axios.get(`${BACKEND_URL}/api/routes/by-stop`, {
+          params: { stop: stopName },
+          headers: { Authorization: `Bearer ${user?.token}` }
+        });
+        if (res.data.status === 'success') {
+          setBusesAtStop(res.data.data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch buses at stop");
+      } finally {
+        setLoadingBusesAtStop(false);
+      }
+    };
+    fetchBusesAtStop();
 
     // Socket.io connection for live data
     const socket = io(SOCKET_URL, {
@@ -783,6 +809,12 @@ const Home = () => {
                   <div className="flex flex-col min-w-0">
                     <span className="font-bold text-slate-800 dark:text-slate-100 truncate text-base">{user?.name || 'Passenger User'}</span>
                     <span className="text-xs text-slate-500 dark:text-slate-400 truncate font-medium">{user?.email || user?.login_id || 'passenger@invertis.edu'}</span>
+                    {user?.stopName && (
+                      <span className="flex items-center gap-1 mt-1 text-xs text-blue-600 dark:text-blue-400 font-medium">
+                        <MapPin size={10} />
+                        {user.stopName}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -1058,6 +1090,124 @@ const Home = () => {
                </CardContent>
             </Card>
             </div>
+
+            {/* BUSES AT MY STOP CARD */}
+            {user?.stopName && (
+              <Card className="rounded-3xl border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl">
+                <CardHeader className="border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50 pb-5 px-6 pt-6">
+                  <CardTitle className="flex justify-between items-center text-lg font-bold text-blue-700 dark:text-blue-400">
+                    <span className="flex items-center gap-2">
+                      <MapPin size={20} />
+                      Buses at {user.stopName}
+                    </span>
+                    <Badge variant="secondary" className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 hover:bg-blue-100 border-none font-semibold px-3 py-1 text-sm">
+                      {busesAtStop.length} Bus(es)
+                    </Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-6 flex flex-col gap-4">
+                  {loadingBusesAtStop ? (
+                    <div className="flex justify-center py-8">
+                      <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  ) : busesAtStop.length === 0 ? (
+                    <div className="text-center py-8" style={{ color: 'var(--text-light)' }}>
+                      <MapPin size={32} className="mx-auto mb-2 opacity-50" />
+                      <p className="m-0 text-sm font-medium">No buses found for this stop</p>
+                      <p className="m-0 text-xs mt-1">Your stop may not be on any active route yet</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {busesAtStop.map((bus, idx) => {
+                        const matchingStop = bus.matching_stops?.[0];
+                        const isSelected = selectedStopBus?.route_id === bus.route_id;
+                        const isActive = bus.live && bus.bus_number;
+                        return (
+                          <div
+                            key={bus.route_id}
+                            onClick={() => setSelectedStopBus(isSelected ? null : bus)}
+                            style={{
+                              cursor: 'pointer',
+                              padding: '1rem',
+                              borderRadius: '12px',
+                              border: `2px solid ${isSelected ? '#2563eb' : isActive ? '#22c55e' : 'var(--border-color)'}`,
+                              backgroundColor: isSelected ? '#eff6ff' : isActive ? '#f0fdf4' : 'var(--card-bg)',
+                              transition: 'all 0.2s',
+                            }}
+                            className="hover:shadow-md transition-shadow"
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                  <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: '700', color: 'var(--text-dark)' }}>
+                                    {bus.route_name} ({bus.route_id})
+                                  </h4>
+                                  {isActive && (
+                                    <span style={{ fontSize: '0.65rem', fontWeight: '700', backgroundColor: '#22c55e', color: 'white', padding: '0.15rem 0.4rem', borderRadius: '4px' }}>
+                                      LIVE
+                                    </span>
+                                  )}
+                                  <span style={{ fontSize: '0.7rem', fontWeight: '600', color: 'var(--text-light)', textTransform: 'uppercase' }}>
+                                    {bus.route_type === 'outstation' ? 'Outstation' : 'Local'}
+                                  </span>
+                                </div>
+                                <p style={{ margin: '0.3rem 0 0 0', fontSize: '0.85rem', color: 'var(--text-light)' }}>
+                                  Bus {bus.bus_number} • {bus.city || 'Bareilly'}
+                                </p>
+                                {matchingStop && matchingStop.time && (
+                                  <p style={{ margin: '0.3rem 0 0 0', fontSize: '0.75rem', color: '#2563eb', fontWeight: '500' }}>
+                                    Scheduled: {matchingStop.time}
+                                  </p>
+                                )}
+                              </div>
+                              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                                <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-light)' }}>Your Stop</p>
+                                <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.9rem', fontWeight: '700', color: 'var(--text-dark)' }}>
+                                  {matchingStop?.name || user.stopName}
+                                </p>
+                                {isSelected && (
+                                  <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); setSelectedStopBus(null); }}
+                                      style={{ padding: '0.4rem 0.8rem', backgroundColor: '#2563eb', color: 'white', border: 'none', borderRadius: '6px', fontSize: '0.75rem', fontWeight: '600', cursor: 'pointer' }}
+                                    >
+                                      Track This Bus
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            {isSelected && bus.all_stops && (
+                              <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)' }}>
+                                <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-light)' }}>All Stops on This Route</p>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+                                  {bus.all_stops.map((stop, sIdx) => (
+                                    <span
+                                      key={sIdx}
+                                      style={{
+                                        fontSize: '0.7rem',
+                                        padding: '0.2rem 0.5rem',
+                                        borderRadius: '4px',
+                                        backgroundColor: stop.type === 'pickup' ? '#dbeafe' : stop.type === 'dropoff' ? '#fce7f3' : '#f3f4f6',
+                                        color: stop.type === 'pickup' ? '#1e40af' : stop.type === 'dropoff' ? '#9d174d' : '#374151',
+                                        fontWeight: '500',
+                                      }}
+                                      title={stop.type}
+                                    >
+                                      {stop.name}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
           </div>
 
