@@ -790,6 +790,12 @@ const Home = () => {
                   <div className="flex flex-col min-w-0">
                     <span className="font-bold text-slate-800 dark:text-slate-100 truncate text-base">{user?.name || 'Passenger User'}</span>
                     <span className="text-xs text-slate-500 dark:text-slate-400 truncate font-medium">{user?.email || user?.login_id || 'passenger@invertis.edu'}</span>
+                    {user?.stopName && (
+                      <span className="flex items-center gap-1 mt-1 text-xs text-blue-600 dark:text-blue-400 font-medium">
+                        <MapPin size={10} />
+                        {user.stopName}
+                      </span>
+                    )}
                   </div>
                 </div>
 

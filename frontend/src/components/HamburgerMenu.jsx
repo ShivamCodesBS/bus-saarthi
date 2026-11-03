@@ -1,4 +1,4 @@
-import { X, Users, Home, User, Settings, LogOut } from 'lucide-react';
+import { X, Users, Home, User, Settings, LogOut, MapPin } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
@@ -60,6 +60,23 @@ const HamburgerMenu = ({ isOpen, onClose }) => {
         </div>
 
         <div data-lenis-prevent="true" style={{ padding: '2rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', flex: 1, overflowY: 'auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem', backgroundColor: 'var(--bg-color)', borderRadius: '10px' }}>
+            <UserAvatar
+              src={user?.profile_pic}
+              name={user?.name}
+              size={44}
+            />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span className="font-bold text-slate-800 dark:text-slate-100 truncate block">{user?.name || 'Passenger User'}</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400 truncate block">{user?.email || user?.login_id || 'passenger@invertis.edu'}</span>
+              {user?.stopName && (
+                <span className="flex items-center gap-1 mt-1 text-xs text-blue-600 dark:text-blue-400 font-medium">
+                  <MapPin size={10} />
+                  {user.stopName}
+                </span>
+              )}
+            </div>
+          </div>
           {user?.role !== 'parent' && user?.role !== 'admin' && user?.role !== 'transport_incharge' && (
             <button 
               onClick={() => { onClose(); navigate('/community'); }}
