@@ -310,7 +310,14 @@ class _HomeViewState extends State<_HomeView> {
           ),
 
           // ── Notification dropdown panel ──
-          if (_showNotifications)
+          if (_showNotifications) ...[
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() => _showNotifications = false),
+                child: const ColoredBox(color: Colors.transparent),
+              ),
+            ),
             Positioned(
               top: 0,
               right: 8,
@@ -321,6 +328,7 @@ class _HomeViewState extends State<_HomeView> {
                 onClose: () => setState(() => _showNotifications = false),
               ),
             ),
+          ],
 
           // ── Drawer ──
           if (_isMenuOpen) ...[

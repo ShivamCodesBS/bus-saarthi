@@ -90,6 +90,19 @@ const Home = () => {
   const [routeInfo, setRouteInfo] = useState(null);
   const [driverInfo, setDriverInfo] = useState(null);
   const [showNotifications, setShowNotifications] = useState(false);
+  const notifDropdownRef = useRef(null);
+
+  useEffect(() => {
+    if (!showNotifications) return;
+    const handleClickOutside = (e) => {
+      if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target)) {
+        setShowNotifications(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showNotifications]);
+
   const [hasUnread, setHasUnread] = useState(false);
   const [seenIds, setSeenIds] = useState(() => {
     try { return JSON.parse(localStorage.getItem('passenger_seen_notif_ids') || '[]'); }
@@ -634,7 +647,7 @@ const Home = () => {
             </Button>
           </nav>
 
-          <div className="relative">
+          <div className="relative" ref={notifDropdownRef}>
             {(() => {
               const allNotifications = [];
               if (activeBroadcast) {
