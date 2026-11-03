@@ -293,18 +293,6 @@ export class RoutesService {
     return { status: 'success', message: 'Route deleted' };
   }
 
-  async getLiveBus(routeId: string) {
-    const route = await this.prisma.route.findUnique({
-      where: { routeId },
-      select: { busNumber: true, routeName: true, bus: { select: { busNumber: true } } },
-    });
-    if (!route) return null;
-    return {
-      busNumber: route.bus?.busNumber ?? route.busNumber,
-      routeName: route.routeName,
-    };
-  }
-
   /**
    * Find the Bus record for a bus number, creating it if needed
    */
