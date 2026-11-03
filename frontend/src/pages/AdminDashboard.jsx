@@ -140,9 +140,8 @@ const AdminDashboard = () => {
   const [editingRoute, setEditingRoute] = useState(null);
   const [viewingRouteDetails, setViewingRouteDetails] = useState(null);
   const [routeFormData, setRouteFormData] = useState({ route_id: '', route_name: '', bus_number: '', driver_id: '', stops: [], city: 'Bareilly', vehicleModel: '', registrationNumber: '', seatingCapacity: '', insuranceExpiry: '', route_type: 'local' });
-const [showRouteStopsBuilder, setShowRouteStopsBuilder] = useState(false);
+  const [showRouteStopsBuilder, setShowRouteStopsBuilder] = useState(false);
   const [routeTypeFilter, setRouteTypeFilter] = useState('all');
-  const [routeSearchQuery, setRouteSearchQuery] = useState('');
 
   // Filter routes by type
   const filteredRoutes = useMemo(() => {
@@ -3311,9 +3310,7 @@ const [showRouteStopsBuilder, setShowRouteStopsBuilder] = useState(false);
             </div>
 
             {showRouteStopsBuilder ? (
-              <>
-                {/* Advanced Stops Builder */}
-                <form onSubmit={handleSaveRoute} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <form onSubmit={handleSaveRoute} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <div className="flex flex-col sm:flex-row gap-4">
                   <div style={{ flex: 1 }}>
                     <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Route ID</label>
@@ -3412,7 +3409,6 @@ const [showRouteStopsBuilder, setShowRouteStopsBuilder] = useState(false);
                 </div>
               </form>
             ) : (
-              {/* Basic Form - Simple comma-separated */}
               <form onSubmit={handleSaveRoute} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <div className="flex flex-col sm:flex-row gap-4">
                   <div style={{ flex: 1 }}>
@@ -3475,8 +3471,7 @@ const [showRouteStopsBuilder, setShowRouteStopsBuilder] = useState(false);
                   <button type="submit" style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: 'none', background: 'var(--primary-blue)', color: 'white', cursor: 'pointer', fontWeight: 'bold' }}>{editingRoute ? 'Update Route' : 'Save Route'}</button>
                 </div>
               </form>
-            </>
-          )}
+            )}
           </div>
         </div>
       )}
