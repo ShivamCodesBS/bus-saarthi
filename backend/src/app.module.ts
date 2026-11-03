@@ -38,17 +38,17 @@ import { StatsModule } from './stats/stats.module';
       {
         name: 'short',
         ttl: 60000, // 1 minute
-        limit: 10, // 10 requests default
+        limit: 100, // 100 requests per minute (increased for auth/token endpoint)
       },
       {
         name: 'medium',
         ttl: 300000, // 5 minutes
-        limit: 50,
+        limit: 200,
       },
       {
         name: 'long',
         ttl: 3600000, // 1 hour
-        limit: 200,
+        limit: 1000,
       },
     ]),
     AuthModule,
