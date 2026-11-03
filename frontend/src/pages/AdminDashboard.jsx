@@ -3311,8 +3311,9 @@ const [showRouteStopsBuilder, setShowRouteStopsBuilder] = useState(false);
             </div>
 
             {showRouteStopsBuilder ? (
-              {/* Advanced Stops Builder */}
-              <form onSubmit={handleSaveRoute} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <>
+                {/* Advanced Stops Builder */}
+                <form onSubmit={handleSaveRoute} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <div className="flex flex-col sm:flex-row gap-4">
                   <div style={{ flex: 1 }}>
                     <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Route ID</label>
@@ -3474,10 +3475,8 @@ const [showRouteStopsBuilder, setShowRouteStopsBuilder] = useState(false);
                   <button type="submit" style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: 'none', background: 'var(--primary-blue)', color: 'white', cursor: 'pointer', fontWeight: 'bold' }}>{editingRoute ? 'Update Route' : 'Save Route'}</button>
                 </div>
               </form>
-            )}
-          </div>
-        </div>
-      )}
+            </>
+          )}
               </div>
             </form>
           </div>
