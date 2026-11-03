@@ -35,12 +35,14 @@ class LanguageProvider extends ChangeNotifier {
   Future<void> setLanguage(String langCode) async {
     if (langCode != 'en' && langCode != 'hi') return;
     _lang = langCode;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      AppConstants.prefLangKey,
-      langCode == 'hi' ? 'Hindi (हिंदी)' : 'English',
-    );
     notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        AppConstants.prefLangKey,
+        langCode == 'hi' ? 'Hindi (हिंदी)' : 'English',
+      );
+    } catch (_) {}
   }
 
   /// Same fallback chain as the web `t()`: lang → en → key.

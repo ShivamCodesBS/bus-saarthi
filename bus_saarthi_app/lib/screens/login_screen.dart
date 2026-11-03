@@ -235,16 +235,8 @@ class _LoginScreenState extends State<LoginScreen> {
           SafeArea(
             child: Stack(
               children: [
-                // Top Header Bar
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: _TopBar(lang: lang),
-                ),
-
-                // Glassmorphic Login Card
-                Center(
+                // Glassmorphic Login Card (Positioned.fill so it scrolls under the top bar)
+                Positioned.fill(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
                       final bottomInset = MediaQuery.of(
@@ -252,7 +244,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ).viewInsets.bottom;
                       return SingleChildScrollView(
                         padding: EdgeInsets.only(
-                          top: 85,
+                          top: 75,
                           bottom: 20 + bottomInset,
                           left: 18,
                           right: 18,
@@ -260,7 +252,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         child: ConstrainedBox(
                           constraints: BoxConstraints(
                             minHeight:
-                                constraints.maxHeight - 85 - 20 - bottomInset,
+                                constraints.maxHeight - 75 - 20 - bottomInset,
                           ),
                           child: Center(
                             child: _LoginCard(
@@ -305,6 +297,14 @@ class _LoginScreenState extends State<LoginScreen> {
                       );
                     },
                   ),
+                ),
+
+                // Top Header Bar (FLOAT ON TOP in Stack so it receives all taps first)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: _TopBar(lang: lang),
                 ),
               ],
             ),
@@ -381,8 +381,10 @@ class _TopBar extends StatelessWidget {
                 borderRadius: BorderRadius.circular(20),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(20),
-                  onTap: () =>
-                      lang.setLanguage(lang.lang == 'en' ? 'hi' : 'en'),
+                  onTap: () {
+                    final nextLang = lang.lang == 'en' ? 'hi' : 'en';
+                    lang.setLanguage(nextLang);
+                  },
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 14,
