@@ -141,6 +141,7 @@ const AdminDashboard = () => {
   const [viewingRouteDetails, setViewingRouteDetails] = useState(null);
 const [routeFormData, setRouteFormData] = useState({ route_id: '', route_name: '', bus_number: '', driver_id: '', stops: [], city: 'Bareilly', vehicleModel: '', registrationNumber: '', seatingCapacity: '', insuranceExpiry: '', route_type: 'local' });
   const [routeTypeFilter, setRouteTypeFilter] = useState('all');
+  const [allStops, setAllStops] = useState([]);
 
   // Filter routes by type
   const filteredRoutes = useMemo(() => {
@@ -443,6 +444,17 @@ const [routeFormData, setRouteFormData] = useState({ route_id: '', route_name: '
         return prev;
       });
     },
+  });
+
+  // Fetch all unique stops for the user edit dropdown
+  const {
+    data: stopsData,
+    refetch: refetchStops,
+  } = useStaleWhileRevalidate('/api/routes/stops', {
+    cacheKey: 'admin:stops',
+    staleTime: 300000,
+    token: user?.token,
+    onData: (data) => setAllStops(data.data || []),
   });
 
   const {
@@ -976,14 +988,18 @@ const [routeFormData, setRouteFormData] = useState({ route_id: '', route_name: '
     if (!routeFormData.route_id?.trim()) return toast.error('Route ID is required.');
     if (!routeFormData.route_name?.trim()) return toast.error('Route name is required.');
     if (!routeFormData.bus_number?.trim()) return toast.error('Bus number is required.');
-    if (!routeFormData.stops?.trim()) return toast.error('At least one stop is required.');
+    if (!routeFormData.stops?.length || routeFormData.stops.every(s => !s.trim())) return toast.error('At least one stop is required.');
+
+    // Filter out empty stops and trim
+    const stops = routeFormData.stops.map(s => s.trim()).filter(Boolean);
 
     try {
       const authHeaders = { headers: { Authorization: `Bearer ${user?.token}` } };
+      const payload = { ...routeFormData, stops };
       if (editingRoute) {
-        await axios.put(`${BACKEND_URL}/api/routes/${editingRoute.route_id || editingRoute.routeId}`, routeFormData, authHeaders);
+        await axios.put(`${BACKEND_URL}/api/routes/${editingRoute.route_id || editingRoute.routeId}`, payload, authHeaders);
       } else {
-        await axios.post(`${BACKEND_URL}/api/routes`, routeFormData, authHeaders);
+        await axios.post(`${BACKEND_URL}/api/routes`, payload, authHeaders);
       }
       setShowRouteModal(false);
       // Invalidate routes cache - wait for refetch to complete so UI updates instantly
@@ -3140,6 +3156,18 @@ const [routeFormData, setRouteFormData] = useState({ route_id: '', route_name: '
                         <option key={r.routeId || r.route_id} value={r.routeId || r.route_id}>Route {r.routeId || r.route_id} - {r.routeName || r.route_name} (Bus: {r.busNumber || r.bus_number})</option>
                       ))}
                       {routesList.length === 0 && <option value="">No Routes Found</option>}
+                    </select>
+                  </div>
+                )}
+                {/* Assigned Stop (for passengers) */}
+                {userFormData.role === 'passenger' && (
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Assigned Stop</label>
+                    <select value={userFormData.stop_name || ''} onChange={e => setUserFormData({ ...userFormData, stop_name: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: 'var(--card-bg)' }}>
+                      <option value="">Not Assigned</option>
+                      {allStops.map(s => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
                     </select>
                   </div>
                 )}
