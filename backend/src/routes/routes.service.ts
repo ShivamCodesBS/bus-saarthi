@@ -307,37 +307,32 @@ export class RoutesService {
   }
 
   /**
-   * Parse stops from JSON string to array
+   * Parse stops from JSON string to array of simple stop names
    */
-  private parseStops(stopsJson: string): any[] {
+  private parseStops(stopsJson: string): string[] {
     if (!stopsJson) return [];
     try {
       const parsed = JSON.parse(stopsJson);
-      return Array.isArray(parsed) ? parsed : [];
+      if (Array.isArray(parsed)) {
+        return parsed.map(s => typeof s === 'string' ? s : (s.name || s.stopName || String(s))).filter(Boolean);
+      }
     } catch {
       // Fallback for legacy comma-separated format
-      return stopsJson.split(',').map((s, i) => ({
-        name: s.trim(),
-        type: 'main',
-        order: i,
-      }));
+      return stopsJson.split(',').map(s => s.trim()).filter(Boolean);
     }
+    return [];
   }
 
   /**
    * Process stops input - handle both array and legacy string formats
+   * Returns array of simple stop names (strings)
    */
-  private processStopsInput(stops: any): any[] {
+  private processStopsInput(stops: any): string[] {
     if (!stops) return [];
 
     // If already an array
     if (Array.isArray(stops)) {
-      return stops.map((s, i) => ({
-        name: typeof s === 'string' ? s.trim() : s.name?.trim(),
-        type: s.type || 'main',
-        order: s.order ?? i,
-        time: s.time || null,
-      }));
+      return stops.map(s => typeof s === 'string' ? s.trim() : (s.name || s.stopName || String(s)).trim()).filter(Boolean);
     }
 
     // If it's a JSON string
@@ -345,20 +340,11 @@ export class RoutesService {
       try {
         const parsed = JSON.parse(stops);
         if (Array.isArray(parsed)) {
-          return parsed.map((s, i) => ({
-            name: typeof s === 'string' ? s.trim() : s.name?.trim(),
-            type: s.type || 'main',
-            order: s.order ?? i,
-            time: s.time || null,
-          }));
+          return parsed.map(s => typeof s === 'string' ? s.trim() : (s.name || s.stopName || String(s)).trim()).filter(Boolean);
         }
       } catch {
         // Fallback for comma-separated format
-        return stops.split(',').map((s, i) => ({
-          name: s.trim(),
-          type: 'main',
-          order: i,
-        }));
+        return stops.split(',').map(s => s.trim()).filter(Boolean);
       }
     }
 

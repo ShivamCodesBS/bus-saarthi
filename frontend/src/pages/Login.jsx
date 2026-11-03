@@ -143,7 +143,7 @@ const Login = () => {
           opacity: 0.85
         }}
       >
-        <source src="https://www.invertisuniversity.ac.in/uploads/banner/20251029150922.mp4" type="video/mp4" />
+        <source src="/login_background.mp4" type="video/mp4" />
       </video>
 
       {/* Lightened overlay for better video visibility while keeping text readable */}
