@@ -29,6 +29,10 @@ export class CreateUserDto {
   @IsOptional()
   route_id?: string;
 
+  @IsString()
+  @IsOptional()
+  stop_name?: string;
+
   @IsEnum(FeeStatus)
   @IsOptional()
   fee_status?: FeeStatus;

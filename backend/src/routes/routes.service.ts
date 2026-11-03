@@ -107,7 +107,7 @@ export class RoutesService {
     const matchingRoutes = routes.filter((r) => {
       const stops = this.parseStops(r.stops);
       return stops.some(
-        (s) => s.name.toLowerCase().includes(stopName.toLowerCase()),
+        (s) => s.toLowerCase().includes(stopName.toLowerCase()),
       );
     });
 
@@ -117,7 +117,7 @@ export class RoutesService {
       data: matchingRoutes.map((r) => {
         const stops = this.parseStops(r.stops);
         const matchingStops = stops.filter((s) =>
-          s.name.toLowerCase().includes(stopName.toLowerCase()),
+          s.toLowerCase().includes(stopName.toLowerCase()),
         );
         const liveBus = r.bus?.busNumber || r.busNumber;
         return {
@@ -142,16 +142,16 @@ export class RoutesService {
       select: { stops: true },
     });
 
-    const stopSet = new Map<string, { name: string; category: string; count: number }>();
+    const stopSet = new Map<string, { name: string; count: number }>();
 
     routes.forEach((r) => {
       const stops = this.parseStops(r.stops);
-      stops.forEach((s) => {
-        const existing = stopSet.get(s.name);
+      stops.forEach((s: string) => {
+        const existing = stopSet.get(s);
         if (existing) {
           existing.count += 1;
         } else {
-          stopSet.set(s.name, { name: s.name, category: s.type, count: 1 });
+          stopSet.set(s, { name: s, count: 1 });
         }
       });
     });
@@ -163,41 +163,11 @@ export class RoutesService {
   }
 
   /**
-   * Get stops by category (pickup, dropoff, main, etc.)
+   * Get stops by category (deprecated - stops are now simple strings)
+   * Returns empty categories for backward compatibility
    */
   async getStopsByCategory(routeId?: string) {
-    const where = routeId ? { routeId } : {};
-    const routes = await this.prisma.route.findMany({
-      where,
-      select: { routeId: true, routeName: true, stops: true },
-    });
-
-    const categorizedStops: Record<string, any[]> = {
-      pickup: [],
-      dropoff: [],
-      main: [],
-      intermediate: [],
-      terminal: [],
-      other: [],
-    };
-
-    routes.forEach((r) => {
-      const stops = this.parseStops(r.stops);
-      stops.forEach((s) => {
-        const category = s.type || 'other';
-        if (categorizedStops[category]) {
-          categorizedStops[category].push({
-            stop_name: s.name,
-            order: s.order,
-            route_id: r.routeId,
-            route_name: r.routeName,
-            time: s.time,
-          });
-        }
-      });
-    });
-
-    return { status: 'success', data: categorizedStops };
+    return { status: 'success', data: {} };
   }
 
   async create(body: any) {
@@ -372,7 +342,7 @@ export class RoutesService {
    */
   private formatStopsForDisplay(stopsJson: string): string {
     const stops = this.parseStops(stopsJson);
-    return stops.map((s) => s.name).join(', ');
+    return stops.join(', ');
   }
 
   private async invalidate() {

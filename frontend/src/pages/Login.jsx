@@ -25,6 +25,16 @@ const Login = () => {
   const [errorMessage, setErrorMessage] = useState('');
   const [lockoutTimer, setLockoutTimer] = useState(null);
   const [isLocked, setIsLocked] = useState(false);
+  const videoRef = useRef(null);
+
+  // Ensure autoplay works across modern browsers
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.defaultMuted = true;
+      videoRef.current.muted = true;
+      videoRef.current.play().catch(() => {});
+    }
+  }, []);
 
   // Close the Student/Staff dropdown when clicking outside of it.
   useEffect(() => {
@@ -125,13 +135,11 @@ const Login = () => {
     }}>
       {/* Background Video with fallback */}
       <video
+        ref={videoRef}
         autoPlay
         loop
         muted
         playsInline
-        onError={(e) => {
-          e.target.style.display = 'none';
-        }}
         style={{
           position: 'absolute',
           top: 0,
@@ -139,18 +147,21 @@ const Login = () => {
           width: '100%',
           height: '100%',
           objectFit: 'cover',
-          zIndex: -2,
-          opacity: 0.85
+          zIndex: 0,
+          opacity: 0.85,
+          pointerEvents: 'none'
         }}
       >
         <source src="/login_background.mp4" type="video/mp4" />
+        <source src="https://www.invertisuniversity.ac.in/uploads/banner/20251029150922.mp4" type="video/mp4" />
       </video>
 
       {/* Lightened overlay for better video visibility while keeping text readable */}
       <div style={{
         position: 'absolute', inset: 0,
         background: 'linear-gradient(135deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.3) 100%)',
-        zIndex: -1
+        zIndex: 1,
+        pointerEvents: 'none'
       }}></div>
 
       <div style={{
