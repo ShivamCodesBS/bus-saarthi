@@ -2507,7 +2507,6 @@ class _CreateComplaintSheetState extends State<_CreateComplaintSheet> {
   String _mediaType = 'text';
   String? _mediaPath;
   String? _mediaName;
-  bool _showMyName = false;
 
   @override
   void dispose() {
@@ -2567,7 +2566,7 @@ class _CreateComplaintSheetState extends State<_CreateComplaintSheet> {
       category: _category,
       mediaPath: _mediaPath,
       mediaType: _mediaType,
-      showMyName: _showMyName,
+      showMyName: false,
     );
     if (ok && mounted) Navigator.pop(context);
   }
@@ -2735,76 +2734,55 @@ class _CreateComplaintSheetState extends State<_CreateComplaintSheet> {
                   ),
                   const SizedBox(height: 14),
 
-                  // Anonymous toggle
+                  // Privacy Protected badge
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: bgSoft,
+                      color: AppColors.primaryBlue.withOpacity(0.08),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: borderColor),
+                      border: Border.all(
+                        color: AppColors.primaryBlue.withOpacity(0.2),
+                      ),
                     ),
                     child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            color: AppColors.primaryBlue.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(
+                            Icons.shield_outlined,
+                            size: 18,
+                            color: AppColors.primaryBlue,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Post anonymously',
+                                '🔒 Privacy Protected',
                                 style: TextStyle(
-                                  fontSize: 13.5,
+                                  fontSize: 13,
                                   fontWeight: FontWeight.w700,
                                   color: textDark,
                                 ),
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                'Other passengers see complaints anonymously. Transport staff can see your name for moderation.',
+                                'Your name is 100% hidden from other passengers (posted as "Anonymous Passenger"). Only college transport staff sees your details to resolve the complaint.',
                                 style: TextStyle(
                                   fontSize: 11.5,
                                   color: textLight,
+                                  height: 1.35,
                                 ),
                               ),
                             ],
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        // Web-style toggle: blue when anonymous, green when named
-                        GestureDetector(
-                          onTap: () =>
-                              setState(() => _showMyName = !_showMyName),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            width: 46,
-                            height: 26,
-                            padding: const EdgeInsets.all(3),
-                            decoration: BoxDecoration(
-                              color: _showMyName
-                                  ? const Color(0xFF28A745)
-                                  : AppColors.primaryBlue,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: AnimatedAlign(
-                              duration: const Duration(milliseconds: 200),
-                              alignment: _showMyName
-                                  ? Alignment.centerRight
-                                  : Alignment.centerLeft,
-                              child: Container(
-                                width: 20,
-                                height: 20,
-                                decoration: const BoxDecoration(
-                                  color: Colors.white,
-                                  shape: BoxShape.circle,
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Color(0x40000000),
-                                      blurRadius: 3,
-                                      offset: Offset(0, 1),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
                           ),
                         ),
                       ],
