@@ -3,12 +3,16 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  InternalServerErrorException,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CacheService } from '../cache/cache.service';
 
 @Injectable()
 export class RoutesService {
+  private readonly logger = new Logger(RoutesService.name);
+
   constructor(
     private prisma: PrismaService,
     private cache: CacheService,
@@ -245,33 +249,45 @@ export class RoutesService {
     const stopsData =
       body.stops !== undefined ? this.processStopsInput(body.stops) : undefined;
 
-    const updatedRoute = await this.prisma.route.update({
-      where: { routeId },
-      data: {
-        routeName: body.route_name,
-        busNumber: body.bus_number,
-        busId,
-        driverId: body.driver_id,
-        stops: stopsData ? JSON.stringify(stopsData) : undefined,
-        city: body.city,
-        routeType: body.route_type,
-        vehicleModel: body.vehicleModel,
-        registrationNumber: body.registrationNumber,
-        seatingCapacity:
-          body.seatingCapacity !== undefined
-            ? parseInt(body.seatingCapacity, 10)
-            : undefined,
-        insuranceExpiry:
-          body.insuranceExpiry !== undefined
-            ? body.insuranceExpiry
-              ? new Date(body.insuranceExpiry)
-              : null
-            : undefined,
-      },
-    });
+    try {
+      const updatedRoute = await this.prisma.route.update({
+        where: { routeId },
+        data: {
+          routeName: body.route_name,
+          busNumber: body.bus_number,
+          busId,
+          driverId: body.driver_id,
+          stops: stopsData ? JSON.stringify(stopsData) : undefined,
+          city: body.city,
+          routeType: body.route_type,
+          vehicleModel: body.vehicleModel,
+          registrationNumber: body.registrationNumber,
+          seatingCapacity:
+            body.seatingCapacity !== undefined
+              ? parseInt(body.seatingCapacity, 10)
+              : undefined,
+          insuranceExpiry:
+            body.insuranceExpiry !== undefined
+              ? body.insuranceExpiry
+                ? new Date(body.insuranceExpiry)
+                : null
+              : undefined,
+        },
+      });
 
-    await this.invalidate();
-    return { status: 'success', message: 'Route updated', route: updatedRoute };
+      await this.invalidate();
+      return { status: 'success', message: 'Route updated', route: updatedRoute };
+    } catch (error: any) {
+      // Log the actual error for debugging
+      this.logger.error(`Failed to update route ${routeId}:`, error);
+      if (error.code === 'P2003') {
+        throw new BadRequestException('Invalid bus number or driver ID');
+      }
+      if (error.code === 'P2002') {
+        throw new ConflictException('Route ID already exists');
+      }
+      throw new InternalServerErrorException(`Failed to update route: ${error.message}`);
+    }
   }
 
   async remove(routeId: string) {
