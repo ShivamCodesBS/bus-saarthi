@@ -55,10 +55,14 @@ export class RoutesService {
 
     let driver: any = null;
     if (route.driverId) {
-      driver = await this.prisma.user.findUnique({
-        where: { loginId: route.driverId },
-        select: { id: true, loginId: true, name: true, phone: true },
-      });
+      try {
+        driver = await this.prisma.user.findUnique({
+          where: { loginId: route.driverId },
+          select: { id: true, loginId: true, name: true, phone: true },
+        });
+      } catch (err: any) {
+        this.logger.warn(`Could not fetch driver ${route.driverId} for route ${routeId}: ${err?.message}`);
+      }
     }
 
     const liveBus = route.bus?.busNumber || route.busNumber;
@@ -183,24 +187,32 @@ export class RoutesService {
     // Link (or create) the Bus entity that serves this route.
     const busId = await this.resolveBusId(body.bus_number);
 
+    let seatingCapacity: number | null = null;
+    if (body.seatingCapacity) {
+      const parsed = parseInt(String(body.seatingCapacity), 10);
+      if (!isNaN(parsed)) seatingCapacity = parsed;
+    }
+
+    let insuranceExpiry: Date | null = null;
+    if (body.insuranceExpiry) {
+      const parsedDate = new Date(body.insuranceExpiry);
+      if (!isNaN(parsedDate.getTime())) insuranceExpiry = parsedDate;
+    }
+
     const route = await this.prisma.route.create({
       data: {
         routeId: body.route_id,
         routeName: body.route_name,
         busNumber: body.bus_number,
         busId,
-        driverId: body.driver_id,
+        driverId: body.driver_id || null,
         stops: JSON.stringify(stopsData),
         city: body.city || 'Bareilly',
         routeType: body.route_type || 'local',
-        vehicleModel: body.vehicleModel,
-        registrationNumber: body.registrationNumber,
-        seatingCapacity: body.seatingCapacity
-          ? parseInt(body.seatingCapacity, 10)
-          : null,
-        insuranceExpiry: body.insuranceExpiry
-          ? new Date(body.insuranceExpiry)
-          : null,
+        vehicleModel: body.vehicleModel || null,
+        registrationNumber: body.registrationNumber || null,
+        seatingCapacity,
+        insuranceExpiry,
       },
     });
     await this.invalidate();
@@ -219,6 +231,26 @@ export class RoutesService {
     const stopsData =
       body.stops !== undefined ? this.processStopsInput(body.stops) : undefined;
 
+    let seatingCapacity: number | null | undefined = undefined;
+    if (body.seatingCapacity !== undefined) {
+      if (!body.seatingCapacity && body.seatingCapacity !== 0) {
+        seatingCapacity = null;
+      } else {
+        const parsed = parseInt(String(body.seatingCapacity), 10);
+        seatingCapacity = isNaN(parsed) ? null : parsed;
+      }
+    }
+
+    let insuranceExpiry: Date | null | undefined = undefined;
+    if (body.insuranceExpiry !== undefined) {
+      if (!body.insuranceExpiry) {
+        insuranceExpiry = null;
+      } else {
+        const parsedDate = new Date(body.insuranceExpiry);
+        insuranceExpiry = isNaN(parsedDate.getTime()) ? null : parsedDate;
+      }
+    }
+
     try {
       const updatedRoute = await this.prisma.route.update({
         where: { routeId },
@@ -226,22 +258,14 @@ export class RoutesService {
           routeName: body.route_name,
           busNumber: body.bus_number,
           busId,
-          driverId: body.driver_id,
-          stops: stopsData ? JSON.stringify(stopsData) : undefined,
+          driverId: body.driver_id !== undefined ? (body.driver_id || null) : undefined,
+          stops: stopsData !== undefined ? JSON.stringify(stopsData) : undefined,
           city: body.city,
           routeType: body.route_type,
           vehicleModel: body.vehicleModel,
           registrationNumber: body.registrationNumber,
-          seatingCapacity:
-            body.seatingCapacity !== undefined
-              ? parseInt(body.seatingCapacity, 10)
-              : undefined,
-          insuranceExpiry:
-            body.insuranceExpiry !== undefined
-              ? body.insuranceExpiry
-                ? new Date(body.insuranceExpiry)
-                : null
-              : undefined,
+          seatingCapacity,
+          insuranceExpiry,
         },
       });
 
@@ -293,18 +317,23 @@ export class RoutesService {
   }
 
   /**
-   * Parse stops from JSON string to array of simple stop names
+   * Parse stops from JSON string or array to array of simple stop names
    */
-  private parseStops(stopsJson: string): string[] {
+  private parseStops(stopsJson: any): string[] {
     if (!stopsJson) return [];
-    try {
-      const parsed = JSON.parse(stopsJson);
-      if (Array.isArray(parsed)) {
-        return parsed.map(s => typeof s === 'string' ? s : (s.name || s.stopName || String(s))).filter(Boolean);
+    if (Array.isArray(stopsJson)) {
+      return stopsJson.map(s => typeof s === 'string' ? s.trim() : (s?.name || s?.stopName || String(s)).trim()).filter(Boolean);
+    }
+    if (typeof stopsJson === 'string') {
+      try {
+        const parsed = JSON.parse(stopsJson);
+        if (Array.isArray(parsed)) {
+          return parsed.map(s => typeof s === 'string' ? s.trim() : (s?.name || s?.stopName || String(s)).trim()).filter(Boolean);
+        }
+      } catch {
+        // Fallback for legacy comma-separated format
+        return stopsJson.split(',').map(s => s.trim()).filter(Boolean);
       }
-    } catch {
-      // Fallback for legacy comma-separated format
-      return stopsJson.split(',').map(s => s.trim()).filter(Boolean);
     }
     return [];
   }
@@ -340,7 +369,7 @@ export class RoutesService {
   /**
    * Format stops for display (comma-separated list)
    */
-  private formatStopsForDisplay(stopsJson: string): string {
+  private formatStopsForDisplay(stopsJson: any): string {
     const stops = this.parseStops(stopsJson);
     return stops.join(', ');
   }

@@ -255,6 +255,30 @@ const UnifiedMap = ({
   useEffect(() => {
     setLastKnownData(lastKnown);
   }, [lastKnown]);
+
+  // Effective telemetry: uses live socket telemetry if available and fresh;
+  // otherwise gracefully falls back to last-known telemetry from the database.
+  const effectiveTelemetry = useMemo(() => {
+    if (telemetry && !telemetryStale) {
+      return {
+        speed: Number(telemetry.speed) >= 0 ? Number(telemetry.speed) : 0,
+        heading: telemetry.heading ?? 0,
+        comfort: telemetry.comfort || 'Smooth',
+        isLive: true,
+        lastUpdated: lastTelemetryUpdate,
+      };
+    }
+    if (lastKnownData && (lastKnownData.speed !== undefined || lastKnownData.timestamp)) {
+      return {
+        speed: Number(lastKnownData.speed) >= 0 ? Number(lastKnownData.speed) : 0,
+        heading: lastKnownData.heading ?? 0,
+        comfort: lastKnownData.comfort || 'Smooth',
+        isLive: false,
+        lastUpdated: lastKnownData.timestamp,
+      };
+    }
+    return null;
+  }, [telemetry, telemetryStale, lastTelemetryUpdate, lastKnownData]);
   
   // Expose map instance to parent if ref provided
   useEffect(() => {
@@ -423,6 +447,8 @@ const UnifiedMap = ({
             position: [data.data.lat, data.data.lng],
             timestamp: data.data.timestamp,
             speed: data.data.speed,
+            heading: data.data.heading,
+            comfort: data.data.comfort,
           };
           setLastKnownData(freshData);
         }
@@ -640,8 +666,8 @@ const UnifiedMap = ({
       <Marker 
         position={busLocation} 
         icon={busDirectionIcon(
-          telemetry?.heading, 
-          !telemetry || telemetryStale,
+          effectiveTelemetry?.heading ?? telemetry?.heading, 
+          !effectiveTelemetry || !effectiveTelemetry.isLive,
           lastKnownData?.timestamp ? formatLastUpdate(lastKnownData.timestamp) : null,
           handleMarkerClick
         )}
@@ -658,34 +684,39 @@ const UnifiedMap = ({
             <div style={{ fontWeight: 'bold', fontSize: '14px', marginBottom: '4px' }}>
               🚌 {busLabel} {routeInfo?.busNumber || routeInfo?.bus_number || routeInfo?.routeId || ''}
             </div>
-            {telemetry && !telemetryStale && (
-<>
+            {effectiveTelemetry ? (
+              <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '2px' }}>
                   <span style={{ color: '#666' }}>Speed:</span>
-                  <span style={{ fontWeight: 'bold', color: telemetry.speed > 60 ? '#cf1322' : '#28a745' }}>
-                    {telemetry.speed > 0 ? Math.round(telemetry.speed) : 0} km/h
+                  <span style={{ fontWeight: 'bold', color: effectiveTelemetry.speed > 60 ? '#cf1322' : '#28a745' }}>
+                    {Math.round(effectiveTelemetry.speed)} km/h
                   </span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '2px' }}>
                   <span style={{ color: '#666' }}>Direction:</span>
-                  <span style={{ fontWeight: 'bold' }}>{getHeadingLabel(telemetry.heading)}</span>
+                  <span style={{ fontWeight: 'bold' }}>{getHeadingLabel(effectiveTelemetry.heading)}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '2px' }}>
                   <span style={{ color: '#666' }}>Comfort:</span>
                   <span style={{ 
                     fontWeight: 'bold', 
-                    color: (telemetry.comfort || 'Smooth') === 'Smooth' ? '#28a745' : 
-                           (telemetry.comfort || 'Smooth') === 'Moderate' ? '#f97316' : '#ef4444' 
+                    color: (effectiveTelemetry.comfort || 'Smooth') === 'Smooth' ? '#28a745' : 
+                           (effectiveTelemetry.comfort || 'Smooth') === 'Moderate' ? '#f97316' : '#ef4444' 
                   }}>
-                    {telemetry.comfort || 'Smooth'}
+                    {effectiveTelemetry.comfort || 'Smooth'}
                   </span>
                 </div>
                 <div style={{ fontSize: '10px', color: '#999', marginTop: '4px' }}>
-                  Updated: {formatLastUpdate(lastTelemetryUpdate)}
+                  {effectiveTelemetry.isLive ? 'Updated: ' : 'Last seen: '}
+                  {formatLastUpdate(effectiveTelemetry.lastUpdated)}
                 </div>
+                {!effectiveTelemetry.isLive && (
+                  <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#cf1322', marginTop: '3px' }}>
+                    📡 Offline
+                  </div>
+                )}
               </>
-            )}
-            {(!telemetry || telemetryStale) && (
+            ) : (
               <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#cf1322' }}>
                 {isFetchingLastKnown
                   ? '📡 Fetching last location...'
@@ -707,44 +738,52 @@ const UnifiedMap = ({
       pointerEvents: 'none',
       zIndex: 500,
     }}>
-      {/* Top-left: GPS Status (fullscreen header shows its own badge) */}
-      <div style={{ position: 'absolute', top: '12px', left: '12px', pointerEvents: 'auto', display: isFullscreen ? 'none' : 'block' }}>
-        <div 
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '6px 12px',
-            borderRadius: '20px',
-            fontSize: '0.7rem',
-            fontWeight: '700',
-            background: gpsStatus.bg,
-            color: gpsStatus.color,
-            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-            border: `1px solid ${gpsStatus.color}40`,
-            cursor: 'help',
-          }}
-          title={gpsStatus.tooltip}
-        >
-          <span style={{ 
-            width: '8px', 
-            height: '8px', 
-            borderRadius: '50%', 
-            background: gpsStatus.color,
-            animation: gpsStatus.status === 'live' ? 'pulse 1.5s infinite' : 'none'
-          }} />
-          <span style={{ letterSpacing: '0.5px' }}>{gpsStatus.label}</span>
-          {lastTelemetryUpdate && gpsStatus.status === 'live' && (
-            <span style={{ fontSize: '0.65rem', opacity: 0.8 }}>
-              {formatLastUpdate(lastTelemetryUpdate)}
-            </span>
-          )}
-        </div>
+      {/* Top-left: GPS Status and Telemetry Panel */}
+      <div style={{
+        position: 'absolute',
+        top: isFullscreen ? '72px' : '12px',
+        left: isFullscreen ? '16px' : '12px',
+        pointerEvents: 'auto',
+        zIndex: 500,
+      }}>
+        {!isFullscreen && (
+          <div 
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              borderRadius: '20px',
+              fontSize: '0.7rem',
+              fontWeight: '700',
+              background: gpsStatus.bg,
+              color: gpsStatus.color,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+              border: `1px solid ${gpsStatus.color}40`,
+              cursor: 'help',
+            }}
+            title={gpsStatus.tooltip}
+          >
+            <span style={{ 
+              width: '8px', 
+              height: '8px', 
+              borderRadius: '50%', 
+              background: gpsStatus.color,
+              animation: gpsStatus.status === 'live' ? 'pulse 1.5s infinite' : 'none'
+            }} />
+            <span style={{ letterSpacing: '0.5px' }}>{gpsStatus.label}</span>
+            {lastTelemetryUpdate && gpsStatus.status === 'live' && (
+              <span style={{ fontSize: '0.65rem', opacity: 0.8 }}>
+                {formatLastUpdate(lastTelemetryUpdate)}
+              </span>
+            )}
+          </div>
+        )}
         
         {/* Telemetry Panel — collapsible to a compact speed chip */}
-        {showTelemetryPanel && telemetry && !telemetryStale && telemetry.speed > 0 && (
+        {showTelemetryPanel && effectiveTelemetry && (
           <div style={{
-            marginTop: '8px',
+            marginTop: isFullscreen ? '0' : '8px',
             padding: '8px 12px',
             borderRadius: '12px',
             background: 'rgba(255,255,255,0.95)',
@@ -754,7 +793,16 @@ const UnifiedMap = ({
             minWidth: '160px',
             pointerEvents: 'auto',
           }}>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '2px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px', gap: '8px' }}>
+              <span style={{
+                fontSize: '0.62rem',
+                fontWeight: 700,
+                color: effectiveTelemetry.isLive ? '#28a745' : '#888',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px'
+              }}>
+                {effectiveTelemetry.isLive ? '● Live Telemetry' : '📡 Last Recorded'}
+              </span>
               <button
                 onClick={() => setTelemetryMinimized((m) => !m)}
                 title={telemetryMinimized ? 'Expand telemetry' : 'Minimize telemetry'}
@@ -770,10 +818,10 @@ const UnifiedMap = ({
             {telemetryMinimized ? (
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '5px' }}>
                 <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#1a1a2e', fontVariantNumeric: 'tabular-nums' }}>
-                  {Math.round(telemetry.speed)}
+                  {Math.round(effectiveTelemetry.speed)}
                 </span>
                 <span style={{ fontSize: '0.62rem', fontWeight: 600, color: '#666' }}>km/h</span>
-                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#3b82f6' }}>{getHeadingLabel(telemetry.heading)}</span>
+                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#3b82f6' }}>{getHeadingLabel(effectiveTelemetry.heading)}</span>
               </div>
             ) : (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
@@ -794,10 +842,10 @@ const UnifiedMap = ({
                 <div style={{ 
                   fontSize: '1.1rem', 
                   fontWeight: '800', 
-                  color: telemetry.speed > 60 ? '#cf1322' : '#1a1a2e',
+                  color: effectiveTelemetry.speed > 60 ? '#cf1322' : '#1a1a2e',
                   fontVariantNumeric: 'tabular-nums'
                 }}>
-                  {Math.round(telemetry.speed)} km/h
+                  {Math.round(effectiveTelemetry.speed)} km/h
                 </div>
               </div>
               
@@ -816,11 +864,11 @@ const UnifiedMap = ({
                   Heading
                 </div>
                 <div style={{ 
-                  fontSize: '0.9rem', 
+                  fontSize: '0.85rem', 
                   fontWeight: '700', 
                   color: '#1a1a2e',
                 }}>
-                  {getHeadingLabel(telemetry.heading)}
+                  {getHeadingLabel(effectiveTelemetry.heading)}
                 </div>
               </div>
               
@@ -836,18 +884,18 @@ const UnifiedMap = ({
                   letterSpacing: '0.5px'
                 }}>
                   <Wind size={10} style={{ 
-                    color: (telemetry.comfort || 'Smooth') === 'Smooth' ? '#28a745' : 
-                           (telemetry.comfort || 'Smooth') === 'Moderate' ? '#f97316' : '#ef4444' 
+                    color: (effectiveTelemetry.comfort || 'Smooth') === 'Smooth' ? '#28a745' : 
+                           (effectiveTelemetry.comfort || 'Smooth') === 'Moderate' ? '#f97316' : '#ef4444' 
                   }} />
                   Comfort
                 </div>
                 <div style={{ 
                   fontSize: '0.85rem', 
                   fontWeight: '700', 
-                  color: (telemetry.comfort || 'Smooth') === 'Smooth' ? '#28a745' : 
-                         (telemetry.comfort || 'Smooth') === 'Moderate' ? '#f97316' : '#ef4444',
+                  color: (effectiveTelemetry.comfort || 'Smooth') === 'Smooth' ? '#28a745' : 
+                         (effectiveTelemetry.comfort || 'Smooth') === 'Moderate' ? '#f97316' : '#ef4444',
                 }}>
-                  {telemetry.comfort || 'Smooth'}
+                  {effectiveTelemetry.comfort || 'Smooth'}
                 </div>
               </div>
             </div>

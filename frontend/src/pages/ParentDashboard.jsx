@@ -311,7 +311,7 @@ const ParentDashboard = () => {
   const lastKnown = useMemo(() => {
     const d = lastKnownData?.data;
     if (!d?.lat || !d?.lng) return null;
-    return { position: [d.lat, d.lng], timestamp: d.timestamp, speed: d.speed };
+    return { position: [d.lat, d.lng], timestamp: d.timestamp, speed: d.speed, heading: d.heading };
   }, [lastKnownData]);
 
   useEffect(() => {

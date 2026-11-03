@@ -126,6 +126,8 @@ const Profile = () => {
           fee_status: data.feeStatus ?? user.fee_status,
           route_id: data.routeId ?? user.route_id,
           name: data.name ?? user.name,
+          stopName: data.stopName ?? user.stopName,
+          stop_name: data.stopName ?? user.stop_name,
         });
       }
     },
@@ -597,17 +599,17 @@ const Profile = () => {
                     {profile.busNumber ? ` · Bus ${profile.busNumber}` : ''}
                   </p>
                 )}
-                {profile?.stopName && (
+                {(profile?.stopName || user?.stopName || user?.stop_name) && (
                   <p
                     style={{
                       margin: '0.35rem 0 0',
                       fontSize: '0.8rem',
                       color: 'var(--primary-blue)',
-                      fontWeight: '600',
+                      fontWeight: '700',
                     }}
                   >
                     <MapPin size={14} style={{ verticalAlign: 'middle', marginRight: '0.2rem' }} />
-                    Stop: {profile.stopName}
+                    Stop: {profile?.stopName || user?.stopName || user?.stop_name}
                   </p>
                 )}
               </div>
@@ -670,40 +672,43 @@ const Profile = () => {
           </Section>
 
           {/* Stop Assignment (for passengers) */}
-          {(role === 'passenger' || role === 'parent') && (
-            <Section title="Assigned Stop" icon={MapPin}>
-              <Detail
-                icon={MapPin}
-                label="Current Stop"
-                value={profile?.stopName || 'Not assigned'}
-              />
-              {profile?.stopName && (
+          {(role === 'passenger' || role === 'parent') && (() => {
+            const currentStop = profile?.stopName || user?.stopName || user?.stop_name;
+            return (
+              <Section title="Assigned Stop" icon={MapPin}>
                 <Detail
-                  icon={Bus}
-                  label="Buses at this stop"
-                  value={
-                    <button
-                      onClick={() => {
-                        // Navigate to home and show buses at stop
-                        navigate('/home');
-                      }}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--primary-blue)',
-                        cursor: 'pointer',
-                        textDecoration: 'underline',
-                        fontSize: 'inherit',
-                        fontWeight: 'inherit',
-                      }}
-                    >
-                      View all buses at this stop
-                    </button>
-                  }
+                  icon={MapPin}
+                  label="Designated Stop"
+                  value={currentStop || 'Not assigned'}
                 />
-              )}
-            </Section>
-          )}
+                {currentStop && (
+                  <Detail
+                    icon={Bus}
+                    label="Buses at this stop"
+                    value={
+                      <button
+                        onClick={() => {
+                          navigate('/home');
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--primary-blue)',
+                          cursor: 'pointer',
+                          textDecoration: 'underline',
+                          fontSize: 'inherit',
+                          fontWeight: '700',
+                          padding: 0,
+                        }}
+                      >
+                        View all buses stopping at {currentStop} →
+                      </button>
+                    }
+                  />
+                )}
+              </Section>
+            );
+          })()}
 
           {/* Student / staff specifics */}
           {(role === 'passenger' || role === 'teacher') && (

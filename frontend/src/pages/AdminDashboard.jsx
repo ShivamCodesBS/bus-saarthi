@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Users, MapPin, LogOut, Settings, Bell, AlertOctagon, CheckCircle2, MessageSquare, Trash2, UserPlus, Navigation, Plus, X, User, Menu, Eye, Download, Upload, Activity, GitMerge, Undo2, Sparkles, ArrowLeft, AlertTriangle, ArrowRight, History, Layers, Wrench, Timer, RotateCcw, Compass } from 'lucide-react';
+import { Users, MapPin, LogOut, Settings, Bell, AlertOctagon, CheckCircle2, MessageSquare, Trash2, UserPlus, Navigation, Plus, X, User, Menu, Eye, Download, Upload, Activity, GitMerge, Undo2, Sparkles, ArrowLeft, AlertTriangle, ArrowRight, History, Layers, Wrench, Timer, RotateCcw, Compass, Bus, ArrowUp, ArrowDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { io } from 'socket.io-client';
@@ -86,7 +86,7 @@ const AdminDashboard = () => {
   // User Management Modal State
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
-  const [userFormData, setUserFormData] = useState({ name: '', login_id: '', password: '', role: 'passenger', subject: '', route_id: '1', fee_status: 'paid', phone: '', licenseNumber: '', licenseExpiry: '', experienceYears: '', bloodGroup: '', parentName: '', parentPhone: '', parentPassword: '', createParentAccount: false, dob: '', address: '', gradeClass: '' });
+  const [userFormData, setUserFormData] = useState({ name: '', login_id: '', password: '', role: 'passenger', subject: '', route_id: '1', stop_name: '', fee_status: 'paid', phone: '', licenseNumber: '', licenseExpiry: '', experienceYears: '', bloodGroup: '', parentName: '', parentPhone: '', parentPassword: '', createParentAccount: false, dob: '', address: '', gradeClass: '' });
   const [userFilter, setUserFilter] = useState('passenger');
   const [routeSearchQuery, setRouteSearchQuery] = useState('');
   const [viewingUser, setViewingUser] = useState(null);
@@ -139,9 +139,38 @@ const AdminDashboard = () => {
   const [showRouteModal, setShowRouteModal] = useState(false);
   const [editingRoute, setEditingRoute] = useState(null);
   const [viewingRouteDetails, setViewingRouteDetails] = useState(null);
-const [routeFormData, setRouteFormData] = useState({ route_id: '', route_name: '', bus_number: '', driver_id: '', stops: [], city: 'Bareilly', vehicleModel: '', registrationNumber: '', seatingCapacity: '', insuranceExpiry: '', route_type: 'local' });
+  const [routeFormData, setRouteFormData] = useState({ route_id: '', route_name: '', bus_number: '', driver_id: '', stops: [], city: 'Bareilly', vehicleModel: '', registrationNumber: '', seatingCapacity: '', insuranceExpiry: '', route_type: 'local' });
   const [routeTypeFilter, setRouteTypeFilter] = useState('all');
   const [allStops, setAllStops] = useState([]);
+  const [isSavingRoute, setIsSavingRoute] = useState(false);
+  const [stopInputText, setStopInputText] = useState('');
+  const [selectedExistingStop, setSelectedExistingStop] = useState('');
+
+  // All unique stops collected from all routes + API
+  const availableStops = useMemo(() => {
+    const set = new Set();
+    routesList.forEach(r => {
+      let stops = [];
+      if (Array.isArray(r.stops_data)) stops = r.stops_data;
+      else if (typeof r.stops === 'string') {
+        try {
+          const p = JSON.parse(r.stops);
+          stops = Array.isArray(p) ? p : r.stops.split(',').map(s => s.trim());
+        } catch {
+          stops = r.stops.split(',').map(s => s.trim());
+        }
+      }
+      stops.forEach(s => {
+        const name = typeof s === 'string' ? s.trim() : (s?.name || String(s)).trim();
+        if (name) set.add(name);
+      });
+    });
+    (allStops || []).forEach(s => {
+      const name = typeof s === 'string' ? s.trim() : (s?.name || String(s)).trim();
+      if (name) set.add(name);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [routesList, allStops]);
 
   // Filter routes by type
   const filteredRoutes = useMemo(() => {
@@ -959,13 +988,34 @@ const [routeFormData, setRouteFormData] = useState({ route_id: '', route_name: '
 
   const openAddUser = () => {
     setEditingUser(null);
-    setUserFormData({ name: '', login_id: '', password: '', role: 'passenger', subject: '', route_id: routesList[0]?.route_id || '1', fee_status: 'paid', phone: '', licenseNumber: '', licenseExpiry: '', experienceYears: '', bloodGroup: '', parentName: '', parentPhone: '', parentPassword: '', createParentAccount: false, dob: '', address: '', gradeClass: '' });
+    setUserFormData({ name: '', login_id: '', password: '', role: userFilter || 'passenger', subject: '', route_id: routesList[0]?.route_id || routesList[0]?.routeId || '1', stop_name: '', fee_status: 'paid', phone: '', licenseNumber: '', licenseExpiry: '', experienceYears: '', bloodGroup: '', parentName: '', parentPhone: '', parentPassword: '', createParentAccount: false, dob: '', address: '', gradeClass: '' });
     setShowUserModal(true);
   };
 
   const openEditUser = (u) => {
     setEditingUser(u);
-    setUserFormData({ name: u.name, login_id: u.loginId || u.login_id, password: '', role: u.role, subject: u.subject || '', route_id: u.routeId || u.route_id || '', fee_status: u.feeStatus || u.fee_status || 'paid', phone: u.phone || '', licenseNumber: u.licenseNumber || '', licenseExpiry: u.licenseExpiry ? new Date(u.licenseExpiry).toISOString().split('T')[0] : '', experienceYears: u.experienceYears || '', bloodGroup: u.bloodGroup || '', parentName: u.parentName || '', parentPhone: u.parentPhone || '', parentPassword: '', createParentAccount: false, dob: u.dob ? new Date(u.dob).toISOString().split('T')[0] : '', address: u.address || '', gradeClass: u.gradeClass || '' });
+    setUserFormData({
+      name: u.name,
+      login_id: u.loginId || u.login_id,
+      password: '',
+      role: u.role,
+      subject: u.subject || '',
+      route_id: u.routeId || u.route_id || '',
+      stop_name: u.stopName || u.stop_name || '',
+      fee_status: u.feeStatus || u.fee_status || 'paid',
+      phone: u.phone || '',
+      licenseNumber: u.licenseNumber || '',
+      licenseExpiry: u.licenseExpiry ? new Date(u.licenseExpiry).toISOString().split('T')[0] : '',
+      experienceYears: u.experienceYears || '',
+      bloodGroup: u.bloodGroup || '',
+      parentName: u.parentName || '',
+      parentPhone: u.parentPhone || '',
+      parentPassword: '',
+      createParentAccount: false,
+      dob: u.dob ? new Date(u.dob).toISOString().split('T')[0] : '',
+      address: u.address || '',
+      gradeClass: u.gradeClass || ''
+    });
     setShowUserModal(true);
   };
 
@@ -984,54 +1034,71 @@ const [routeFormData, setRouteFormData] = useState({ route_id: '', route_name: '
 
   const handleSaveRoute = async (e) => {
     e.preventDefault();
+    if (isSavingRoute) return;
+
     // Client-side validation
     if (!routeFormData.route_id?.trim()) return toast.error('Route ID is required.');
     if (!routeFormData.route_name?.trim()) return toast.error('Route name is required.');
     if (!routeFormData.bus_number?.trim()) return toast.error('Bus number is required.');
-    if (!routeFormData.stops?.length || routeFormData.stops.every(s => !s.trim())) return toast.error('At least one stop is required.');
 
-    // Filter out empty stops and trim
-    const stops = routeFormData.stops.map(s => s.trim()).filter(Boolean);
+    const cleanStops = (routeFormData.stops || []).map(s => (typeof s === 'string' ? s : s?.name || '').trim()).filter(Boolean);
+    if (cleanStops.length === 0) return toast.error('At least one stop is required.');
 
+    setIsSavingRoute(true);
     try {
       const authHeaders = { headers: { Authorization: `Bearer ${user?.token}` } };
-      const payload = { ...routeFormData, stops };
+      const payload = {
+        ...routeFormData,
+        stops: cleanStops,
+        driver_id: routeFormData.driver_id?.trim() || null,
+        seatingCapacity: routeFormData.seatingCapacity !== '' && routeFormData.seatingCapacity != null
+          ? parseInt(String(routeFormData.seatingCapacity), 10) || null
+          : null,
+        insuranceExpiry: routeFormData.insuranceExpiry ? routeFormData.insuranceExpiry : null,
+      };
       if (editingRoute) {
         await axios.put(`${BACKEND_URL}/api/routes/${editingRoute.route_id || editingRoute.routeId}`, payload, authHeaders);
+        toast.success("Route updated successfully!");
       } else {
         await axios.post(`${BACKEND_URL}/api/routes`, payload, authHeaders);
+        toast.success("Route created successfully!");
       }
       setShowRouteModal(false);
       // Invalidate routes cache - wait for refetch to complete so UI updates instantly
       await refetchRoutes();
     } catch (err) {
       toast.error(friendlyError(err, "Failed to save route"));
+    } finally {
+      setIsSavingRoute(false);
     }
   };
 
   const openAddRoute = () => {
     setEditingRoute(null);
     setRouteFormData({ route_id: '', route_name: '', bus_number: '', driver_id: '', stops: [], city: 'Bareilly', vehicleModel: '', registrationNumber: '', seatingCapacity: '', insuranceExpiry: '', route_type: 'local' });
+    setStopInputText('');
+    setSelectedExistingStop('');
     setShowRouteModal(true);
   };
 
   const openEditRoute = (r) => {
     setEditingRoute(r);
-    // Parse stops from stored format
+    // Parse stops from stored format into clean string[]
     let stopsArray = [];
-    if (r.stops_data && Array.isArray(r.stops_data)) {
-      stopsArray = r.stops_data.map(s => s.name || s);
-    } else if (r.stops) {
+    if (Array.isArray(r.stops_data) && r.stops_data.length > 0) {
+      stopsArray = r.stops_data.map(s => typeof s === 'string' ? s : (s?.name || String(s))).filter(Boolean);
+    } else if (Array.isArray(r.stops)) {
+      stopsArray = r.stops.map(s => typeof s === 'string' ? s : (s?.name || String(s))).filter(Boolean);
+    } else if (typeof r.stops === 'string') {
       try {
         const parsed = JSON.parse(r.stops);
         if (Array.isArray(parsed)) {
-          stopsArray = parsed.map(s => s.name || s);
+          stopsArray = parsed.map(s => typeof s === 'string' ? s : (s?.name || String(s))).filter(Boolean);
         } else {
-          // Legacy comma-separated format
-          stopsArray = r.stops.split(',').map(s => s.trim());
+          stopsArray = r.stops.split(',').map(s => s.trim()).filter(Boolean);
         }
       } catch {
-        stopsArray = r.stops.split(',').map(s => s.trim());
+        stopsArray = r.stops.split(',').map(s => s.trim()).filter(Boolean);
       }
     }
     setRouteFormData({
@@ -1043,10 +1110,12 @@ const [routeFormData, setRouteFormData] = useState({ route_id: '', route_name: '
       city: r.city || 'Bareilly',
       vehicleModel: r.vehicleModel || '',
       registrationNumber: r.registrationNumber || '',
-      seatingCapacity: r.seatingCapacity || '',
+      seatingCapacity: r.seatingCapacity != null ? String(r.seatingCapacity) : '',
       insuranceExpiry: r.insuranceExpiry ? new Date(r.insuranceExpiry).toISOString().split('T')[0] : '',
       route_type: r.routeType || r.route_type || 'local'
     });
+    setStopInputText('');
+    setSelectedExistingStop('');
     setShowRouteModal(true);
   };
 
@@ -1083,7 +1152,7 @@ const [routeFormData, setRouteFormData] = useState({ route_id: '', route_name: '
   const lastKnown = useMemo(() => {
     const d = lastKnownData?.data;
     if (!d?.lat || !d?.lng) return null;
-    return { position: [d.lat, d.lng], timestamp: d.timestamp, speed: d.speed };
+    return { position: [d.lat, d.lng], timestamp: d.timestamp, speed: d.speed, heading: d.heading };
   }, [lastKnownData]);
 
   // Offline: put the marker where the bus was last actually seen.
@@ -1661,145 +1730,171 @@ const [routeFormData, setRouteFormData] = useState({ route_id: '', route_name: '
                   const isOutstation = routeType === 'outstation';
                   const stopsData = r.stops_data || (typeof r.stops === 'string' ? JSON.parse(r.stops || '[]') : []);
 
-                  // Group stops by category
-                  const stopsByCategory = stopsData.reduce((acc, stop) => {
-                    const type = stop.type || 'main';
-                    if (!acc[type]) acc[type] = [];
-                    acc[type].push(stop);
-                    return acc;
-                  }, {});
+                  const routeStops = (() => {
+                    if (Array.isArray(r.stops_data) && r.stops_data.length > 0) {
+                      return r.stops_data.map(s => typeof s === 'string' ? s : (s?.name || String(s))).filter(Boolean);
+                    }
+                    if (Array.isArray(r.stops)) {
+                      return r.stops.map(s => typeof s === 'string' ? s : (s?.name || String(s))).filter(Boolean);
+                    }
+                    if (typeof r.stops === 'string') {
+                      try {
+                        const p = JSON.parse(r.stops);
+                        if (Array.isArray(p)) return p.map(s => typeof s === 'string' ? s : (s?.name || String(s))).filter(Boolean);
+                      } catch {}
+                      return r.stops.split(',').map(s => s.trim()).filter(Boolean);
+                    }
+                    return [];
+                  })();
 
                   return (
                     <div
                       key={r.routeId || r.route_id}
                       style={{
                         backgroundColor: 'var(--card-bg)',
-                        borderRadius: '16px',
-                        border: `2px solid ${isOutstation ? '#dc2626' : 'var(--border-color)'}`,
+                        borderRadius: '20px',
+                        border: `1.5px solid ${isOutstation ? 'rgba(220, 38, 38, 0.4)' : 'var(--border-color)'}`,
                         display: 'flex',
                         flexDirection: 'column',
-                        gap: '1rem',
-                        boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
+                        gap: '0.85rem',
+                        boxShadow: '0 4px 16px rgba(0,0,0,0.04)',
                         overflow: 'hidden',
+                        transition: 'all 0.2s',
                       }}
                     >
                       {/* Header with route type indicator */}
                       <div style={{
                         padding: '1rem 1.25rem',
-                        backgroundColor: isOutstation ? '#fef2f2' : '#f8fafc',
-                        borderBottom: `1px solid ${isOutstation ? '#fecaca' : 'var(--border-color)'}`,
+                        backgroundColor: isOutstation ? 'rgba(254, 242, 242, 0.6)' : 'rgba(248, 250, 252, 0.7)',
+                        borderBottom: `1px solid ${isOutstation ? 'rgba(254, 202, 202, 0.6)' : 'var(--border-color)'}`,
                         display: 'flex',
                         justifyContent: 'space-between',
                         alignItems: 'center',
+                        gap: '0.75rem',
                       }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
                           <div style={{
-                            width: '40px',
-                            height: '40px',
-                            borderRadius: '10px',
-                            backgroundColor: isOutstation ? '#dc2626' : 'var(--primary-blue)',
-                            color: 'white',
+                            width: '42px',
+                            height: '42px',
+                            borderRadius: '14px',
+                            backgroundColor: isOutstation ? '#fee2e2' : '#e0f2fe',
+                            color: isOutstation ? '#dc2626' : '#0284c7',
+                            border: `1.5px solid ${isOutstation ? '#fca5a5' : '#bae6fd'}`,
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
+                            flexShrink: 0,
+                            boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
                           }}>
                             <Navigation size={20} />
                           </div>
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '700', color: 'var(--text-dark)' }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                              <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: '800', color: 'var(--text-dark)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                                 {r.routeName || r.route_name}
                               </h3>
-                              {isOutstation && (
-                                <span style={{
-                                  fontSize: '0.65rem',
-                                  fontWeight: '700',
-                                  backgroundColor: '#dc2626',
-                                  color: 'white',
-                                  padding: '0.15rem 0.5rem',
-                                  borderRadius: '6px',
-                                  textTransform: 'uppercase',
-                                }}>
-                                  Outstation
-                                </span>
-                              )}
+                              <span style={{
+                                fontSize: '0.65rem',
+                                fontWeight: '800',
+                                backgroundColor: isOutstation ? '#fee2e2' : '#e0f2fe',
+                                color: isOutstation ? '#dc2626' : '#0284c7',
+                                border: `1px solid ${isOutstation ? '#fca5a5' : '#bae6fd'}`,
+                                padding: '0.1rem 0.45rem',
+                                borderRadius: '6px',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.3px',
+                              }}>
+                                {isOutstation ? 'Outstation' : 'Local'}
+                              </span>
                             </div>
-                            <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.8rem', color: 'var(--text-light)' }}>
-                              Route ID: {r.routeId || r.route_id}
+                            <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.78rem', color: 'var(--text-light)', fontWeight: '600' }}>
+                              Route ID: <span style={{ color: 'var(--text-dark)' }}>{r.routeId || r.route_id}</span>
                             </p>
                           </div>
                         </div>
-                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+
+                        {/* Top action buttons */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexShrink: 0 }}>
                           <button
                             onClick={() => setViewingRouteDetails(r)}
-                            style={{ background: 'none', border: 'none', color: 'var(--text-light)', cursor: 'pointer', padding: '0.5rem', borderRadius: '8px', transition: 'all 0.2s' }}
-                            className="hover:bg-slate-100 dark:hover:bg-slate-700"
-                            title="View Details"
+                            style={{ background: 'none', border: '1px solid var(--border-color)', color: 'var(--text-light)', cursor: 'pointer', padding: '0.45rem', borderRadius: '8px', transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            className="hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-900"
+                            title="View Route Details"
                           >
-                            <Eye size={18} />
+                            <Eye size={16} />
                           </button>
                           <button
                             onClick={() => openEditRoute(r)}
-                            style={{ background: 'none', border: 'none', color: 'var(--primary-blue)', cursor: 'pointer', padding: '0.5rem', borderRadius: '8px', transition: 'all 0.2s' }}
-                            className="hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                            style={{ background: 'rgba(0, 86, 179, 0.08)', border: '1px solid rgba(0, 86, 179, 0.25)', color: 'var(--primary-blue)', cursor: 'pointer', padding: '0.4rem 0.65rem', borderRadius: '8px', transition: 'all 0.2s', fontSize: '0.78rem', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+                            className="hover:bg-blue-600 hover:text-white"
                             title="Edit Route"
                           >
-                            <span style={{ fontSize: '0.8rem', fontWeight: '600' }}>Edit</span>
+                            <Wrench size={13} /> Edit
                           </button>
                           <button
                             onClick={() => handleDeleteRoute(r.routeId || r.route_id)}
-                            style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', padding: '0.5rem', borderRadius: '8px', transition: 'all 0.2s' }}
-                            className="hover:bg-red-50 dark:hover:bg-red-900/20"
+                            style={{ background: 'rgba(220, 38, 38, 0.08)', border: '1px solid rgba(220, 38, 38, 0.25)', color: '#dc2626', cursor: 'pointer', padding: '0.45rem', borderRadius: '8px', transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            className="hover:bg-red-600 hover:text-white"
                             title="Delete Route"
                           >
-                            <Trash2 size={18} />
+                            <Trash2 size={16} />
                           </button>
                         </div>
                       </div>
 
                       {/* Route Info */}
                       <div style={{ padding: '0 1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.75rem', backgroundColor: 'var(--bg-color)', borderRadius: '10px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', padding: '0.75rem 0.9rem', backgroundColor: 'var(--bg-color)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
                           <div>
-                            <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-light)', fontWeight: '600' }}>Bus Number</p>
-                            <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.95rem', fontWeight: '700', color: 'var(--text-dark)' }}>{r.busNumber || r.bus_number}</p>
+                            <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--text-light)', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Bus Number</p>
+                            <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.95rem', fontWeight: '800', color: 'var(--text-dark)' }}>{r.busNumber || r.bus_number}</p>
                           </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-light)', fontWeight: '600' }}>Assigned Driver</p>
-                            <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.95rem', fontWeight: '700', color: 'var(--primary-blue)' }}>{driverName}</p>
+                          <div>
+                            <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--text-light)', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Assigned Driver</p>
+                            <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.92rem', fontWeight: '700', color: 'var(--primary-blue)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{driverName}</p>
                           </div>
                         </div>
 
                         {/* Stops List */}
-                        {stopsData.length > 0 && (
-                          <div>
-                            <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.75rem', color: 'var(--text-light)', fontWeight: '600' }}>Stops ({stopsData.length})</p>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
-                              {stopsData.map((stop, idx) => (
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+                            <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--text-light)', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
+                              Route Stops ({routeStops.length})
+                            </p>
+                          </div>
+                          {routeStops.length === 0 ? (
+                            <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-light)', fontStyle: 'italic' }}>No stops added to this route yet</p>
+                          ) : (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', maxHeight: '90px', overflowY: 'auto' }} data-lenis-prevent="true">
+                              {routeStops.map((stop, sIdx) => (
                                 <span
-                                  key={idx}
+                                  key={sIdx}
                                   style={{
-                                    fontSize: '0.75rem',
-                                    padding: '0.25rem 0.5rem',
+                                    fontSize: '0.74rem',
+                                    padding: '0.2rem 0.55rem',
                                     borderRadius: '6px',
                                     backgroundColor: 'var(--bg-color)',
                                     color: 'var(--text-dark)',
-                                    fontWeight: '500',
-                                    border: '1px solid var(--border-color)'
+                                    fontWeight: '600',
+                                    border: '1px solid var(--border-color)',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.3rem',
                                   }}
                                 >
-                                  {idx + 1}. {stop.name || stop}
+                                  <span style={{ color: 'var(--primary-blue)', fontSize: '0.68rem', fontWeight: '800' }}>{sIdx + 1}.</span>
+                                  {stop}
                                 </span>
                               ))}
                             </div>
-                          </div>
-                        )}
+                          )}
+                        </div>
                       </div>
 
                       {/* Footer */}
-                      <div style={{ padding: '0.75rem 1.25rem', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-light)' }}>
-                          {r.city || 'Bareilly'}
+                      <div style={{ padding: '0.65rem 1.25rem', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--bg-color)' }}>
+                        <span style={{ fontSize: '0.78rem', fontWeight: '600', color: 'var(--text-light)' }}>
+                          📍 {r.city || 'Bareilly'}
                         </span>
                         <button
                           onClick={() => navigate(`/admin/routes/${r.routeId || r.route_id}/analytics`)}
@@ -1811,15 +1906,15 @@ const [routeFormData, setRouteFormData] = useState({ route_id: '', route_name: '
                             border: 'none',
                             color: '#d97706',
                             cursor: 'pointer',
-                            fontSize: '0.8rem',
-                            fontWeight: '600',
-                            padding: '0.4rem 0.75rem',
+                            fontSize: '0.78rem',
+                            fontWeight: '700',
+                            padding: '0.3rem 0.6rem',
                             borderRadius: '6px',
                             transition: 'all 0.2s',
                           }}
-                          className="hover:bg-amber-50 dark:hover:bg-amber-900/20"
+                          className="hover:bg-amber-100/60 dark:hover:bg-amber-950/40"
                         >
-                          <Activity size={16} /> Analytics
+                          <Activity size={14} /> View Analytics
                         </button>
                       </div>
                     </div>
@@ -3163,15 +3258,149 @@ const [routeFormData, setRouteFormData] = useState({ route_id: '', route_name: '
                 {userFormData.role === 'passenger' && (
                   <div style={{ flex: 1 }}>
                     <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Assigned Stop</label>
-                    <select value={userFormData.stop_name || ''} onChange={e => setUserFormData({ ...userFormData, stop_name: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: 'var(--card-bg)' }}>
+                    <select
+                      value={userFormData.stop_name || ''}
+                      onChange={e => setUserFormData({ ...userFormData, stop_name: e.target.value })}
+                      style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', backgroundColor: 'var(--card-bg)' }}
+                    >
                       <option value="">Not Assigned</option>
-                      {allStops.map(s => (
+                      {availableStops.map(s => (
                         <option key={s} value={s}>{s}</option>
                       ))}
                     </select>
                   </div>
                 )}
               </div>
+
+              {/* Stop Bus Preview for Reference */}
+              {userFormData.role === 'passenger' && userFormData.stop_name && (() => {
+                const selectedStopLower = (userFormData.stop_name || '').trim().toLowerCase();
+                const matchingRoutes = routesList.filter(r => {
+                  let stops = [];
+                  if (Array.isArray(r.stops_data)) stops = r.stops_data;
+                  else if (typeof r.stops === 'string') {
+                    try {
+                      const p = JSON.parse(r.stops);
+                      stops = Array.isArray(p) ? p : r.stops.split(',').map(s => s.trim());
+                    } catch {
+                      stops = r.stops.split(',').map(s => s.trim());
+                    }
+                  }
+                  return stops.some(s => (typeof s === 'string' ? s : s?.name || '').trim().toLowerCase() === selectedStopLower);
+                });
+
+                return (
+                  <div style={{
+                    padding: '0.85rem 1rem',
+                    borderRadius: '12px',
+                    backgroundColor: 'rgba(0, 86, 179, 0.05)',
+                    border: '1.5px solid rgba(0, 86, 179, 0.25)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.5rem',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: '0.82rem', fontWeight: '800', color: 'var(--primary-blue)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <Bus size={15} /> Buses Serving "{userFormData.stop_name}" ({matchingRoutes.length})
+                      </span>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-light)', fontWeight: '600' }}>
+                        Live Bus Reference
+                      </span>
+                    </div>
+
+                    {matchingRoutes.length === 0 ? (
+                      <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-light)', fontStyle: 'italic' }}>
+                        No routes currently include this stop. You can still assign it and add the stop to a route later.
+                      </p>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', maxHeight: '160px', overflowY: 'auto' }} data-lenis-prevent="true">
+                        {matchingRoutes.map(r => {
+                          const isAssigned = String(r.routeId || r.route_id) === String(userFormData.route_id);
+                          let stops = [];
+                          if (Array.isArray(r.stops_data)) stops = r.stops_data;
+                          else if (typeof r.stops === 'string') {
+                            try {
+                              const p = JSON.parse(r.stops);
+                              stops = Array.isArray(p) ? p : r.stops.split(',').map(s => s.trim());
+                            } catch {
+                              stops = r.stops.split(',').map(s => s.trim());
+                            }
+                          }
+                          const stopNames = stops.map(s => typeof s === 'string' ? s : s?.name || String(s)).filter(Boolean);
+
+                          return (
+                            <div
+                              key={r.routeId || r.route_id}
+                              style={{
+                                padding: '0.55rem 0.75rem',
+                                borderRadius: '10px',
+                                backgroundColor: isAssigned ? '#e6f0fa' : 'var(--card-bg)',
+                                border: isAssigned ? '1.5px solid var(--primary-blue)' : '1px solid var(--border-color)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '0.3rem',
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                  <span style={{ fontWeight: '800', fontSize: '0.85rem', color: 'var(--text-dark)' }}>
+                                    Bus {r.busNumber || r.bus_number}
+                                  </span>
+                                  <span style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>
+                                    · Route {r.routeId || r.route_id} ({r.routeName || r.route_name})
+                                  </span>
+                                </div>
+                                {!isAssigned ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setUserFormData(prev => ({ ...prev, route_id: String(r.routeId || r.route_id) }))}
+                                    style={{
+                                      padding: '0.2rem 0.55rem',
+                                      fontSize: '0.72rem',
+                                      fontWeight: '700',
+                                      backgroundColor: 'var(--primary-blue)',
+                                      color: 'white',
+                                      border: 'none',
+                                      borderRadius: '6px',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    Assign Route {r.routeId || r.route_id}
+                                  </button>
+                                ) : (
+                                  <span style={{ fontSize: '0.72rem', fontWeight: '800', color: 'var(--primary-blue)' }}>
+                                    ✓ Selected Route
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-light)', display: 'flex', flexWrap: 'wrap', gap: '0.2rem' }}>
+                                <span style={{ fontWeight: '700' }}>Route Stops:</span>
+                                {stopNames.map((sn, sIdx) => {
+                                  const isCurrentStop = sn.trim().toLowerCase() === selectedStopLower;
+                                  return (
+                                    <span
+                                      key={sIdx}
+                                      style={{
+                                        padding: '0.05rem 0.35rem',
+                                        borderRadius: '4px',
+                                        backgroundColor: isCurrentStop ? '#fde047' : 'rgba(0,0,0,0.05)',
+                                        color: isCurrentStop ? '#854d0e' : 'inherit',
+                                        fontWeight: isCurrentStop ? '800' : 'normal',
+                                      }}
+                                    >
+                                      {sn}{sIdx < stopNames.length - 1 ? ' →' : ''}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               {userFormData.role === 'teacher' && (
                 <div>
                   <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Subject / Department</label>
@@ -3353,35 +3582,194 @@ const [routeFormData, setRouteFormData] = useState({ route_id: '', route_name: '
                 </div>
               </div>
 
-              <div style={{ marginTop: '1rem', padding: '1rem', backgroundColor: 'var(--bg-color)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-                <label style={{ display: 'block', marginBottom: '0.75rem', fontWeight: '600' }}>Stops (in order)</label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  {routeFormData.stops.map((stop, idx) => (
-                    <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <span style={{ fontSize: '0.8rem', fontWeight: '600', color: 'var(--text-light)', minWidth: '30px' }}>{idx + 1}.</span>
-                      <input
-                        type="text"
-                        value={stop}
-                        onChange={e => {
-                          const newStops = [...routeFormData.stops];
-                          newStops[idx] = e.target.value;
-                          setRouteFormData({ ...routeFormData, stops: newStops });
-                        }}
-                        placeholder="Stop name"
-                        style={{ flex: 1, padding: '0.5rem', borderRadius: '8px', border: '1px solid #ccc', fontSize: '0.9rem' }}
-                      />
-                      <button type="button" onClick={() => {
-                        const newStops = routeFormData.stops.filter((_, i) => i !== idx);
-                        setRouteFormData({ ...routeFormData, stops: newStops });
-                      }} style={{ background: '#dc2626', color: 'white', border: 'none', padding: '0.5rem 0.75rem', borderRadius: '8px', cursor: 'pointer', fontSize: '0.8rem' }}>Remove</button>
-                    </div>
-                  ))}
-                  <button type="button" onClick={() => {
-                    setRouteFormData({ ...routeFormData, stops: [...routeFormData.stops, ''] });
-                  }} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', padding: '0.4rem 0.8rem', backgroundColor: 'transparent', border: '2px dashed var(--primary-blue)', borderRadius: '6px', color: 'var(--primary-blue)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: '500' }}>
-                    <Plus size={16} /> Add Stop
-                  </button>
+              <div style={{ marginTop: '0.5rem', padding: '1rem', backgroundColor: 'var(--bg-color)', borderRadius: '14px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label style={{ margin: 0, fontWeight: '700', fontSize: '0.9rem', color: 'var(--text-dark)' }}>
+                    Route Stops & Waypoints ({routeFormData.stops.length})
+                  </label>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>
+                    Add in travel order
+                  </span>
                 </div>
+
+                {/* Dropdown to pick existing stop OR type custom stop */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <select
+                      value={selectedExistingStop}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val) {
+                          if (!routeFormData.stops.includes(val)) {
+                            setRouteFormData({ ...routeFormData, stops: [...routeFormData.stops, val] });
+                          } else {
+                            toast('Stop is already added', { icon: 'ℹ️' });
+                          }
+                          setSelectedExistingStop('');
+                        }
+                      }}
+                      style={{ flex: 1, padding: '0.65rem 0.85rem', borderRadius: '10px', border: '1px solid var(--border-color)', backgroundColor: 'var(--card-bg)', fontSize: '0.85rem' }}
+                    >
+                      <option value="">-- Pick an existing stop from system --</option>
+                      {availableStops.filter(s => !routeFormData.stops.includes(s)).map(s => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <input
+                      type="text"
+                      placeholder="Or type custom stop name..."
+                      value={stopInputText}
+                      onChange={e => setStopInputText(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          if (stopInputText.trim()) {
+                            setRouteFormData({ ...routeFormData, stops: [...routeFormData.stops, stopInputText.trim()] });
+                            setStopInputText('');
+                          }
+                        }
+                      }}
+                      style={{ flex: 1, padding: '0.65rem 0.85rem', borderRadius: '10px', border: '1px solid var(--border-color)', backgroundColor: 'var(--card-bg)', fontSize: '0.85rem' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (stopInputText.trim()) {
+                          setRouteFormData({ ...routeFormData, stops: [...routeFormData.stops, stopInputText.trim()] });
+                          setStopInputText('');
+                        }
+                      }}
+                      className="active:scale-95 transition-all"
+                      style={{
+                        padding: '0.65rem 1rem',
+                        backgroundColor: 'var(--primary-blue)',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '10px',
+                        fontWeight: '700',
+                        fontSize: '0.82rem',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.3rem',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      <Plus size={16} /> Add Stop
+                    </button>
+                  </div>
+                </div>
+
+                {/* Ordered list of stops */}
+                {routeFormData.stops.length === 0 ? (
+                  <p style={{ margin: '0.5rem 0', fontSize: '0.8rem', color: 'var(--text-light)', fontStyle: 'italic', textAlign: 'center', padding: '0.75rem', backgroundColor: 'var(--card-bg)', borderRadius: '8px' }}>
+                    No stops added to this route yet. Select a stop from the dropdown or type a custom stop above.
+                  </p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }} data-lenis-prevent="true">
+                    {routeFormData.stops.map((stop, idx) => (
+                      <div
+                        key={idx}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          padding: '0.4rem 0.6rem',
+                          backgroundColor: 'var(--card-bg)',
+                          borderRadius: '10px',
+                          border: '1px solid var(--border-color)',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+                        }}
+                      >
+                        <span style={{
+                          width: '24px',
+                          height: '24px',
+                          borderRadius: '6px',
+                          backgroundColor: '#e0f2fe',
+                          color: '#0284c7',
+                          fontWeight: '800',
+                          fontSize: '0.75rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0
+                        }}>
+                          {idx + 1}
+                        </span>
+                        <input
+                          type="text"
+                          value={stop}
+                          onChange={e => {
+                            const newStops = [...routeFormData.stops];
+                            newStops[idx] = e.target.value;
+                            setRouteFormData({ ...routeFormData, stops: newStops });
+                          }}
+                          placeholder="Stop name"
+                          style={{
+                            flex: 1,
+                            padding: '0.35rem 0.6rem',
+                            borderRadius: '6px',
+                            border: '1px solid transparent',
+                            backgroundColor: 'transparent',
+                            fontSize: '0.85rem',
+                            fontWeight: '600',
+                            color: 'var(--text-dark)',
+                            outline: 'none'
+                          }}
+                          className="hover:border-slate-300 focus:border-blue-500 focus:bg-white dark:focus:bg-slate-900"
+                        />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            disabled={idx === 0}
+                            onClick={() => {
+                              if (idx === 0) return;
+                              const next = [...routeFormData.stops];
+                              const temp = next[idx - 1];
+                              next[idx - 1] = next[idx];
+                              next[idx] = temp;
+                              setRouteFormData({ ...routeFormData, stops: next });
+                            }}
+                            style={{ padding: '4px', background: 'none', border: 'none', color: idx === 0 ? '#cbd5e1' : 'var(--text-light)', cursor: idx === 0 ? 'default' : 'pointer', borderRadius: '4px' }}
+                            title="Move Up"
+                          >
+                            <ArrowUp size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={idx === routeFormData.stops.length - 1}
+                            onClick={() => {
+                              if (idx === routeFormData.stops.length - 1) return;
+                              const next = [...routeFormData.stops];
+                              const temp = next[idx + 1];
+                              next[idx + 1] = next[idx];
+                              next[idx] = temp;
+                              setRouteFormData({ ...routeFormData, stops: next });
+                            }}
+                            style={{ padding: '4px', background: 'none', border: 'none', color: idx === routeFormData.stops.length - 1 ? '#cbd5e1' : 'var(--text-light)', cursor: idx === routeFormData.stops.length - 1 ? 'default' : 'pointer', borderRadius: '4px' }}
+                            title="Move Down"
+                          >
+                            <ArrowDown size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newStops = routeFormData.stops.filter((_, i) => i !== idx);
+                              setRouteFormData({ ...routeFormData, stops: newStops });
+                            }}
+                            style={{ padding: '4px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', borderRadius: '4px', marginLeft: '2px' }}
+                            title="Remove Stop"
+                          >
+                            <X size={15} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="flex flex-col sm:flex-row gap-4">
@@ -3404,9 +3792,46 @@ const [routeFormData, setRouteFormData] = useState({ route_id: '', route_name: '
                   <input type="date" value={routeFormData.insuranceExpiry} onChange={e => setRouteFormData({ ...routeFormData, insuranceExpiry: e.target.value })} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc' }} />
                 </div>
               </div>
-              <div className="flex flex-col sm:flex-row gap-4 mt-4">
-                <button type="button" onClick={() => setShowRouteModal(false)} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '1px solid #ccc', background: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Cancel</button>
-                <button type="submit" style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: 'none', background: 'var(--primary-blue)', color: 'white', cursor: 'pointer', fontWeight: 'bold' }}>{editingRoute ? 'Update Route' : 'Save Route'}</button>
+
+              {/* Action Buttons with tactile pressing animation */}
+              <div className="flex flex-col sm:flex-row gap-3 mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowRouteModal(false)}
+                  className="active:scale-95 transition-all"
+                  style={{ flex: 1, padding: '0.8rem 1.25rem', borderRadius: '10px', border: '1px solid var(--border-color)', background: 'var(--card-bg)', color: 'var(--text-dark)', cursor: 'pointer', fontWeight: '700' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingRoute}
+                  className="active:scale-95 transition-all hover:brightness-105 active:brightness-95 shadow-md hover:shadow-lg disabled:opacity-50"
+                  style={{
+                    flex: 1.5,
+                    padding: '0.8rem 1.5rem',
+                    borderRadius: '10px',
+                    border: 'none',
+                    background: 'linear-gradient(135deg, #1d63ed, #0056b3)',
+                    color: 'white',
+                    cursor: isSavingRoute ? 'not-allowed' : 'pointer',
+                    fontWeight: '800',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem',
+                    fontSize: '0.95rem'
+                  }}
+                >
+                  {isSavingRoute ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>{editingRoute ? 'Updating Route...' : 'Saving Route...'}</span>
+                    </>
+                  ) : (
+                    <span>{editingRoute ? 'Update Route' : 'Save Route'}</span>
+                  )}
+                </button>
               </div>
             </form>
           </div>

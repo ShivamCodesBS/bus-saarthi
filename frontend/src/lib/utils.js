@@ -56,6 +56,8 @@ export const USER_PAYLOAD_KEYS = [
   'password',
   'role',
   'route_id',
+  'stop_name',
+  'stopName',
   'fee_status',
   'phone',
   'email',

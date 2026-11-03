@@ -147,7 +147,7 @@ const Home = () => {
   const lastKnown = useMemo(() => {
     const d = lastKnownData?.data;
     if (!d?.lat || !d?.lng) return null;
-    return { position: [d.lat, d.lng], timestamp: d.timestamp, speed: d.speed };
+    return { position: [d.lat, d.lng], timestamp: d.timestamp, speed: d.speed, heading: d.heading };
   }, [lastKnownData]);
 
   // While offline, show the bus at its last DB position.
@@ -300,7 +300,7 @@ const Home = () => {
 
     // Fetch buses at student's assigned stop
     const fetchBusesAtStop = async () => {
-      const stopName = user?.stopName;
+      const stopName = user?.stopName || user?.stop_name;
       if (!stopName) return;
       setLoadingBusesAtStop(true);
       try {
@@ -977,6 +977,20 @@ const Home = () => {
                     </div>
                   </div>
 
+                  {(user?.stopName || user?.stop_name) && (
+                    <div className="flex items-center gap-4 p-3 rounded-2xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/40">
+                      <div className="bg-blue-100 dark:bg-blue-900/50 p-2.5 rounded-xl text-blue-600 dark:text-blue-400 shrink-0">
+                        <MapPin size={20} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[11px] font-bold text-blue-600 dark:text-blue-400 m-0 uppercase tracking-wider">Your Designated Stop</p>
+                        <p className="text-base font-extrabold text-slate-900 dark:text-white m-0 truncate">
+                          {user.stopName || user.stop_name}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex items-center gap-4">
                     <div className="bg-orange-50 dark:bg-orange-900/30 p-3 rounded-2xl text-orange-500 shrink-0">
                       <User size={22} />
@@ -1092,13 +1106,13 @@ const Home = () => {
             </div>
 
             {/* BUSES AT MY STOP CARD */}
-            {user?.stopName && (
+            {(user?.stopName || user?.stop_name) && (
               <Card className="rounded-3xl border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl">
                 <CardHeader className="border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50 pb-5 px-6 pt-6">
                   <CardTitle className="flex justify-between items-center text-lg font-bold text-blue-700 dark:text-blue-400">
                     <span className="flex items-center gap-2">
                       <MapPin size={20} />
-                      Buses at {user.stopName}
+                      Buses at {user.stopName || user.stop_name}
                     </span>
                     <Badge variant="secondary" className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 hover:bg-blue-100 border-none font-semibold px-3 py-1 text-sm">
                       {busesAtStop.length} Bus(es)
@@ -1163,7 +1177,7 @@ const Home = () => {
                               <div style={{ textAlign: 'right', flexShrink: 0 }}>
                                 <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-light)' }}>Your Stop</p>
                                 <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.9rem', fontWeight: '700', color: 'var(--text-dark)' }}>
-                                  {matchingStop?.name || user.stopName}
+                                  {matchingStop?.name || user.stopName || user.stop_name}
                                 </p>
                                 {isSelected && (
                                   <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
