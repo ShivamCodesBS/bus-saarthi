@@ -184,22 +184,19 @@ class _LoginScreenState extends State<LoginScreen> {
     final bool locked = _lockoutUntil != null;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0A1A30),
+      backgroundColor: Colors.black,
       resizeToAvoidBottomInset: false,
       body: Stack(
         children: [
-          // ── Background Video ──
+          // ── Background Video (100% crisp visibility matching web) ──
           if (_videoController?.value.isInitialized ?? false)
             Positioned.fill(
-              child: Opacity(
-                opacity: 0.85,
-                child: FittedBox(
-                  fit: BoxFit.cover,
-                  child: SizedBox(
-                    width: _videoController!.value.size.width,
-                    height: _videoController!.value.size.height,
-                    child: VideoPlayer(_videoController!),
-                  ),
+              child: FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox(
+                  width: _videoController!.value.size.width,
+                  height: _videoController!.value.size.height,
+                  child: VideoPlayer(_videoController!),
                 ),
               ),
             )
@@ -215,7 +212,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
 
-          // ── Subtle Dark Gradient Overlay ──
+          // ── Lightened Vignette Overlay for Clear Background Visibility ──
           Positioned.fill(
             child: DecoratedBox(
               decoration: BoxDecoration(
@@ -223,8 +220,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   colors: [
-                    Colors.black.withValues(alpha: 0.18),
-                    Colors.black.withValues(alpha: 0.35),
+                    Colors.black.withValues(alpha: 0.10),
+                    Colors.black.withValues(alpha: 0.22),
                   ],
                 ),
               ),
@@ -490,7 +487,7 @@ class _LoginCard extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(20),
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
         child: Container(
           width: cardWidth,
           padding: EdgeInsets.symmetric(
@@ -498,15 +495,16 @@ class _LoginCard extends StatelessWidget {
             vertical: 24,
           ),
           decoration: BoxDecoration(
-            color: const Color(
-              0x2213233D,
-            ), // Translucent frosted glass matching web
+            color: Colors.white.withValues(alpha: 0.14), // True frosted glass matching web rgba(255, 255, 255, 0.12)
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.25),
+              width: 1.2,
+            ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.35),
-                blurRadius: 32,
+                color: Colors.black.withValues(alpha: 0.28),
+                blurRadius: 28,
                 offset: const Offset(0, 8),
               ),
             ],
@@ -979,7 +977,7 @@ class _PassengerKindSelect extends StatelessWidget {
       children: [
         // Dropdown Toggle Button
         Material(
-          color: const Color(0x9E0C1E36), // rgba(12,30,54,0.62)
+          color: Colors.white.withValues(alpha: 0.16),
           borderRadius: BorderRadius.circular(12),
           child: InkWell(
             borderRadius: BorderRadius.circular(12),
