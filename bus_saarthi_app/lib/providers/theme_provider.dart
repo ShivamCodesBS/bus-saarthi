@@ -13,6 +13,7 @@ class ThemeProvider extends ChangeNotifier {
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     _darkMode = prefs.getString(AppConstants.prefDarkKey) == 'true';
+    notifyListeners();
   }
 
   Future<void> setDarkMode(bool value) async {
