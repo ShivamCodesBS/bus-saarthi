@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Users, MapPin, LogOut, Settings, Bell, AlertOctagon, CheckCircle2, MessageSquare, Trash2, UserPlus, Navigation, Plus, X, User, Menu, Eye, Download, Upload, Activity, GitMerge, Undo2, Sparkles, ArrowLeft, AlertTriangle, ArrowRight, History, Layers, Wrench, Timer, RotateCcw } from 'lucide-react';
+import { Users, MapPin, LogOut, Settings, Bell, AlertOctagon, CheckCircle2, MessageSquare, Trash2, UserPlus, Navigation, Plus, X, User, Menu, Eye, Download, Upload, Activity, GitMerge, Undo2, Sparkles, ArrowLeft, AlertTriangle, ArrowRight, History, Layers, Wrench, Timer, RotateCcw, Compass } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { io } from 'socket.io-client';
