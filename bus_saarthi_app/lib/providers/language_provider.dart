@@ -25,19 +25,24 @@ class LanguageProvider extends ChangeNotifier {
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     // Web rule: stored 'Hindi (हिंदी)' → 'hi', anything else → 'en'.
-    _lang = prefs.getString(AppConstants.prefLangKey) == 'Hindi (हिंदी)' ? 'hi' : 'en';
+    _lang = prefs.getString(AppConstants.prefLangKey) == 'Hindi (हिंदी)'
+        ? 'hi'
+        : 'en';
+    notifyListeners();
   }
 
   /// [langCode] is 'en' or 'hi' (the two supported dictionaries).
   Future<void> setLanguage(String langCode) async {
     if (langCode != 'en' && langCode != 'hi') return;
     _lang = langCode;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      AppConstants.prefLangKey,
-      langCode == 'hi' ? 'Hindi (हिंदी)' : 'English',
-    );
     notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        AppConstants.prefLangKey,
+        langCode == 'hi' ? 'Hindi (हिंदी)' : 'English',
+      );
+    } catch (_) {}
   }
 
   /// Same fallback chain as the web `t()`: lang → en → key.
@@ -50,15 +55,38 @@ class LanguageProvider extends ChangeNotifier {
     if (name == null || name.isEmpty || _lang != 'hi') return name;
 
     const nameMap = {
-      'abhinav': 'अभिनव', 'srivastava': 'श्रीवास्तव', 'lovish': 'लविश',
-      'chauhan': 'चौहान', 'gaurav': 'गौरव', 'kumar': 'कुमार',
-      'passenger': 'छात्र', 'driver': 'चालक', 'admin': 'प्रशासक',
-      'singh': 'सिंह', 'sharma': 'शर्मा', 'verma': 'वर्मा', 'gupta': 'गुप्ता',
-      'amit': 'अमित', 'rahul': 'राहुल', 'rohit': 'रोहित', 'priya': 'प्रिया',
-      'preeti': 'प्रीति', 'pooja': 'पूजा', 'sneha': 'स्नेहा', 'neha': 'नेहा',
-      'anil': 'अनिल', 'sunil': 'सुनील', 'sanjay': 'संजय', 'rajesh': 'राजेश',
-      'vikram': 'विक्रम', 'karan': 'करण', 'deepak': 'दीपक',
-      'sandeep': 'संदीप', 'manish': 'मनीष', 'kapil': 'कपिल', 'raj': 'राज',
+      'abhinav': 'अभिनव',
+      'srivastava': 'श्रीवास्तव',
+      'lovish': 'लविश',
+      'chauhan': 'चौहान',
+      'gaurav': 'गौरव',
+      'kumar': 'कुमार',
+      'passenger': 'छात्र',
+      'driver': 'चालक',
+      'admin': 'प्रशासक',
+      'singh': 'सिंह',
+      'sharma': 'शर्मा',
+      'verma': 'वर्मा',
+      'gupta': 'गुप्ता',
+      'amit': 'अमित',
+      'rahul': 'राहुल',
+      'rohit': 'रोहित',
+      'priya': 'प्रिया',
+      'preeti': 'प्रीति',
+      'pooja': 'पूजा',
+      'sneha': 'स्नेहा',
+      'neha': 'नेहा',
+      'anil': 'अनिल',
+      'sunil': 'सुनील',
+      'sanjay': 'संजय',
+      'rajesh': 'राजेश',
+      'vikram': 'विक्रम',
+      'karan': 'करण',
+      'deepak': 'दीपक',
+      'sandeep': 'संदीप',
+      'manish': 'मनीष',
+      'kapil': 'कपिल',
+      'raj': 'राज',
     };
 
     return name
@@ -86,17 +114,21 @@ class LanguageProvider extends ChangeNotifier {
         final isStart = i == 0;
         if (char == 'a') {
           if (next == 'a') {
-            hiChar = isStart ? 'आ' : 'ा'; step = 2;
+            hiChar = isStart ? 'आ' : 'ा';
+            step = 2;
           } else if (next == 'i') {
-            hiChar = isStart ? 'ऐ' : 'ै'; step = 2;
+            hiChar = isStart ? 'ऐ' : 'ै';
+            step = 2;
           } else if (next == 'u') {
-            hiChar = isStart ? 'औ' : 'ौ'; step = 2;
+            hiChar = isStart ? 'औ' : 'ौ';
+            step = 2;
           } else {
             hiChar = isStart ? 'अ' : '';
           }
         } else if (char == 'e') {
           if (next == 'e') {
-            hiChar = isStart ? 'ई' : 'ी'; step = 2;
+            hiChar = isStart ? 'ई' : 'ी';
+            step = 2;
           } else {
             hiChar = isStart ? 'ए' : 'े';
           }
@@ -104,7 +136,8 @@ class LanguageProvider extends ChangeNotifier {
           hiChar = isStart ? 'इ' : 'ि';
         } else if (char == 'o') {
           if (next == 'o') {
-            hiChar = isStart ? 'ऊ' : 'ू'; step = 2;
+            hiChar = isStart ? 'ऊ' : 'ू';
+            step = 2;
           } else {
             hiChar = isStart ? 'ओ' : 'ो';
           }
@@ -118,31 +151,66 @@ class LanguageProvider extends ChangeNotifier {
 
       switch (char) {
         case 'k':
-          if (next == 'h') { hiChar = 'ख'; step = 2; } else { hiChar = 'क'; }
+          if (next == 'h') {
+            hiChar = 'ख';
+            step = 2;
+          } else {
+            hiChar = 'क';
+          }
           break;
         case 'g':
-          if (next == 'h') { hiChar = 'घ'; step = 2; } else { hiChar = 'ग'; }
+          if (next == 'h') {
+            hiChar = 'घ';
+            step = 2;
+          } else {
+            hiChar = 'ग';
+          }
           break;
         case 'c':
-          if (next == 'h') { hiChar = 'च'; step = 2; } else { hiChar = 'क'; }
+          if (next == 'h') {
+            hiChar = 'च';
+            step = 2;
+          } else {
+            hiChar = 'क';
+          }
           break;
         case 'j':
           hiChar = 'ज';
           break;
         case 't':
-          if (next == 'h') { hiChar = 'थ'; step = 2; } else { hiChar = 'त'; }
+          if (next == 'h') {
+            hiChar = 'थ';
+            step = 2;
+          } else {
+            hiChar = 'त';
+          }
           break;
         case 'd':
-          if (next == 'h') { hiChar = 'ध'; step = 2; } else { hiChar = 'द'; }
+          if (next == 'h') {
+            hiChar = 'ध';
+            step = 2;
+          } else {
+            hiChar = 'द';
+          }
           break;
         case 'n':
           hiChar = 'न';
           break;
         case 'p':
-          if (next == 'h') { hiChar = 'फ'; step = 2; } else { hiChar = 'प'; }
+          if (next == 'h') {
+            hiChar = 'फ';
+            step = 2;
+          } else {
+            hiChar = 'प';
+          }
           break;
         case 'b':
-          if (next == 'h') { hiChar = 'भ'; step = 2; } else { hiChar = 'ब'; }
+          if (next == 'h') {
+            hiChar = 'भ';
+            step = 2;
+          } else {
+            hiChar = 'ब';
+          }
           break;
         case 'm':
           hiChar = 'म';
@@ -161,7 +229,12 @@ class LanguageProvider extends ChangeNotifier {
           hiChar = 'व';
           break;
         case 's':
-          if (next == 'h') { hiChar = 'श'; step = 2; } else { hiChar = 'स'; }
+          if (next == 'h') {
+            hiChar = 'श';
+            step = 2;
+          } else {
+            hiChar = 'स';
+          }
           break;
         case 'h':
           hiChar = 'ह';

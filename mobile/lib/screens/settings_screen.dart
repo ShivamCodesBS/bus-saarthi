@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../core/constants.dart';
 import '../providers/auth_provider.dart';
 import '../providers/sensor_provider.dart';
 import 'login_screen.dart';
@@ -36,6 +37,17 @@ class SettingsScreen extends StatelessWidget {
             style: const TextStyle(fontSize: 16, color: Colors.grey),
           ),
           const SizedBox(height: 32),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.cloud_outlined),
+            title: const Text('Backend Server'),
+            subtitle: Text(AppConstants.restApiUrl),
+          ),
+          ListTile(
+            leading: const Icon(Icons.hub_outlined),
+            title: const Text('Socket Server'),
+            subtitle: Text(AppConstants.socketUrl),
+          ),
           const Divider(),
           ListTile(
             leading: const Icon(Icons.camera_alt),

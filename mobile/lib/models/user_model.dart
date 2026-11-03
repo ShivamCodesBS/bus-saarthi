@@ -22,4 +22,12 @@ class UserModel {
       profilePic: json['profile_pic'],
     );
   }
+
+  Map<String, dynamic> toJson() => {
+    'login_id': loginId,
+    'name': name,
+    'role': role,
+    'route_id': routeId,
+    'profile_pic': profilePic,
+  };
 }

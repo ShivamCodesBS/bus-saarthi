@@ -151,6 +151,8 @@ export class UsersService {
           address: true,
           awsFaceId: true,
           faceEnrolledAt: true,
+          faceResetRequestedAt: true,
+          faceResetRequestedBy: true,
         },
       });
       return users.map((u) => ({
@@ -160,6 +162,8 @@ export class UsersService {
         fee_status: u.feeStatus,
         face_enrolled_at: u.faceEnrolledAt,
         aws_face_id: u.awsFaceId,
+        face_reset_requested_at: u.faceResetRequestedAt,
+        face_reset_requested_by: u.faceResetRequestedBy,
       }));
     });
   }

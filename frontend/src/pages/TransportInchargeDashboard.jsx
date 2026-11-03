@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { Users, MapPin, LogOut, Settings, Bell, AlertOctagon, CheckCircle2, MessageSquare, Trash2, UserPlus, Navigation, X, User, Menu, Eye, Download, Upload, GitMerge, Undo2, Sparkles, AlertTriangle, ArrowRight, History, Layers, Wrench, Timer, RotateCcw } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { Users, MapPin, LogOut, Settings, Bell, AlertOctagon, CheckCircle2, MessageSquare, Trash2, UserPlus, Navigation, X, User, Menu, Eye, Download, Upload, GitMerge, Undo2, Sparkles, AlertTriangle, ArrowRight, History, Layers, Wrench, Timer, RotateCcw, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
@@ -928,7 +928,7 @@ const TransportInchargeDashboard = () => {
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-          <div className="relative">
+          <div className="relative" ref={notifDropdownRef}>
             {(() => {
               const allNotifications = [
                 ...sosAlerts.map(alert => ({
@@ -1741,7 +1741,7 @@ const TransportInchargeDashboard = () => {
             </div>
 
             {/* Face reset requests raised from user Settings pages */}
-            <FaceResetRequests user={user} onChanged={refetchUsers} />
+            <FaceResetRequests user={user} users={usersList} onChanged={refetchUsers} />
 
             <div className="flex flex-wrap gap-3 mb-6">
               <button onClick={() => setUserFilter('passenger')} style={{ padding: '0.5rem 1.5rem', backgroundColor: userFilter === 'passenger' ? 'var(--primary-blue)' : '#f0f0f0', color: userFilter === 'passenger' ? 'white' : 'var(--text-dark)', borderRadius: '8px', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Passengers</button>

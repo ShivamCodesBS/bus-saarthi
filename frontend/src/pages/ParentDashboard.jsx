@@ -246,7 +246,7 @@ const ParentDashboard = () => {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-  const [isMapExpanded, setIsMapExpanded] = useState(true);
+  const [isMapExpanded, setIsMapExpanded] = useState(false);
 
   // Responsive breakpoint: true if screen width < 768px (phone view)
   const [isMobile, setIsMobile] = useState(() =>
@@ -546,8 +546,9 @@ const ParentDashboard = () => {
       if (data.location?.lat && data.location?.lng) {
         setBusLocation([data.location.lat, data.location.lng]);
       }
+      const rawSpeed = Number(data.speed) || 0;
       setTelemetry({
-        speed: data.speed || 0,
+        speed: rawSpeed < 2.0 ? 0 : rawSpeed,
         heading: data.heading || 0,
         comfort: data.comfort || 'Smooth',
         lastUpdated: new Date().toISOString(),
@@ -606,10 +607,15 @@ const ParentDashboard = () => {
     if (deg == null || isNaN(deg)) return '—';
     let h = Number(deg) % 360;
     if (h < 0) h += 360;
-    if (h >= 315 || h < 45) return 'N ↑';
-    if (h >= 45 && h < 135) return 'E →';
-    if (h >= 135 && h < 225) return 'S ↓';
-    return 'W ←';
+    const degStr = `${Math.round(h)}°`;
+    if (h >= 337.5 || h < 22.5) return `${degStr} N ↑`;
+    if (h >= 22.5 && h < 67.5) return `${degStr} NE ↗`;
+    if (h >= 67.5 && h < 112.5) return `${degStr} E →`;
+    if (h >= 112.5 && h < 157.5) return `${degStr} SE ↘`;
+    if (h >= 157.5 && h < 202.5) return `${degStr} S ↓`;
+    if (h >= 202.5 && h < 247.5) return `${degStr} SW ↙`;
+    if (h >= 247.5 && h < 292.5) return `${degStr} W ←`;
+    return `${degStr} NW ↖`;
   };
 
   const formatTime = (str) => {
@@ -1175,97 +1181,128 @@ const ParentDashboard = () => {
               </div>
             )}
 
-            {/* Live Bus Map (Collapsible) */}
+            {/* Live Bus Map (Collapsible - Clean Single Control) */}
             <div style={{
               background: 'var(--card-bg)', borderRadius: '20px',
               border: '1px solid var(--border-color)', overflow: 'hidden',
               boxShadow: '0 2px 12px rgba(0,0,0,0.07)',
             }}>
-              <div style={{
-                padding: '0.9rem 1.25rem',
-                borderBottom: isMapExpanded ? '1px solid var(--border-color)' : 'none',
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <MapPin size={18} color={PURPLE} />
-                  <span style={{ fontWeight: 700, color: 'var(--text-dark)', fontSize: '0.95rem' }}>Live Bus Location</span>
-                  <span style={{
-                    fontSize: '0.68rem',
-                    fontWeight: 700,
-                    padding: '2px 8px',
-                    borderRadius: '10px',
-                    background: telemetry && !telemetryStale ? '#e6fae6' : '#f3f4f6',
-                    color: telemetry && !telemetryStale ? '#16a34a' : '#6b7280',
+              {isMapExpanded ? (
+                <>
+                  <div style={{
+                    padding: '0.9rem 1.25rem',
+                    borderBottom: '1px solid var(--border-color)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                   }}>
-                    {telemetry && !telemetryStale ? '● LIVE' : '○ OFFLINE'}
-                  </span>
-                </div>
-                <button
-                  onClick={() => setIsMapExpanded(prev => !prev)}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <MapPin size={18} color={PURPLE} />
+                      <span style={{ fontWeight: 700, color: 'var(--text-dark)', fontSize: '0.95rem' }}>Live Bus Location</span>
+                      <span style={{
+                        fontSize: '0.68rem',
+                        fontWeight: 700,
+                        padding: '2px 8px',
+                        borderRadius: '10px',
+                        background: telemetry && !telemetryStale ? '#e6fae6' : '#f3f4f6',
+                        color: telemetry && !telemetryStale ? '#16a34a' : '#6b7280',
+                      }}>
+                        {telemetry && !telemetryStale ? '● LIVE' : '○ OFFLINE'}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => setIsMapExpanded(false)}
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '8px',
+                        padding: '4px 10px',
+                        fontSize: '0.78rem',
+                        fontWeight: 600,
+                        color: PURPLE,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        transition: 'all 0.2s',
+                      }}
+                      title="Collapse Map"
+                    >
+                      Hide Map <ChevronUp size={14} />
+                    </button>
+                  </div>
+                  <div style={{ position: 'relative' }}>
+                    <UnifiedMap
+                      busLocation={busLocation}
+                      routeInfo={routeInfo}
+                      telemetry={telemetry}
+                      isLive={!!telemetry && !telemetryStale}
+                      lastKnown={lastKnown}
+                      initialZoom={14}
+                      height="320px"
+                      busLabel={`Bus ${routeInfo?.busNumber || routeInfo?.bus_number || child?.routeId || ''}`}
+                      showFullscreenButton={true}
+                      showAutoFollowToggle={true}
+                      showRecenterButton={true}
+                      showTelemetryPanel={true}
+                      showRoutePolyline={true}
+                      showDestinationMarker={true}
+                    />
+                  </div>
+                </>
+              ) : (
+                <div
+                  onClick={() => setIsMapExpanded(true)}
                   style={{
-                    background: 'transparent',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '8px',
-                    padding: '4px 10px',
-                    fontSize: '0.78rem',
-                    fontWeight: 600,
-                    color: PURPLE,
-                    cursor: 'pointer',
+                    padding: '1.1rem 1.25rem',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '4px',
-                    transition: 'all 0.2s',
+                    justifyContent: 'space-between',
+                    gap: '1rem',
+                    flexWrap: 'wrap',
+                    cursor: 'pointer',
+                    transition: 'background 0.2s',
                   }}
-                  title={isMapExpanded ? 'Collapse Map' : 'Expand Map'}
+                  title="Click to view live bus map"
                 >
-                  {isMapExpanded ? (
-                    <>Hide Map <ChevronUp size={14} /></>
-                  ) : (
-                    <>Show Map <ChevronDown size={14} /></>
-                  )}
-                </button>
-              </div>
-
-              {!isMapExpanded ? (
-                <div style={{
-                  padding: '1rem 1.25rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '1rem',
-                  flexWrap: 'wrap',
-                  background: 'var(--bg-color)',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <div style={{
-                      width: 36, height: 36, borderRadius: '10px',
+                      width: 44, height: 44, borderRadius: '12px',
                       background: PURPLE_LIGHT, display: 'flex', alignItems: 'center', justifyContent: 'center',
                       color: PURPLE, flexShrink: 0
                     }}>
-                      <Navigation size={18} />
+                      <MapPin size={22} />
                     </div>
                     <div>
-                      <p style={{ margin: 0, fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-dark)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontWeight: 800, color: 'var(--text-dark)', fontSize: '1rem' }}>Live Bus Location</span>
+                        <span style={{
+                          fontSize: '0.68rem',
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: '10px',
+                          background: telemetry && !telemetryStale ? '#e6fae6' : '#f3f4f6',
+                          color: telemetry && !telemetryStale ? '#16a34a' : '#6b7280',
+                        }}>
+                          {telemetry && !telemetryStale ? '● LIVE' : '○ OFFLINE'}
+                        </span>
+                      </div>
+                      <p style={{ margin: '3px 0 0', fontSize: '0.8rem', color: 'var(--text-light)', fontWeight: 500 }}>
                         {telemetry && !telemetryStale
                           ? `Moving at ${Math.round(telemetry.speed)} km/h · Heading ${getHeadingLabel(telemetry.heading)}`
                           : lastKnown
-                            ? `Last seen location recorded`
-                            : 'GPS standby · Waiting for live bus fix'}
-                      </p>
-                      <p style={{ margin: '2px 0 0', fontSize: '0.74rem', color: 'var(--text-light)' }}>
-                        {busLocation ? `Coordinates: ${busLocation[0].toFixed(4)}, ${busLocation[1].toFixed(4)}` : ''}
+                            ? `Last seen location recorded · Click to open live map`
+                            : 'GPS standby · Click to open live map'}
                       </p>
                     </div>
                   </div>
                   <button
-                    onClick={() => setIsMapExpanded(true)}
+                    onClick={(e) => { e.stopPropagation(); setIsMapExpanded(true); }}
                     style={{
                       background: PURPLE,
                       color: 'white',
                       border: 'none',
                       borderRadius: '10px',
-                      padding: '6px 14px',
-                      fontSize: '0.8rem',
+                      padding: '8px 16px',
+                      fontSize: '0.82rem',
                       fontWeight: 700,
                       cursor: 'pointer',
                       display: 'flex',
@@ -1274,27 +1311,8 @@ const ParentDashboard = () => {
                       boxShadow: `0 2px 8px ${PURPLE}40`,
                     }}
                   >
-                    Open Live Map <ChevronDown size={14} />
+                    Open Map <ChevronDown size={14} />
                   </button>
-                </div>
-              ) : (
-                <div style={{ position: 'relative' }}>
-                  <UnifiedMap
-                    busLocation={busLocation}
-                    routeInfo={routeInfo}
-                    telemetry={telemetry}
-                    isLive={!!telemetry && !telemetryStale}
-                    lastKnown={lastKnown}
-                    initialZoom={14}
-                    height="320px"
-                    busLabel={`Bus ${routeInfo?.busNumber || routeInfo?.bus_number || child?.routeId || ''}`}
-                    showFullscreenButton={true}
-                    showAutoFollowToggle={true}
-                    showRecenterButton={true}
-                    showTelemetryPanel={true}
-                    showRoutePolyline={true}
-                    showDestinationMarker={true}
-                  />
                 </div>
               )}
             </div>

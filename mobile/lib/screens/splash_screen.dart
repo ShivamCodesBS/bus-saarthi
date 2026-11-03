@@ -22,35 +22,48 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _checkAuth() async {
-    await Future.delayed(const Duration(seconds: 2)); // Show splash for 2s
+    try {
+      await Future.delayed(const Duration(milliseconds: 1500));
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    final isLoggedIn = await authProvider.init();
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final isLoggedIn = await authProvider.init();
 
-    if (isLoggedIn) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const DriverDashboardScreen()),
-      );
-    } else if (AppConstants.appMode == AppConstants.modeBusDevice) {
-      // The device fixed inside the bus has no user account. It identifies
-      // itself with the hardware token, so it goes straight to the
-      // sensor + face-scanner screen without anyone signing in.
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => const DashboardScreen(
-            mode: AppConstants.modeBusDevice,
+      if (!mounted) return;
+
+      if (isLoggedIn) {
+        if (authProvider.user?.role == 'admin') {
+          Navigator.pushReplacementNamed(context, '/admin_dashboard');
+        } else {
+          Navigator.pushReplacementNamed(context, '/driver_dashboard');
+        }
+      } else if (AppConstants.appMode == AppConstants.modeBusDevice) {
+        // The device fixed inside the bus has no user account. It identifies
+        // itself with the hardware token, so it goes straight to the
+        // sensor + face-scanner screen without anyone signing in.
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const DashboardScreen(
+              mode: AppConstants.modeBusDevice,
+            ),
           ),
-        ),
-      );
-    } else {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-      );
+        );
+      } else {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+        );
+      }
+    } catch (e) {
+      debugPrint('[SplashScreen] _checkAuth error: $e');
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+        );
+      }
     }
   }
 
@@ -80,7 +93,8 @@ class _SplashScreenState extends State<SplashScreen> {
                 'assets/images/logo.png',
                 height: 54,
                 fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => Icon(Icons.directions_bus, size: 54, color: AppTheme.accentColor),
+                errorBuilder: (_, __, ___) => Icon(Icons.directions_bus,
+                    size: 54, color: AppTheme.accentColor),
               ),
             ),
             const SizedBox(height: 24),

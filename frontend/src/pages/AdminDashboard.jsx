@@ -1848,7 +1848,7 @@ const AdminDashboard = () => {
             </div>
 
             {/* Face reset requests raised from user Settings pages */}
-            <FaceResetRequests user={user} onChanged={refetchUsers} />
+            <FaceResetRequests user={user} users={usersList} onChanged={refetchUsers} />
 
             {/* Sub-Tabs for filtering Passengers, Drivers, Admins, Transport Incharges */}
             <div className="flex flex-wrap gap-3 mb-6">

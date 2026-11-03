@@ -539,7 +539,7 @@ class TrackingProvider extends ChangeNotifier {
       // If speed < 1 km/h AND the location hasn't meaningfully changed, treat as 0.
       // We also check if an accuracy field is available from the backend.
       final rawSpeed = newTelemetry.speed;
-      final filteredSpeed = rawSpeed < 1.0 ? 0.0 : rawSpeed;
+      final filteredSpeed = rawSpeed < 2.0 ? 0.0 : rawSpeed;
 
       telemetry = Telemetry(
         speed: filteredSpeed,
@@ -549,17 +549,15 @@ class TrackingProvider extends ChangeNotifier {
       );
       _telemetryTimeout?.cancel();
       final acceptedRouteId = routeId;
-      _telemetryTimeout = Timer(const Duration(seconds: 5), () {
+      _telemetryTimeout = Timer(const Duration(seconds: 6), () {
         if (acceptedRouteId != effectiveRouteId) return;
         telemetry = null;
         isLive = false;
         _notify();
       });
-      // Throttle: only notify at most once per 500ms to prevent Home rebuild spam
-      if (_telemetryThrottle?.isActive ?? false) return;
-      _telemetryThrottle = Timer(const Duration(milliseconds: 500), () {
-        if (!_disposed) _notify();
-      });
+
+      // Immediate leading-edge notification for instant zero-latency UI update
+      _notify();
     };
 
     _socket.onLiveAttendance = () => _fetchCrowdStatus();

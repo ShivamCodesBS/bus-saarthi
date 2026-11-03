@@ -43,6 +43,17 @@ export class UsersController {
     return this.usersService.findAll();
   }
 
+  /**
+   * Pending face-reset requests for the admin / transport-incharge panels.
+   * Declared before :loginId so "face-reset-requests" is not parsed as one.
+   */
+  @Get('face-reset-requests')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
+  listFaceResetRequests() {
+    return this.usersService.findPendingFaceResetRequests();
+  }
+
   @Get(':loginId')
   @UseGuards(RolesGuard)
   @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
@@ -167,17 +178,6 @@ export class UsersController {
   requestFaceReset(@Request() req: any) {
     const loginId = req.user?.loginId || req.user?.login_id;
     return this.usersService.requestFaceReset(loginId);
-  }
-
-  /**
-   * Pending face-reset requests for the admin / transport-incharge panels.
-   * Declared before `:loginId` so "face-reset-requests" is not parsed as one.
-   */
-  @Get('face-reset-requests')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.admin, UserRole.transport_incharge, UserRole.tech_admin)
-  listFaceResetRequests() {
-    return this.usersService.findPendingFaceResetRequests();
   }
 
   /**
