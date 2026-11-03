@@ -283,6 +283,18 @@ const TransportInchargeDashboard = () => {
 
   const [showNotifications, setShowNotifications] = useState(false);
   const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
+  const notifDropdownRef = useRef(null);
+
+  useEffect(() => {
+    if (!showNotifications) return;
+    const handleClickOutside = (e) => {
+      if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target)) {
+        setShowNotifications(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showNotifications]);
 
   // Media Modal State
   const [fullScreenMedia, setFullScreenMedia] = useState(null);
