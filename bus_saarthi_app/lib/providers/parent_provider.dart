@@ -538,7 +538,7 @@ class ParentProvider extends ChangeNotifier {
           'type': 'text',
           'category': category ?? 'General',
           if (activeRouteId.isNotEmpty) 'route': activeRouteId,
-          'isAnonymous': false,
+          'isAnonymous': true,
         },
         options: Options(headers: _authHeaders),
       );
