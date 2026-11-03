@@ -597,6 +597,19 @@ const Profile = () => {
                     {profile.busNumber ? ` · Bus ${profile.busNumber}` : ''}
                   </p>
                 )}
+                {profile?.stopName && (
+                  <p
+                    style={{
+                      margin: '0.35rem 0 0',
+                      fontSize: '0.8rem',
+                      color: 'var(--primary-blue)',
+                      fontWeight: '600',
+                    }}
+                  >
+                    <MapPin size={14} style={{ verticalAlign: 'middle', marginRight: '0.2rem' }} />
+                    Stop: {profile.stopName}
+                  </p>
+                )}
               </div>
               <p
                 style={{
@@ -655,6 +668,42 @@ const Profile = () => {
               value={profile?.address}
             />
           </Section>
+
+          {/* Stop Assignment (for passengers) */}
+          {(role === 'passenger' || role === 'parent') && (
+            <Section title="Assigned Stop" icon={MapPin}>
+              <Detail
+                icon={MapPin}
+                label="Current Stop"
+                value={profile?.stopName || 'Not assigned'}
+              />
+              {profile?.stopName && (
+                <Detail
+                  icon={Bus}
+                  label="Buses at this stop"
+                  value={
+                    <button
+                      onClick={() => {
+                        // Navigate to home and show buses at stop
+                        navigate('/home');
+                      }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--primary-blue)',
+                        cursor: 'pointer',
+                        textDecoration: 'underline',
+                        fontSize: 'inherit',
+                        fontWeight: 'inherit',
+                      }}
+                    >
+                      View all buses at this stop
+                    </button>
+                  }
+                />
+              )}
+            </Section>
+          )}
 
           {/* Student / staff specifics */}
           {(role === 'passenger' || role === 'teacher') && (

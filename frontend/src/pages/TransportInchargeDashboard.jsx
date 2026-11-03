@@ -240,30 +240,119 @@ const TransportInchargeDashboard = () => {
   const [isMerging, setIsMerging] = useState(false);
   const [selectedMergeCity, setSelectedMergeCity] = useState('All');
 
-  // Notifications
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [hasUnread, setHasUnread] = useState(false);
-  const [seenIds, setSeenIds] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('ti_seen_notif_ids') || '[]'); } 
-    catch { return []; }
+  // Notifications - using the hook for proper dynamic notifications
+  const {
+    notifications: inboxNotifications,
+    unreadCount,
+    isLoading: notificationsLoading,
+    markAsRead,
+    markAllAsRead,
+    refetch: refetchNotifications,
+  } = useNotifications({
+    limit: 50,
+    autoRefresh: true,
+    refreshInterval: 30000,
+    token: user?.token,
   });
+
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
 
   // Media Modal State
   const [fullScreenMedia, setFullScreenMedia] = useState(null);
   const [zoomLevel, setZoomLevel] = useState(1);
 
-  // Flag unread notifications in an effect rather than during render.
-  useEffect(() => {
-    if (showNotifications) return;
-    const allNotificationIds = [
-      ...sosAlerts.map(alert => `sos-${alert.id}`),
-      ...grievances.filter(g => g.status === 'pending').map(g => `grievance-${g.id}`)
-    ];
-    const hasNew = allNotificationIds.some((id) => !seenIds.includes(id));
-    if (hasNew) {
-      setHasUnread(true);
+  // Build dynamic notification list combining inbox notifications with real-time alerts
+  const allDynamicNotifications = useMemo(() => {
+    const items = [];
+
+    // Add SOS alerts with proper structure
+    sosAlerts.forEach(alert => {
+      items.push({
+        id: `sos-${alert.id}`,
+        type: 'sos',
+        title: `SOS Alert - Route ${alert.route}`,
+        message: `${alert.passenger} (ID: ${alert.login_id}) initiated SOS`,
+        time: formatSosTime(alert.timestamp, alert.time),
+        icon: <AlertOctagon size={20} />,
+        iconColor: '#cf1322',
+        bgColor: '#fff1f0',
+        borderColor: '#cf1322',
+        timestamp: alert.timestamp,
+        read: false,
+      });
+    });
+
+    // Add grievance notifications
+    grievances.filter(g => g.status === 'pending').forEach(g => {
+      items.push({
+        id: `grievance-${g.id}`,
+        type: 'grievance',
+        title: `New Complaint - Route ${g.route}`,
+        message: (g.isAnonymous ? '🕵️ Anonymous: ' : '') + g.text.substring(0, 80) + (g.text.length > 80 ? '...' : ''),
+        time: formatTime(g.createdAt),
+        icon: <MessageSquare size={20} />,
+        iconColor: '#d97706',
+        bgColor: '#fffbeb',
+        borderColor: '#f59e0b',
+        timestamp: g.createdAt,
+        read: false,
+      });
+    });
+
+    // Add inbox notifications (from the server)
+    inboxNotifications.forEach(n => {
+      items.push({
+        id: n.id,
+        type: n.type || 'info',
+        title: n.title,
+        body: n.body || n.message,
+        time: formatTime(n.created_at),
+        icon: <Bell size={20} />,
+        iconColor: '#2563eb',
+        bgColor: '#eff6ff',
+        borderColor: '#3b82f6',
+        timestamp: n.created_at,
+        read: n.read,
+        grievance_id: n.grievance_id,
+      });
+    });
+
+    // Sort by timestamp descending (newest first)
+    return items.sort((a, b) => {
+      const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+      const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+      return timeB - timeA;
+    });
+  }, [sosAlerts, grievances, inboxNotifications]);
+
+  // Calculate unread count from dynamic notifications
+  const notificationUnreadCount = useMemo(() => {
+    return allDynamicNotifications.filter(n => !n.read).length;
+  }, [allDynamicNotifications]);
+
+  // Handle marking a notification as read
+  const handleNotificationRead = async (notification) => {
+    if (notification.read) return;
+    await markAsRead([notification.id]);
+    if (notification.type === 'sos' || notification.type === 'grievance') {
+      await refetchNotifications();
     }
-  }, [sosAlerts, grievances, seenIds, showNotifications]);
+  };
+
+  // Handle clearing a notification
+  const handleClearNotification = async (notificationId) => {
+    await markAsRead([notificationId]);
+    toast.success('Notification cleared');
+  };
+
+  // Handle clearing all notifications
+  const handleClearAll = async () => {
+    if (window.confirm('Clear all notifications? This will mark all as read.')) {
+      await markAllAsRead();
+      toast.success('All notifications cleared');
+    }
+  };
 
   useEffect(() => {
     if (!user?.token) return;
@@ -864,55 +953,102 @@ const TransportInchargeDashboard = () => {
 
               return (
                 <>
-                  <button 
-                    onClick={() => {
-                      setShowNotifications(!showNotifications);
-                      if (!showNotifications) {
-                        setHasUnread(false);
-                        const newIds = allNotifications.map(n => n.id);
-                        setSeenIds(newIds);
-                        localStorage.setItem('ti_seen_notif_ids', JSON.stringify(newIds));
-                      }
-                    }} 
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: hasUnread ? 'red' : 'var(--text-light)', position: 'relative' }} 
-                    className={`hover:text-slate-800 transition-colors ${hasUnread ? 'animate-bell-ring' : ''}`}
+                  <button
+                    onClick={() => setShowNotifications(!showNotifications)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: notificationUnreadCount > 0 ? '#dc2626' : 'var(--text-light)', position: 'relative' }}
+                    className={`hover:text-slate-800 transition-colors ${notificationUnreadCount > 0 ? 'animate-bell-ring' : ''}`}
                   >
                     <Bell size={24} />
-                    {hasUnread && (
-                      <span style={{ position: 'absolute', top: '-2px', right: '-2px', width: '10px', height: '10px', backgroundColor: 'red', borderRadius: '50%', border: '2px solid white', animation: 'pulse 1.5s infinite' }}></span>
+                    {notificationUnreadCount > 0 && (
+                      <span style={{ position: 'absolute', top: '-2px', right: '-2px', minWidth: '18px', height: '18px', backgroundColor: '#dc2626', borderRadius: '50%', border: '2px solid white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 'bold', color: 'white', animation: 'pulse 1.5s infinite' }}>
+                        {notificationUnreadCount > 99 ? '99+' : notificationUnreadCount}
+                      </span>
                     )}
                   </button>
                   {showNotifications && (
-                    <div className="absolute top-12 right-0 w-80 sm:w-96 shadow-2xl rounded-2xl p-4 z-50 animate-fade-in" style={{ backgroundColor: 'var(--white)', border: '1px solid var(--border-color)' }}>
-                      <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-lg font-bold m-0" style={{ color: 'var(--text-dark)' }}>
-                          Notifications {allNotifications.length > 0 && `(${allNotifications.length})`}
+                    <div className="absolute top-12 right-0 w-96 shadow-2xl rounded-2xl z-50 animate-fade-in overflow-hidden" style={{ backgroundColor: 'var(--white)', border: '1px solid var(--border-color)' }}>
+                      {/* Header */}
+                      <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+                        <h3 className="text-lg font-bold m-0 flex items-center gap-2" style={{ color: 'var(--text-dark)' }}>
+                          <Bell size={18} className="text-blue-600" />
+                          Notifications
+                          {notificationUnreadCount > 0 && (
+                            <span className="bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-400 text-xs font-bold px-2 py-0.5 rounded-full">
+                              {notificationUnreadCount} unread
+                            </span>
+                          )}
                         </h3>
-                        <button onClick={() => setShowNotifications(false)} className="bg-transparent border-none cursor-pointer p-1 hover:bg-slate-100 rounded-full transition-colors">
-                          <X size={20} style={{ color: 'var(--text-light)' }} />
-                        </button>
+                        <div className="flex items-center gap-2">
+                          {allDynamicNotifications.length > 0 && (
+                            <button
+                              onClick={handleClearAll}
+                              className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 px-2 py-1 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors font-medium"
+                            >
+                              Clear All
+                            </button>
+                          )}
+                          <button onClick={() => setShowNotifications(false)} className="bg-transparent border-none cursor-pointer p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
+                            <X size={20} style={{ color: 'var(--text-light)' }} />
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex flex-col gap-3 max-h-[350px] overflow-y-auto hide-scrollbar" data-lenis-prevent="true">
-                        {allNotifications.length > 0 ? (
-                          allNotifications.map(notification => (
-                            <div key={notification.id} className="p-3 rounded-xl flex gap-3 items-start" style={{ backgroundColor: notification.bg, border: `1px solid ${notification.borderColor}` }}>
-                              {notification.icon}
-                              <div className="min-w-0 flex-1">
-                                <div className="flex justify-between items-start gap-2">
-                                  <p className="m-0 text-sm font-bold truncate" style={{ color: notification.textTitle }}>{notification.title}</p>
-                                  <span className="text-[10px] whitespace-nowrap mt-0.5" style={{ color: notification.textDesc }}>{notification.time}</span>
+
+                      {/* Notifications List */}
+                      <div className="max-h-[400px] overflow-y-auto" data-lenis-prevent="true">
+                        {allDynamicNotifications.length > 0 ? (
+                          allDynamicNotifications.map(notification => (
+                            <div
+                              key={notification.id}
+                              className={`p-4 border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer ${!notification.read ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''}`}
+                              onClick={() => handleNotificationRead(notification)}
+                              style={{ backgroundColor: !notification.read ? notification.bg : undefined }}
+                            >
+                              <div className="flex gap-3">
+                                <div className="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: notification.bgColor }}>
+                                  <span style={{ color: notification.iconColor }}>{notification.icon}</span>
                                 </div>
-                                <p className="m-0 text-xs mt-1 leading-relaxed" style={{ color: notification.textDesc }}>{notification.message}</p>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <p className="m-0 text-sm font-bold truncate" style={{ color: notification.iconColor }}>{notification.title}</p>
+                                    <span className="text-[11px] whitespace-nowrap mt-0.5 flex-shrink-0" style={{ color: 'var(--text-light)' }}>{notification.time}</span>
+                                  </div>
+                                  <p className="m-0 text-xs mt-1 leading-relaxed line-clamp-2" style={{ color: 'var(--text-dark)' }}>{notification.message || notification.body}</p>
+                                </div>
+                                {!notification.read && (
+                                  <div className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0 mt-2" />
+                                )}
+                              </div>
+                              {/* Action buttons */}
+                              <div className="flex justify-end gap-2 mt-2">
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleClearNotification(notification.id); }}
+                                  className="text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                                >
+                                  Clear
+                                </button>
                               </div>
                             </div>
                           ))
                         ) : (
-                          <div className="text-center py-6" style={{ color: 'var(--text-light)' }}>
-                            <Bell size={32} className="mx-auto mb-2 opacity-50" />
-                            <p className="m-0 text-sm font-medium">No new notifications</p>
+                          <div className="text-center py-8" style={{ color: 'var(--text-light)' }}>
+                            <Bell size={36} className="mx-auto mb-3 opacity-40" />
+                            <p className="m-0 text-sm font-medium">No notifications</p>
+                            <p className="m-0 text-xs mt-1 opacity-70">You're all caught up!</p>
                           </div>
                         )}
                       </div>
+
+                      {/* Footer */}
+                      {allDynamicNotifications.length > 0 && (
+                        <div className="p-3 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+                          <button
+                            onClick={handleMarkAllRead}
+                            className="w-full text-center text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 py-2 transition-colors"
+                          >
+                            Mark all as read
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </>

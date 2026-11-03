@@ -20,6 +20,7 @@ model User {
   password          String?
   role              UserRole
   routeId           String?            @map("route_id")
+  stopName          String?            @map("stop_name") @db.VarChar(100)  // Assigned stop for viewing buses at that stop
   feeStatus         FeeStatus          @default(unpaid) @map("fee_status")
   phone             String?            @db.VarChar(20)
   email             String?            @db.VarChar(100)
@@ -65,6 +66,7 @@ model User {
 
   @@index([role])
   @@index([routeId])
+  @@index([stopName])
   @@index([phone])
   @@map("users")
 }
@@ -94,8 +96,9 @@ model Route {
   busNumber          String    @map("bus_number") @db.VarChar(30)
   busId              String?   @map("bus_id") @db.Uuid
   driverId           String?   @map("driver_id") @db.VarChar(50)
-  stops              String
-  city               String    @default("Bareilly") @db.VarChar(50)
+  stops              String    // JSON array of stops with categories: [{name, type, order, time?}]
+  city               String    @default("Bareilly") @map("city") @db.VarChar(50)
+  routeType          RouteType @default(local) @map("route_type") @db.VarChar(20)
   vehicleModel       String?   @map("vehicle_model") @db.VarChar(100)
   registrationNumber String?   @map("registration_number") @db.VarChar(50)
   seatingCapacity    Int?      @map("seating_capacity")
@@ -107,7 +110,23 @@ model Route {
   bus                Bus?      @relation(fields: [busId], references: [id], onDelete: SetNull)
 
   @@index([busId])
+  @@index([routeType])
   @@map("routes")
+}
+
+// Reusable stops that can be shared across routes
+model Stop {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String   @unique @db.VarChar(100)
+  category  StopCategory @default(other) @map("category") @db.VarChar(30)
+  latitude  Float?   @map("latitude")
+  longitude Float?   @map("longitude")
+  city      String   @default("Bareilly") @db.VarChar(50)
+  notes     String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("stops")
 }
 
 model Attendance {
@@ -379,4 +398,19 @@ enum MergeReason {
   weather
   other
   bus_cancelled
+}
+
+// Route categorization: Local = within city, Outstation = outside city routes
+enum RouteType {
+  local     // Local city routes within Bareilly
+  outstation // Routes to outside areas/villages (e.g., "Outstation" or "Nagar")
+}
+
+enum StopCategory {
+  pickup        // Morning pickup points
+  dropoff       // Evening dropoff points
+  main          // Main stops (both pickup and dropoff)
+  intermediate  // Intermediate stops
+  terminal      // Route endpoints
+  other
 }

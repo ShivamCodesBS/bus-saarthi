@@ -150,6 +150,16 @@ export class UsersController {
   }
 
   /**
+   * Update user's assigned stop.
+   * Students can see all buses that pass through their assigned stop.
+   */
+  @Put('me/stop')
+  updateMyStop(@Request() req: any, @Body() body: { stop_name: string }) {
+    const loginId = req.user?.loginId || req.user?.login_id;
+    return this.usersService.updateStop(loginId, body.stop_name);
+  }
+
+  /**
    * Passenger requests a face data reset (re-enrollment).
    * This creates a request that admins can see and approve.
    */

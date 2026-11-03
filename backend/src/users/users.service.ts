@@ -64,6 +64,7 @@ export class UsersService {
         name: true,
         role: true,
         routeId: true,
+        stopName: true,  // Assigned stop for viewing buses
         feeStatus: true,
         phone: true,
         email: true,
@@ -539,6 +540,26 @@ export class UsersService {
             firedAt: alarm.firedAt,
           }
         : null,
+    };
+  }
+
+  /**
+   * Update user's assigned stop.
+   * Students can see all buses that pass through their assigned stop.
+   */
+  async updateStop(loginId: string, stopName: string | null) {
+    const user = await this.prisma.user.findUnique({ where: { loginId } });
+    if (!user) throw new NotFoundException(`User ${loginId} not found`);
+
+    await this.prisma.user.update({
+      where: { loginId },
+      data: { stopName },
+    });
+
+    return {
+      status: 'success',
+      message: stopName ? `Stop updated to ${stopName}` : 'Stop cleared',
+      stop_name: stopName,
     };
   }
 
