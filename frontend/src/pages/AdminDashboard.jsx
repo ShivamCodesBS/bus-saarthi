@@ -3477,8 +3477,6 @@ const [showRouteStopsBuilder, setShowRouteStopsBuilder] = useState(false);
               </form>
             </>
           )}
-              </div>
-            </form>
           </div>
         </div>
       )}
