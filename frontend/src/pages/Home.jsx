@@ -1084,7 +1084,6 @@ const Home = () => {
                   isLive={isLive}
                   initialZoom={15}
                   height="100%"
-                  minHeight="500px"
                   busLabel={`Bus ${routeInfo?.busNumber || routeInfo?.bus_number || 'UP 25 AB 1234'}`}
                   lastKnown={lastKnown}
                   showFullscreenButton={true}

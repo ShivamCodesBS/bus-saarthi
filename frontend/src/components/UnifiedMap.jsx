@@ -563,7 +563,7 @@ const UnifiedMap = ({
   // uses height: 100% + min-height to fill available space.
   const mapHostStyle = {
     height: height === '100%' ? '100%' : height,
-    minHeight: isFullscreen ? undefined : minHeight,
+    minHeight: isFullscreen ? undefined : (height === '100%' ? '0' : minHeight),
     width: '100%',
     borderRadius: isFullscreen ? '0' : '16px',
     position: 'relative',
@@ -703,10 +703,7 @@ const UnifiedMap = ({
   const renderOverlayControls = () => (
     <div style={{
       position: 'absolute',
-      top: 12,
-      left: 12,
-      right: 12,
-      bottom: 12,
+      inset: 0,
       pointerEvents: 'none',
       zIndex: 500,
     }}>
@@ -889,11 +886,18 @@ const UnifiedMap = ({
         </div>
       )}
       
-      {/* Bottom-right: Zoom / Recenter / Lock. Leaflet's default zoom sat
-          top-left UNDER the LIVE badge and telemetry panel — custom buttons
-          in this stack remove the overlap. Raised in fullscreen so it does
-          not sit on the footer lock. */}
-      <div style={{ position: 'absolute', bottom: isFullscreen ? '76px' : '12px', right: '12px', pointerEvents: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-end' }}>
+      {/* Bottom-right: Zoom and Recenter / Auto-Follow stack */}
+      <div style={{
+        position: 'absolute',
+        bottom: isFullscreen ? '24px' : '12px',
+        right: '12px',
+        pointerEvents: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '6px',
+        alignItems: 'flex-end',
+        zIndex: 500,
+      }}>
         {[
           { label: '+', title: 'Zoom in', action: () => mapInstance.current?.zoomIn() },
           { label: '−', title: 'Zoom out', action: () => mapInstance.current?.zoomOut() },
@@ -903,15 +907,15 @@ const UnifiedMap = ({
             onClick={btn.action}
             title={btn.title}
             style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '12px',
+              width: '36px',
+              height: '36px',
+              borderRadius: '10px',
               background: 'rgba(255,255,255,0.95)',
               backdropFilter: 'blur(8px)',
-              boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
               border: '1px solid rgba(0,0,0,0.08)',
               cursor: 'pointer',
-              fontSize: '1.25rem',
+              fontSize: '1.2rem',
               fontWeight: 700,
               color: '#1a1a2e',
               lineHeight: 1,
@@ -919,39 +923,52 @@ const UnifiedMap = ({
               alignItems: 'center',
               justifyContent: 'center',
               userSelect: 'none',
-            }}
-          >
-            {btn.label}
-          </button>
-        ))}
-        {showRecenterButton && !isFullscreen && (
-          <button
-            onClick={recenterMap}
-            title="Recenter on bus"
-            style={{
-              padding: '8px',
-              borderRadius: '50%',
-              background: 'rgba(255,255,255,0.95)',
-              backdropFilter: 'blur(8px)',
-              boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
-              border: '1px solid rgba(0,0,0,0.08)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '40px',
-              height: '40px',
-              transition: 'all 0.2s',
+              transition: 'transform 0.15s ease',
             }}
             onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
             onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
           >
-            <Navigation size={20} color="#3b82f6" />
+            {btn.label}
           </button>
-        )}
-        
-        {showAutoFollowToggle && !isFullscreen && (
-          <LockOnBusButton active={autoFollow} onToggle={handleAutoFollowChange} />
+        ))}
+
+        {/* Unified Recenter / Auto-Follow button */}
+        {(showRecenterButton || showAutoFollowToggle) && (
+          <button
+            onClick={() => handleAutoFollowChange(!autoFollow)}
+            title={autoFollow ? 'Tracking Live Bus (Click to unlock view)' : 'Center & Follow Bus'}
+            aria-pressed={autoFollow}
+            style={{
+              width: '38px',
+              height: '38px',
+              borderRadius: '50%',
+              background: autoFollow ? '#2563eb' : 'rgba(255,255,255,0.95)',
+              backdropFilter: 'blur(8px)',
+              boxShadow: autoFollow ? '0 2px 12px rgba(37,99,235,0.45)' : '0 2px 8px rgba(0,0,0,0.18)',
+              border: autoFollow ? 'none' : '1px solid rgba(0,0,0,0.08)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.2s ease',
+              marginTop: '2px',
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.06)'}
+            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+          >
+            {autoFollow ? (
+              <Crosshair size={20} color="#ffffff" />
+            ) : (
+              <Navigation
+                size={18}
+                color="#2563eb"
+                style={{
+                  transform: telemetry?.heading ? `rotate(${telemetry.heading}deg)` : 'none',
+                  transition: 'transform 0.3s ease',
+                }}
+              />
+            )}
+          </button>
         )}
       </div>
       
@@ -1063,50 +1080,7 @@ const UnifiedMap = ({
     </div>
   ) : null;
   
-  const fullscreenFooter = isFullscreen && showAutoFollowToggle ? (
-    <div style={{
-      position: 'absolute',
-      bottom: '16px',
-      right: '16px',
-      zIndex: 1000,
-      pointerEvents: 'auto',
-    }}>
-      <LockOnBusButton active={autoFollow} onToggle={handleAutoFollowChange} size={44} />
-    </div>
-  ) : null;
-  
-  const fullscreenRecenter = isFullscreen && showRecenterButton ? (
-    <div style={{
-      position: 'absolute',
-      top: '72px',
-      right: '16px',
-      zIndex: 1000,
-      pointerEvents: 'auto',
-    }}>
-      <button
-        onClick={recenterMap}
-        title="Recenter on bus"
-        style={{
-          padding: '10px',
-          borderRadius: '50%',
-          background: 'rgba(255,255,255,0.95)',
-          boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
-          border: '1px solid rgba(0,0,0,0.1)',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: '44px',
-          height: '44px',
-          transition: 'all 0.2s',
-        }}
-        onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
-        onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
-      >
-        <Navigation size={22} color="#3b82f6" />
-      </button>
-    </div>
-  ) : null;
+
 
   const mapUi = (
     <div
@@ -1119,7 +1093,7 @@ const UnifiedMap = ({
       {fullscreenHeader}
       <div style={{
         height: '100%',
-        minHeight: isFullscreen ? 0 : minHeight,
+        minHeight: isFullscreen ? 0 : (height === '100%' ? 0 : minHeight),
         width: '100%',
         position: 'relative',
         borderRadius: isFullscreen ? '0' : '16px',
@@ -1141,8 +1115,6 @@ const UnifiedMap = ({
           {renderMapContent()}
         </MapContainer>
         {renderOverlayControls()}
-        {fullscreenFooter}
-        {fullscreenRecenter}
       </div>
       
       {/* Animation keyframes for pulse */}
