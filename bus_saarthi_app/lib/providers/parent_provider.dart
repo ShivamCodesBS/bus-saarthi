@@ -152,9 +152,9 @@ class ParentProvider extends ChangeNotifier {
   void selectChild(int index) {
     if (index >= 0 && index < children.length && index != _selectedChildIndex) {
       _selectedChildIndex = index;
-      _childSelectionGeneration++;
+      final generation = ++_childSelectionGeneration;
       _resetSelectedChildData();
-      _fetchAll();
+      _fetchChildData(children[_selectedChildIndex], generation);
       _fetchChildGrievances();
       _connectTelemetry();
       // Re-fetch speed analytics for current date
@@ -378,6 +378,7 @@ class ParentProvider extends ChangeNotifier {
           routeInfo = RouteInfo.fromJson(
             Map<String, dynamic>.from(routeRes.data),
           );
+          _notify();
         }
       } catch (_) {}
     }

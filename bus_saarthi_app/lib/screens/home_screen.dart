@@ -14,6 +14,7 @@ import '../models/notification_item.dart';
 import '../models/user_model.dart';
 import '../providers/auth_provider.dart';
 import '../providers/language_provider.dart';
+import '../providers/theme_provider.dart';
 import '../providers/tracking_provider.dart';
 import '../services/api_client.dart';
 import '../services/map_cache_service.dart';
@@ -153,7 +154,7 @@ class _HomeViewState extends State<_HomeView> {
     if (user == null) {
       return const LoginScreen();
     }
-    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+    final bool isDark = context.watch<ThemeProvider>().darkMode;
 
     return Scaffold(
       body: Stack(
@@ -309,7 +310,14 @@ class _HomeViewState extends State<_HomeView> {
           ),
 
           // ── Notification dropdown panel ──
-          if (_showNotifications)
+          if (_showNotifications) ...[
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() => _showNotifications = false),
+                child: const ColoredBox(color: Colors.transparent),
+              ),
+            ),
             Positioned(
               top: 0,
               right: 8,
@@ -320,6 +328,7 @@ class _HomeViewState extends State<_HomeView> {
                 onClose: () => setState(() => _showNotifications = false),
               ),
             ),
+          ],
 
           // ── Drawer ──
           if (_isMenuOpen) ...[
@@ -993,7 +1002,7 @@ class _AlarmButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final Color bg = alarmSet ? const Color(0xFFEEF6FF) : Colors.white;
     final Color fg = alarmSet ? const Color(0xFF1D63ED) : AppColors.lightText;
-    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+    final bool isDark = context.watch<ThemeProvider>().darkMode;
 
     return Material(
       color: isDark && !alarmSet ? const Color(0xFF0F172A) : bg,

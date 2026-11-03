@@ -544,7 +544,7 @@ class CommunityProvider extends ChangeNotifier {
     String? category,
     String? mediaPath,
     required String mediaType, // photo | video | audio | text
-    required bool showMyName,
+    bool showMyName = false,
   }) async {
     if (text.trim().isEmpty) return false;
     isSubmitting = true;
@@ -599,7 +599,7 @@ class CommunityProvider extends ChangeNotifier {
           'mediaUrl': uploadedMediaUrl,
           'category': category ?? '',
           if (user.routeId != null) 'route': user.routeId,
-          'isAnonymous': !showMyName,
+          'isAnonymous': true,
         },
         options: Options(headers: _authHeaders),
       );
@@ -619,7 +619,7 @@ class CommunityProvider extends ChangeNotifier {
             mediaUrl: uploadedMediaUrl,
             category: category,
             realName: user.name,
-            isAnonymous: !showMyName,
+            isAnonymous: true,
             status: 'pending',
             createdAt:
                 DateTime.tryParse('${created['createdAt']}') ?? DateTime.now(),

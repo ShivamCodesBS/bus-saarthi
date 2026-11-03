@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Users, MapPin, LogOut, Settings, Bell, AlertOctagon, CheckCircle2, MessageSquare, Trash2, UserPlus, Navigation, X, User, Menu, Eye, Download, Upload, GitMerge, Undo2, Sparkles, AlertTriangle, ArrowRight, History, Layers, Wrench, Timer, RotateCcw } from 'lucide-react';
+import { Users, MapPin, LogOut, Settings, Bell, AlertOctagon, CheckCircle2, MessageSquare, Trash2, UserPlus, Navigation, X, User, Menu, Eye, Download, Upload, GitMerge, Undo2, Sparkles, AlertTriangle, ArrowRight, History, Layers, Wrench, Timer, RotateCcw, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
@@ -242,6 +242,18 @@ const TransportInchargeDashboard = () => {
 
   // Notifications
   const [showNotifications, setShowNotifications] = useState(false);
+  const notifDropdownRef = useRef(null);
+
+  useEffect(() => {
+    if (!showNotifications) return;
+    const handleClickOutside = (e) => {
+      if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target)) {
+        setShowNotifications(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showNotifications]);
   const [hasUnread, setHasUnread] = useState(false);
   const [seenIds, setSeenIds] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ti_seen_notif_ids') || '[]'); } 
@@ -839,7 +851,7 @@ const TransportInchargeDashboard = () => {
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-          <div className="relative">
+          <div className="relative" ref={notifDropdownRef}>
             {(() => {
               const allNotifications = [
                 ...sosAlerts.map(alert => ({

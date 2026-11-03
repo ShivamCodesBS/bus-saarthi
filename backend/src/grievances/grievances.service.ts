@@ -90,7 +90,7 @@ export class GrievancesService {
         mediaUrl,
         category,
         realName: resolvedName,
-        isAnonymous: isAnonymous ?? false,
+        isAnonymous: isAnonymous ?? true,
         status: GrievanceStatus.pending,
       },
     });

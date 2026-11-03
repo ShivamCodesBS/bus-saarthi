@@ -9,6 +9,7 @@ import {
   X,
   ThumbsUp,
   ShieldAlert,
+  ShieldCheck,
   CheckCircle2,
   UserCircle2,
   Search,
@@ -132,7 +133,8 @@ const Community = () => {
   const [isUploading, setIsUploading] = useState(false);
   // Complaints are anonymous by default. The reporter may choose to have
   // their name shown to the transport staff instead.
-  const [showMyName, setShowMyName] = useState(false);
+// showMyName removed: complaints are always anonymous to passengers
+  const isAnonymous = true;
   const [busyIds, setBusyIds] = useState(new Set());
   const [rejectingId, setRejectingId] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -525,9 +527,8 @@ const Community = () => {
         category: selectedCategory,
         // The route is resolved server-side from the account's allocation.
         route: user?.route_id || undefined,
-        // isAnonymous: true means the reporter's name is hidden from other passengers
-        // but still visible to TI/Admin with an "anonymous" badge.
-        isAnonymous: !showMyName,
+        // Anonymous to passengers, visible to transport staff
+        isAnonymous: true,
       };
       const response = await axios.post(`${BACKEND_URL}/api/grievance`, payload, {
         headers: { Authorization: `Bearer ${token}` },
@@ -545,7 +546,7 @@ const Community = () => {
             mediaUrl: uploadedMediaUrl,
             category: selectedCategory,
             realName: user?.name,
-            isAnonymous: !showMyName,
+            isAnonymous: true,
             status: 'pending',
             upvotes: 0,
             createdAt: created.createdAt || new Date().toISOString(),
@@ -2965,9 +2966,7 @@ filteredComplaints.map((comp) => {
                     color: 'var(--text-light)',
                   }}
                 >
-                  {showMyName
-                    ? 'The transport team will see your name on this complaint.'
-                    : 'Your name is hidden from other passengers and the transport team.'}
+                  Your identity is completely hidden from other passengers. Only college transport staff can see your details for verification.
                 </p>
                 {user?.route_id && (
                   <p
@@ -3047,75 +3046,55 @@ filteredComplaints.map((comp) => {
                 </div>
               </div>
 
-              {/* Who should the transport team see? Complaints are anonymous
-                  by default; the reporter can opt in to being named. */}
+              {/* Privacy badge: complaints are strictly anonymous to passengers, visible to transport staff */}
               <div
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'space-between',
                   gap: '0.75rem',
-                  flexWrap: 'wrap',
-                  padding: '0.7rem 0.85rem',
-                  background: 'var(--bg-color)',
-                  border: '1px solid var(--border-color)',
+                  padding: '0.75rem 0.9rem',
+                  background: 'rgba(37, 99, 235, 0.06)',
+                  border: '1px solid rgba(37, 99, 235, 0.18)',
                   borderRadius: '10px',
                 }}
               >
-                <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '8px',
+                    background: 'rgba(37, 99, 235, 0.12)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--primary-blue)',
+                    flexShrink: 0,
+                  }}
+                >
+                  <ShieldCheck size={18} />
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
                   <p
                     style={{
                       margin: 0,
-                      fontSize: '0.85rem',
+                      fontSize: '0.83rem',
                       fontWeight: '700',
                       color: 'var(--text-dark)',
                     }}
                   >
-                    Post anonymously
+                    🔒 Privacy Protected
                   </p>
                   <p
                     style={{
-                      margin: 0,
-                      fontSize: '0.75rem',
+                      margin: '2px 0 0',
+                      fontSize: '0.74rem',
                       color: 'var(--text-light)',
+                      lineHeight: 1.4,
                     }}
                   >
-                    {showMyName
-                      ? 'The transport team will see your name.'
-                      : 'Your name is hidden from other passengers, but the transport team will see it with an "Anonymous" badge.'}
+                    Your name is 100% hidden from other passengers (posted as "Anonymous Passenger"). Only college transport staff can see your details to resolve the complaint.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={!showMyName}
-                  aria-label="Post anonymously"
-                  onClick={() => setShowMyName((v) => !v)}
-                  style={{
-                    width: '46px',
-                    height: '26px',
-                    borderRadius: '20px',
-                    border: 'none',
-                    padding: '3px',
-                    display: 'flex',
-                    justifyContent: showMyName ? 'flex-end' : 'flex-start',
-                    background: showMyName ? '#28a745' : 'var(--primary-blue)',
-                    cursor: 'pointer',
-                    flexShrink: 0,
-                    transition: 'background 0.2s ease',
-                  }}
-                >
-                  <span
-                    style={{
-                      width: '20px',
-                      height: '20px',
-                      borderRadius: '50%',
-                      background: 'white',
-                      display: 'block',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
-                    }}
-                  />
-                </button>
               </div>
 
               <textarea

@@ -84,7 +84,8 @@ class _ParentViewState extends State<_ParentView> {
   @override
   Widget build(BuildContext context) {
     final parent = context.watch<ParentProvider>();
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final theme = context.watch<ThemeProvider>();
+    final isDark = theme.darkMode;
     final bg = isDark ? AppColors.darkBg : AppColors.lightBg;
     final textDark = isDark ? AppColors.darkText : AppColors.lightText;
     final textLight = isDark
@@ -543,155 +544,158 @@ class _ParentViewState extends State<_ParentView> {
   }
 
   void _showProfileMenu(BuildContext context, ParentProvider parent) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardBg = isDark ? AppColors.darkCard : AppColors.lightCard;
-    final textDark = isDark ? AppColors.darkText : AppColors.lightText;
-    final textLight = isDark
-        ? AppColors.darkTextMuted
-        : AppColors.lightTextMuted;
-    final borderColor = isDark ? AppColors.darkBorder : AppColors.lightBorder;
-
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.all(22),
-        decoration: BoxDecoration(
-          color: cardBg,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          border: Border.all(color: borderColor),
-        ),
-        child: SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  UserAvatar(src: null, name: parent.user.name, size: 52),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          parent.user.name,
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                            color: textDark,
+      builder: (ctx) {
+        final theme = ctx.watch<ThemeProvider>();
+        final isDark = theme.darkMode;
+        final cardBg = isDark ? AppColors.darkCard : AppColors.lightCard;
+        final textDark = isDark ? AppColors.darkText : AppColors.lightText;
+        final textLight = isDark
+            ? AppColors.darkTextMuted
+            : AppColors.lightTextMuted;
+        final borderColor = isDark ? AppColors.darkBorder : AppColors.lightBorder;
+
+        return Container(
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            color: cardBg,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            border: Border.all(color: borderColor),
+          ),
+          child: SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    UserAvatar(src: null, name: parent.user.name, size: 52),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            parent.user.name,
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              color: textDark,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Parent / Guardian · ${parent.user.loginId}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: textLight,
-                            fontWeight: FontWeight.w500,
+                          const SizedBox(height: 2),
+                          Text(
+                            'Parent / Guardian · ${parent.user.loginId}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: textLight,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                Divider(color: borderColor),
+                const SizedBox(height: 8),
+
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: kPurple.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      isDark ? LucideIcons.moon : LucideIcons.sun,
+                      color: kPurple,
+                      size: 20,
                     ),
                   ),
-                ],
-              ),
-              const SizedBox(height: 18),
-              Divider(color: borderColor),
-              const SizedBox(height: 8),
+                  title: Text(
+                    'Dark Mode',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14.5,
+                      color: textDark,
+                    ),
+                  ),
+                  trailing: Switch(
+                    value: isDark,
+                    activeColor: kPurple,
+                    onChanged: (val) {
+                      ctx.read<ThemeProvider>().setDarkMode(val);
+                    },
+                  ),
+                ),
 
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: kPurple.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(10),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2563EB).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      LucideIcons.settings,
+                      color: Color(0xFF2563EB),
+                      size: 20,
+                    ),
                   ),
-                  child: Icon(
-                    isDark ? LucideIcons.moon : LucideIcons.sun,
-                    color: kPurple,
-                    size: 20,
+                  title: Text(
+                    'Settings & Preferences',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14.5,
+                      color: textDark,
+                    ),
                   ),
-                ),
-                title: Text(
-                  'Dark Mode',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14.5,
-                    color: textDark,
-                  ),
-                ),
-                trailing: Switch(
-                  value: isDark,
-                  activeColor: kPurple,
-                  onChanged: (val) {
-                    context.read<ThemeProvider>().setDarkMode(val);
+                  trailing: const Icon(LucideIcons.chevronRight, size: 18),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                    );
                   },
                 ),
-              ),
 
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2563EB).withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(10),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEF4444).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      LucideIcons.logOut,
+                      color: Color(0xFFEF4444),
+                      size: 20,
+                    ),
                   ),
-                  child: const Icon(
-                    LucideIcons.settings,
-                    color: Color(0xFF2563EB),
-                    size: 20,
+                  title: const Text(
+                    'Sign Out',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14.5,
+                      color: Color(0xFFEF4444),
+                    ),
                   ),
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    await context.read<AuthProvider>().logout();
+                  },
                 ),
-                title: Text(
-                  'Settings & Preferences',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14.5,
-                    color: textDark,
-                  ),
-                ),
-                trailing: const Icon(LucideIcons.chevronRight, size: 18),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                  );
-                },
-              ),
-
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFEF4444).withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(
-                    LucideIcons.logOut,
-                    color: Color(0xFFEF4444),
-                    size: 20,
-                  ),
-                ),
-                title: const Text(
-                  'Sign Out',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14.5,
-                    color: Color(0xFFEF4444),
-                  ),
-                ),
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  await context.read<AuthProvider>().logout();
-                },
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
